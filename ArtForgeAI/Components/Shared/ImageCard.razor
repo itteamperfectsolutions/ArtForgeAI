@@ -1,0 +1,20 @@
+@inject IImageStorageService ImageStorage
+
+<div class="image-card" @onclick="() => OnClick.InvokeAsync(Generation)">
+    <img class="image-card-img"
+         src="@ImageStorage.GetWebPath(Generation.LocalImagePath ?? "")"
+         alt="@Generation.OriginalPrompt"
+         loading="lazy" />
+    <div class="image-card-body">
+        <div class="image-card-prompt">@Generation.OriginalPrompt</div>
+        <div class="image-card-meta">
+            <span>@Generation.CreatedAt.ToString("MMM d, yyyy")</span>
+            <span>@Generation.ImageSize</span>
+        </div>
+    </div>
+</div>
+
+@code {
+    [Parameter, EditorRequired] public ImageGeneration Generation { get; set; } = default!;
+    [Parameter] public EventCallback<ImageGeneration> OnClick { get; set; }
+}

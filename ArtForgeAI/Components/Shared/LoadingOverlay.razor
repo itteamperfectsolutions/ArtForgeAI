@@ -1,0 +1,48 @@
+@if (IsVisible)
+{
+    <div class="loading-overlay">
+        <div class="loading-content">
+            <div class="loading-spinner"></div>
+            <h3 style="margin-bottom: 1.5rem; font-size: 1.1rem;">Generating your image...</h3>
+            <div class="loading-steps">
+                @foreach (var step in _steps)
+                {
+                    var css = step.Order < CurrentStep ? "completed"
+                            : step.Order == CurrentStep ? "active"
+                            : "";
+                    <div class="loading-step @css">
+                        <span class="step-icon">
+                            @if (step.Order < CurrentStep)
+                            {
+                                <text>&#10003;</text>
+                            }
+                            else if (step.Order == CurrentStep)
+                            {
+                                <text>&#9679;</text>
+                            }
+                            else
+                            {
+                                <text>&#9675;</text>
+                            }
+                        </span>
+                        <span>@step.Label</span>
+                    </div>
+                }
+            </div>
+        </div>
+    </div>
+}
+
+@code {
+    [Parameter] public bool IsVisible { get; set; }
+    [Parameter] public int CurrentStep { get; set; } = 1;
+
+    private record StepInfo(int Order, string Label);
+
+    private readonly StepInfo[] _steps =
+    [
+        new(1, "Enhancing your prompt with AI..."),
+        new(2, "Generating image with DALL-E 3..."),
+        new(3, "Saving & optimizing...")
+    ];
+}

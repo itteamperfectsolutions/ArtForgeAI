@@ -1,0 +1,104 @@
+@page "/gallery"
+@rendermode InteractiveServer
+@inject IGenerationHistoryService HistoryService
+
+<PageTitle>ArtForge AI - Gallery</PageTitle>
+
+<div class="page-header">
+    <h2>Gallery</h2>
+    <p>Your generation history</p>
+</div>
+
+@if (_loading)
+{
+    <div class="empty-state">
+        <div class="loading-spinner"></div>
+        <p>Loading gallery...</p>
+    </div>
+}
+else if (_generations.Count == 0)
+{
+    <div class="empty-state">
+        <div class="empty-icon">&#127912;</div>
+        <h3>No images yet</h3>
+        <p>Start creating beautiful images on the Create page!</p>
+    </div>
+}
+else
+{
+    <div class="image-grid">
+        @foreach (var gen in _generations)
+        {
+            <ImageCard Generation="gen" OnClick="OpenPreview" />
+        }
+    </div>
+
+    @if (_hasMore)
+    {
+        <div style="text-align: center; margin-top: 2rem;">
+            <button class="btn-secondary" @onclick="LoadMore">Load More</button>
+        </div>
+    }
+}
+
+<ImagePreviewModal Generation="_selectedGeneration"
+                   OnClose="ClosePreview"
+                   OnDelete="DeleteGeneration" />
+
+<Toast @ref="_toast" />
+
+@code {
+    private List<ImageGeneration> _generations = new();
+    private ImageGeneration? _selectedGeneration;
+    private bool _loading = true;
+    private bool _hasMore;
+    private int _page = 1;
+    private const int PageSize = 20;
+    private Toast? _toast;
+
+    protected override async Task OnInitializedAsync()
+    {
+        await LoadGenerations();
+    }
+
+    private async Task LoadGenerations()
+    {
+        _loading = true;
+        _page = 1;
+        _generations = await HistoryService.GetHistoryAsync(page: _page, pageSize: PageSize);
+        var total = await HistoryService.GetTotalCountAsync();
+        _hasMore = total > _generations.Count;
+        _loading = false;
+    }
+
+    private async Task LoadMore()
+    {
+        _page++;
+        var more = await HistoryService.GetHistoryAsync(page: _page, pageSize: PageSize);
+        _generations.AddRange(more);
+        var total = await HistoryService.GetTotalCountAsync();
+        _hasMore = total > _generations.Count;
+    }
+
+    private void OpenPreview(ImageGeneration gen)
+    {
+        _selectedGeneration = gen;
+    }
+
+    private void ClosePreview()
+    {
+        _selectedGeneration = null;
+    }
+
+    private async Task DeleteGeneration(int id)
+    {
+        var success = await HistoryService.DeleteGenerationAsync(id);
+        if (success)
+        {
+            _generations.RemoveAll(g => g.Id == id);
+            _selectedGeneration = null;
+            if (_toast is not null)
+                _ = _toast.ShowAsync("Image deleted");
+        }
+    }
+}

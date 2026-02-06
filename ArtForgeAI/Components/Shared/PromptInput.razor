@@ -1,0 +1,69 @@
+@inject IImageStorageService ImageStorage
+
+<div class="mb-3">
+    <label class="form-label">Describe your image</label>
+    <textarea class="form-input" rows="4"
+              placeholder="e.g. A serene mountain lake at sunset with reflection..."
+              @bind="Prompt"
+              @bind:event="oninput"
+              disabled="@IsDisabled"></textarea>
+</div>
+
+<div class="mb-3">
+    <label class="form-label">Reference image (optional)</label>
+    @if (string.IsNullOrEmpty(ReferenceImagePath))
+    {
+        <label class="upload-area">
+            <div class="upload-icon">&#128247;</div>
+            <div>Click to upload a reference image</div>
+            <div style="font-size: 0.75rem; margin-top: 0.25rem;">JPG, PNG up to 10MB</div>
+            <InputFile OnChange="HandleFileUpload" accept="image/*" style="display:none" disabled="@IsDisabled" />
+        </label>
+    }
+    else
+    {
+        <div class="upload-preview">
+            <img src="/@ReferenceImagePath" alt="Reference" />
+            <button class="remove-btn" @onclick="RemoveReference" disabled="@IsDisabled">&#10005;</button>
+        </div>
+    }
+</div>
+
+<div class="mb-3">
+    <label class="form-check-enhanced">
+        <input type="checkbox" @bind="EnhancePrompt" disabled="@IsDisabled" />
+        <span>AI Prompt Enhancement</span>
+        <span class="enhance-badge">&#10024; GPT-4o</span>
+    </label>
+</div>
+
+@code {
+    [Parameter] public string Prompt { get; set; } = string.Empty;
+    [Parameter] public EventCallback<string> PromptChanged { get; set; }
+    [Parameter] public bool EnhancePrompt { get; set; } = true;
+    [Parameter] public EventCallback<bool> EnhancePromptChanged { get; set; }
+    [Parameter] public string? ReferenceImagePath { get; set; }
+    [Parameter] public EventCallback<string?> ReferenceImagePathChanged { get; set; }
+    [Parameter] public bool IsDisabled { get; set; }
+
+    private async Task HandleFileUpload(InputFileChangeEventArgs e)
+    {
+        var file = e.File;
+        if (file.Size > 10 * 1024 * 1024) return;
+
+        using var stream = file.OpenReadStream(10 * 1024 * 1024);
+        var path = await ImageStorage.SaveUploadedFileAsync(stream, file.Name);
+        ReferenceImagePath = path;
+        await ReferenceImagePathChanged.InvokeAsync(path);
+    }
+
+    private async Task RemoveReference()
+    {
+        if (!string.IsNullOrEmpty(ReferenceImagePath))
+        {
+            await ImageStorage.DeleteImageAsync(ReferenceImagePath);
+            ReferenceImagePath = null;
+            await ReferenceImagePathChanged.InvokeAsync(null);
+        }
+    }
+}

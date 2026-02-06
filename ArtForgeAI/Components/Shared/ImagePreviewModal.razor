@@ -1,0 +1,89 @@
+@inject IJSRuntime JS
+@inject IImageStorageService ImageStorage
+
+@if (Generation is not null)
+{
+    <div class="preview-modal" @onclick="Close">
+        <div class="preview-content" @onclick:stopPropagation="true">
+            <div class="preview-image-wrap">
+                <button class="preview-close" @onclick="Close">&#10005;</button>
+                <img class="preview-image @(_zoomed ? "zoomed" : "")"
+                     src="@ImageStorage.GetWebPath(Generation.LocalImagePath ?? "")"
+                     alt="Preview"
+                     @onclick="ToggleZoom" />
+            </div>
+            <div class="preview-details">
+                @if (!string.IsNullOrEmpty(Generation.EnhancedPrompt))
+                {
+                    <div class="prompt-text">
+                        <strong>Enhanced prompt:</strong> @Generation.EnhancedPrompt
+                    </div>
+                }
+                <div class="prompt-text">
+                    <strong>Original:</strong> @Generation.OriginalPrompt
+                </div>
+                <div style="font-size: 0.8rem; color: var(--text-muted); margin-bottom: 1rem;">
+                    @Generation.ImageSize &middot; @Generation.CreatedAt.ToString("MMMM d, yyyy h:mm tt")
+                </div>
+                <div class="preview-actions">
+                    <button class="btn-secondary" @onclick="DownloadPng">
+                        &#11015; PNG
+                    </button>
+                    <button class="btn-secondary" @onclick="DownloadJpg">
+                        &#11015; JPG
+                    </button>
+                    <button class="btn-danger" @onclick="RequestDelete">
+                        &#128465; Delete
+                    </button>
+                </div>
+            </div>
+        </div>
+    </div>
+}
+
+@code {
+    [Parameter] public ImageGeneration? Generation { get; set; }
+    [Parameter] public EventCallback OnClose { get; set; }
+    [Parameter] public EventCallback<int> OnDelete { get; set; }
+
+    private bool _zoomed;
+
+    private void ToggleZoom() => _zoomed = !_zoomed;
+
+    private Task DownloadPng() => DownloadAs("png");
+    private Task DownloadJpg() => DownloadAs("jpg");
+
+    private async Task Close()
+    {
+        _zoomed = false;
+        await OnClose.InvokeAsync();
+    }
+
+    private async Task DownloadAs(string format)
+    {
+        if (Generation?.LocalImagePath is null) return;
+
+        try
+        {
+            var bytes = await ImageStorage.GetImageAsBytesAsync(Generation.LocalImagePath, format);
+            var base64 = Convert.ToBase64String(bytes);
+            var contentType = format == "jpg" ? "image/jpeg" : "image/png";
+            var fileName = $"artforge_{Generation.Id}.{format}";
+
+            await JS.InvokeVoidAsync("downloadFileFromBytes", fileName, contentType, base64);
+        }
+        catch (Exception ex)
+        {
+            Console.Error.WriteLine($"Download failed: {ex.Message}");
+        }
+    }
+
+    private async Task RequestDelete()
+    {
+        if (Generation is not null)
+        {
+            await OnDelete.InvokeAsync(Generation.Id);
+            await Close();
+        }
+    }
+}

@@ -1,0 +1,15 @@
+@inherits LayoutComponentBase
+
+<div class="app-layout">
+    <NavMenu />
+    <main class="main-content">
+        <button class="mobile-menu-btn" onclick="toggleSidebar()">&#9776;</button>
+        @Body
+    </main>
+</div>
+
+<div id="blazor-error-ui" style="display:none">
+    An unhandled error has occurred.
+    <a href="" class="reload">Reload</a>
+    <a class="dismiss">&#10005;</a>
+</div>

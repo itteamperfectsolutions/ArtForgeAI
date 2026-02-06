@@ -1,0 +1,178 @@
+@page "/"
+@rendermode InteractiveServer
+@inject IImageGenerationService ImageGenService
+@inject IImageStorageService ImageStorage
+@inject IJSRuntime JS
+
+<PageTitle>ArtForge AI - Create</PageTitle>
+
+<div class="page-header">
+    <h2>Create Image</h2>
+    <p>Describe your vision and let AI bring it to life</p>
+</div>
+
+<div style="max-width: 700px;">
+    <div class="card">
+        <div class="card-body">
+            <PromptInput @bind-Prompt="_prompt"
+                         @bind-EnhancePrompt="_enhancePrompt"
+                         @bind-ReferenceImagePath="_referenceImagePath"
+                         IsDisabled="_isGenerating" />
+
+            <SizeSelector @bind-SelectedSize="_selectedSize"
+                          IsDisabled="_isGenerating" />
+
+            <button class="btn-primary-gradient"
+                    style="width: 100%; justify-content: center; padding: 1rem;"
+                    @onclick="GenerateImage"
+                    disabled="@(_isGenerating || string.IsNullOrWhiteSpace(_prompt))">
+                @if (_isGenerating)
+                {
+                    <span>Generating...</span>
+                }
+                else
+                {
+                    <span>&#10024; Generate Image</span>
+                }
+            </button>
+        </div>
+    </div>
+
+    @if (!string.IsNullOrEmpty(_errorMessage))
+    {
+        <div class="card" style="margin-top: 1.5rem; border-left: 3px solid var(--danger);">
+            <div class="card-body" style="color: var(--danger);">
+                <strong>Error:</strong> @_errorMessage
+            </div>
+        </div>
+    }
+
+    @if (_result is not null && _result.Success)
+    {
+        <div class="result-container">
+            <div class="result-image-wrap">
+                <img class="result-image" src="@ImageStorage.GetWebPath(_result.LocalImagePath ?? "")" alt="Generated image" />
+            </div>
+
+            @if (!string.IsNullOrEmpty(_result.EnhancedPrompt))
+            {
+                <div class="result-prompt">
+                    <strong>Enhanced prompt:</strong> @_result.EnhancedPrompt
+                </div>
+            }
+
+            <div class="result-actions">
+                <button class="btn-secondary" @onclick="DownloadPng">
+                    &#11015; Download PNG
+                </button>
+                <button class="btn-secondary" @onclick="DownloadJpg">
+                    &#11015; Download JPG
+                </button>
+                <button class="btn-primary-gradient" @onclick="StartNew">
+                    &#10024; Generate Another
+                </button>
+            </div>
+        </div>
+    }
+</div>
+
+<LoadingOverlay IsVisible="_isGenerating" CurrentStep="_loadingStep" />
+<Toast @ref="_toast" />
+
+@code {
+    private string _prompt = string.Empty;
+    private bool _enhancePrompt = true;
+    private string? _referenceImagePath;
+    private ImageSize _selectedSize = ImageSize.Square;
+    private bool _isGenerating;
+    private int _loadingStep = 1;
+    private string? _errorMessage;
+    private GenerationResult? _result;
+    private Toast? _toast;
+
+    private async Task GenerateImage()
+    {
+        if (string.IsNullOrWhiteSpace(_prompt)) return;
+
+        _isGenerating = true;
+        _errorMessage = null;
+        _result = null;
+        _loadingStep = 1;
+        StateHasChanged();
+
+        try
+        {
+            if (_enhancePrompt)
+            {
+                _loadingStep = 1;
+                StateHasChanged();
+                await Task.Delay(500); // Brief pause so the user sees the step
+            }
+
+            _loadingStep = 2;
+            StateHasChanged();
+
+            var request = new GenerationRequest
+            {
+                Prompt = _prompt,
+                Size = _selectedSize,
+                EnhancePrompt = _enhancePrompt,
+                ReferenceImagePath = _referenceImagePath
+            };
+
+            _result = await ImageGenService.GenerateImageAsync(request);
+
+            _loadingStep = 3;
+            StateHasChanged();
+            await Task.Delay(300);
+
+            if (!_result.Success)
+            {
+                _errorMessage = _result.ErrorMessage;
+            }
+            else if (_toast is not null)
+            {
+                _ = _toast.ShowAsync("Image generated successfully!");
+            }
+        }
+        catch (Exception ex)
+        {
+            _errorMessage = $"An unexpected error occurred: {ex.Message}";
+        }
+        finally
+        {
+            _isGenerating = false;
+            StateHasChanged();
+        }
+    }
+
+    private Task DownloadPng() => DownloadAs("png");
+    private Task DownloadJpg() => DownloadAs("jpg");
+
+    private async Task DownloadAs(string format)
+    {
+        if (_result?.LocalImagePath is null) return;
+
+        try
+        {
+            var bytes = await ImageStorage.GetImageAsBytesAsync(_result.LocalImagePath, format);
+            var base64 = Convert.ToBase64String(bytes);
+            var contentType = format == "jpg" ? "image/jpeg" : "image/png";
+            var fileName = $"artforge_{_result.GenerationId}.{format}";
+
+            await JS.InvokeVoidAsync("downloadFileFromBytes", fileName, contentType, base64);
+        }
+        catch (Exception ex)
+        {
+            _errorMessage = $"Download failed: {ex.Message}";
+        }
+    }
+
+    private void StartNew()
+    {
+        _prompt = string.Empty;
+        _result = null;
+        _errorMessage = null;
+        _referenceImagePath = null;
+    }
+}

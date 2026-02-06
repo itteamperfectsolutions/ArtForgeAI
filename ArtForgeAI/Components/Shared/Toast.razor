@@ -1,0 +1,28 @@
+@if (_toasts.Count > 0)
+{
+    <div class="toast-container">
+        @foreach (var toast in _toasts)
+        {
+            <div class="toast @toast.Type">
+                <span>@toast.Message</span>
+            </div>
+        }
+    </div>
+}
+
+@code {
+    private readonly List<ToastItem> _toasts = new();
+
+    public async Task ShowAsync(string message, string type = "success", int durationMs = 3000)
+    {
+        var toast = new ToastItem(message, type);
+        _toasts.Add(toast);
+        StateHasChanged();
+
+        await Task.Delay(durationMs);
+        _toasts.Remove(toast);
+        StateHasChanged();
+    }
+
+    private record ToastItem(string Message, string Type);
+}

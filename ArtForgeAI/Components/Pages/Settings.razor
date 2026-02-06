@@ -1,0 +1,125 @@
+@page "/settings"
+@rendermode InteractiveServer
+@inject IGenerationHistoryService HistoryService
+@inject IJSRuntime JS
+
+<PageTitle>ArtForge AI - Settings</PageTitle>
+
+<div class="page-header">
+    <h2>Settings</h2>
+    <p>Customize your experience</p>
+</div>
+
+<div style="max-width: 600px;">
+    <div class="card">
+        <div class="card-body">
+            <div class="settings-section">
+                <h3>Generation Defaults</h3>
+
+                <div class="setting-row">
+                    <div>
+                        <div class="setting-label">Default Image Size</div>
+                        <div class="setting-desc">Pre-selected size for new generations</div>
+                    </div>
+                    <select class="form-input" style="width: auto; min-width: 160px;"
+                            @bind="_prefs.DefaultImageSize">
+                        @foreach (var size in Enum.GetValues<ImageSize>())
+                        {
+                            <option value="@size.ToString()">@size.ToDisplayName()</option>
+                        }
+                    </select>
+                </div>
+
+                <div class="setting-row">
+                    <div>
+                        <div class="setting-label">Auto-Enhance Prompts</div>
+                        <div class="setting-desc">Use GPT-4o to improve prompts before generation</div>
+                    </div>
+                    <label class="toggle-switch">
+                        <input type="checkbox" @bind="_prefs.AutoEnhancePrompt" />
+                        <span class="toggle-slider"></span>
+                    </label>
+                </div>
+
+                <div class="setting-row">
+                    <div>
+                        <div class="setting-label">Default Download Format</div>
+                        <div class="setting-desc">Preferred file format for downloads</div>
+                    </div>
+                    <select class="form-input" style="width: auto; min-width: 100px;"
+                            @bind="_prefs.DefaultDownloadFormat">
+                        <option value="png">PNG</option>
+                        <option value="jpg">JPG</option>
+                    </select>
+                </div>
+            </div>
+
+            <div class="settings-section">
+                <h3>Appearance</h3>
+
+                <div class="setting-row">
+                    <div>
+                        <div class="setting-label">Dark Mode</div>
+                        <div class="setting-desc">Toggle between dark and light themes</div>
+                    </div>
+                    <label class="toggle-switch">
+                        <input type="checkbox" @bind="_prefs.DarkMode" @bind:after="ApplyTheme" />
+                        <span class="toggle-slider"></span>
+                    </label>
+                </div>
+            </div>
+
+            <div style="display: flex; gap: 0.75rem; justify-content: flex-end;">
+                <button class="btn-primary-gradient" @onclick="SaveSettings" disabled="@_saving">
+                    @(_saving ? "Saving..." : "Save Settings")
+                </button>
+            </div>
+
+            @if (!string.IsNullOrEmpty(_message))
+            {
+                <div style="margin-top: 1rem; color: var(--success); font-size: 0.85rem;">
+                    @_message
+                </div>
+            }
+        </div>
+    </div>
+</div>
+
+@code {
+    private UserPreference _prefs = new();
+    private bool _saving;
+    private string? _message;
+
+    protected override async Task OnInitializedAsync()
+    {
+        _prefs = await HistoryService.GetUserPreferencesAsync();
+    }
+
+    private async Task ApplyTheme()
+    {
+        var theme = _prefs.DarkMode ? "dark" : "light";
+        await JS.InvokeVoidAsync("themeManager.setTheme", theme);
+    }
+
+    private async Task SaveSettings()
+    {
+        _saving = true;
+        _message = null;
+        StateHasChanged();
+
+        try
+        {
+            await HistoryService.SaveUserPreferencesAsync(_prefs);
+            await ApplyTheme();
+            _message = "Settings saved successfully!";
+        }
+        catch (Exception ex)
+        {
+            _message = $"Failed to save: {ex.Message}";
+        }
+        finally
+        {
+            _saving = false;
+        }
+    }
+}
