@@ -5,7 +5,7 @@
             <div class="loading-spinner"></div>
             <h3 style="margin-bottom: 1.5rem; font-size: 1.1rem;">Generating your image...</h3>
             <div class="loading-steps">
-                @foreach (var step in _steps)
+                @foreach (var step in GetSteps())
                 {
                     var css = step.Order < CurrentStep ? "completed"
                             : step.Order == CurrentStep ? "active"
@@ -36,13 +36,32 @@
 @code {
     [Parameter] public bool IsVisible { get; set; }
     [Parameter] public int CurrentStep { get; set; } = 1;
+    [Parameter] public ImageProvider Provider { get; set; } = ImageProvider.OpenAI;
+    [Parameter] public bool AutoRemoveBg { get; set; }
 
     private record StepInfo(int Order, string Label);
 
-    private readonly StepInfo[] _steps =
-    [
-        new(1, "Enhancing your prompt with AI..."),
-        new(2, "Generating image with DALL-E 3..."),
-        new(3, "Saving & optimizing...")
-    ];
+    private string GetModelName() => Provider switch
+    {
+        ImageProvider.Gemini => "Gemini Flash",
+        ImageProvider.Replicate => "FLUX",
+        _ => "DALL-E 3"
+    };
+
+    private StepInfo[] GetSteps()
+    {
+        var steps = new List<StepInfo>
+        {
+            new(1, "Enhancing your prompt with AI..."),
+            new(2, $"Generating image with {GetModelName()}..."),
+            new(3, "Saving & optimizing...")
+        };
+
+        if (AutoRemoveBg)
+        {
+            steps.Add(new(4, "Removing background with RMBG-2.0..."));
+        }
+
+        return steps.ToArray();
+    }
 }

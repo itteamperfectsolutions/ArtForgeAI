@@ -1,0 +1,24 @@
+@* AI Provider selector temporarily hidden – Gemini is the default *@
+
+@code {
+    [Parameter] public ImageProvider SelectedProvider { get; set; } = ImageProvider.Gemini;
+    [Parameter] public EventCallback<ImageProvider> SelectedProviderChanged { get; set; }
+    [Parameter] public bool IsDisabled { get; set; }
+
+    private record ProviderInfo(ImageProvider Value, string Icon, string Label, string Model);
+
+    private static readonly ProviderInfo[] _providers =
+    [
+        new(ImageProvider.Gemini, "\U0001f535", "Gemini", "Flash Image"),
+        // OpenAI and Replicate temporarily hidden
+        // new(ImageProvider.OpenAI, "\U0001f7e2", "OpenAI", "DALL-E 3"),
+        // new(ImageProvider.Replicate, "\U0001f7e3", "Replicate", "FLUX / Kontext")
+    ];
+
+    private async Task SelectProvider(ImageProvider provider)
+    {
+        if (IsDisabled) return;
+        SelectedProvider = provider;
+        await SelectedProviderChanged.InvokeAsync(provider);
+    }
+}

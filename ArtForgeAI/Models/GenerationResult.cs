@@ -8,4 +8,7 @@ public class GenerationResult
     public string? EnhancedPrompt { get; set; }
     public string? ErrorMessage { get; set; }
     public int? GenerationId { get; set; }
+    public bool WasLocalProcessing { get; set; }
+    public string? TransparentImagePath { get; set; }
+    public byte[]? TransparentPngBytes { get; set; }
 }

@@ -1,37 +1,54 @@
 @inject IImageStorageService ImageStorage
 
+@* ── Upload area (above prompt) ── *@
 <div class="mb-3">
-    <label class="form-label">Describe your image</label>
-    <textarea class="form-input" rows="4"
-              placeholder="e.g. A serene mountain lake at sunset with reflection..."
-              @bind="Prompt"
-              @bind:event="oninput"
-              disabled="@IsDisabled"></textarea>
-</div>
-
-<div class="mb-3">
-    <label class="form-label">Reference image (optional)</label>
-    @if (string.IsNullOrEmpty(ReferenceImagePath))
+    @if (ReferenceImagePaths.Count > 0)
     {
-        <label class="upload-area">
-            <div class="upload-icon">&#128247;</div>
-            <div>Click to upload a reference image</div>
-            <div style="font-size: 0.75rem; margin-top: 0.25rem;">JPG, PNG up to 10MB</div>
-            <InputFile OnChange="HandleFileUpload" accept="image/*" style="display:none" disabled="@IsDisabled" />
-        </label>
+        <div class="ref-thumbnails">
+            @foreach (var path in ReferenceImagePaths)
+            {
+                <div class="ref-thumb">
+                    <img src="/@path" alt="Reference" />
+                    <button class="ref-thumb-remove" @onclick="() => RemoveImage(path)" disabled="@IsDisabled">&#10005;</button>
+                    @if (OnRemoveBackground.HasDelegate)
+                    {
+                        <button class="ref-thumb-bg-btn" @onclick="() => OnRemoveBackground.InvokeAsync(path)" disabled="@IsDisabled" title="Remove Background">
+                            &#9986;
+                        </button>
+                    }
+                </div>
+            }
+            <label class="ref-thumb-add" title="Add more images">
+                <span>+</span>
+                <InputFile OnChange="HandleFileUpload" accept="image/*" multiple style="display:none" disabled="@IsDisabled" />
+            </label>
+        </div>
     }
     else
     {
-        <div class="upload-preview">
-            <img src="/@ReferenceImagePath" alt="Reference" />
-            <button class="remove-btn" @onclick="RemoveReference" disabled="@IsDisabled">&#10005;</button>
-        </div>
+        <label class="upload-area upload-area-compact">
+            <span class="upload-icon">&#128247;</span>
+            <span>Upload reference images (optional)</span>
+            <span style="font-size: 0.7rem; color: var(--text-muted); margin-left: 0.5rem;">JPG, PNG up to 10MB each</span>
+            <InputFile OnChange="HandleFileUpload" accept="image/*" multiple style="display:none" disabled="@IsDisabled" />
+        </label>
     }
 </div>
 
+@* ── Prompt textarea ── *@
+<div class="mb-3">
+    <label class="form-label">Describe your image</label>
+    <textarea class="form-input" rows="2"
+              placeholder="e.g. A serene mountain lake at sunset with reflection..."
+              value="@Prompt"
+              @oninput="OnPromptInput"
+              disabled="@IsDisabled"></textarea>
+</div>
+
+@* ── Enhance prompt checkbox ── *@
 <div class="mb-3">
     <label class="form-check-enhanced">
-        <input type="checkbox" @bind="EnhancePrompt" disabled="@IsDisabled" />
+        <input type="checkbox" checked="@EnhancePrompt" @onchange="OnEnhancePromptChange" disabled="@IsDisabled" />
         <span>AI Prompt Enhancement</span>
         <span class="enhance-badge">&#10024; GPT-4o</span>
     </label>
@@ -42,28 +59,46 @@
     [Parameter] public EventCallback<string> PromptChanged { get; set; }
     [Parameter] public bool EnhancePrompt { get; set; } = true;
     [Parameter] public EventCallback<bool> EnhancePromptChanged { get; set; }
-    [Parameter] public string? ReferenceImagePath { get; set; }
-    [Parameter] public EventCallback<string?> ReferenceImagePathChanged { get; set; }
+    [Parameter] public List<string> ReferenceImagePaths { get; set; } = [];
+    [Parameter] public EventCallback<List<string>> ReferenceImagePathsChanged { get; set; }
     [Parameter] public bool IsDisabled { get; set; }
+    [Parameter] public EventCallback<string> OnRemoveBackground { get; set; }
+
+    private async Task OnPromptInput(ChangeEventArgs e)
+    {
+        Prompt = e.Value?.ToString() ?? string.Empty;
+        await PromptChanged.InvokeAsync(Prompt);
+    }
+
+    private async Task OnEnhancePromptChange(ChangeEventArgs e)
+    {
+        EnhancePrompt = (bool)(e.Value ?? false);
+        await EnhancePromptChanged.InvokeAsync(EnhancePrompt);
+    }
 
     private async Task HandleFileUpload(InputFileChangeEventArgs e)
     {
-        var file = e.File;
-        if (file.Size > 10 * 1024 * 1024) return;
+        var newPaths = new List<string>(ReferenceImagePaths);
 
-        using var stream = file.OpenReadStream(10 * 1024 * 1024);
-        var path = await ImageStorage.SaveUploadedFileAsync(stream, file.Name);
-        ReferenceImagePath = path;
-        await ReferenceImagePathChanged.InvokeAsync(path);
+        foreach (var file in e.GetMultipleFiles(10))
+        {
+            if (file.Size > 10 * 1024 * 1024) continue;
+
+            using var stream = file.OpenReadStream(10 * 1024 * 1024);
+            var path = await ImageStorage.SaveUploadedFileAsync(stream, file.Name);
+            newPaths.Add(path);
+        }
+
+        ReferenceImagePaths = newPaths;
+        await ReferenceImagePathsChanged.InvokeAsync(ReferenceImagePaths);
     }
 
-    private async Task RemoveReference()
+    private async Task RemoveImage(string path)
     {
-        if (!string.IsNullOrEmpty(ReferenceImagePath))
-        {
-            await ImageStorage.DeleteImageAsync(ReferenceImagePath);
-            ReferenceImagePath = null;
-            await ReferenceImagePathChanged.InvokeAsync(null);
-        }
+        await ImageStorage.DeleteImageAsync(path);
+        var newPaths = new List<string>(ReferenceImagePaths);
+        newPaths.Remove(path);
+        ReferenceImagePaths = newPaths;
+        await ReferenceImagePathsChanged.InvokeAsync(ReferenceImagePaths);
     }
 }

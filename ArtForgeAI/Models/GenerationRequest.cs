@@ -5,5 +5,12 @@ public class GenerationRequest
     public string Prompt { get; set; } = string.Empty;
     public ImageSize Size { get; set; } = ImageSize.Square;
     public bool EnhancePrompt { get; set; } = true;
-    public string? ReferenceImagePath { get; set; }
+    public List<string> ReferenceImagePaths { get; set; } = [];
+    public ImageProvider Provider { get; set; } = ImageProvider.OpenAI;
+
+    /// <summary>Primary reference image (first uploaded), or null if none.</summary>
+    public string? ReferenceImagePath => ReferenceImagePaths.Count > 0 ? ReferenceImagePaths[0] : null;
+
+    public bool HasReferenceImages => ReferenceImagePaths.Count > 0;
+    public bool ForceCloudProvider { get; set; }
 }

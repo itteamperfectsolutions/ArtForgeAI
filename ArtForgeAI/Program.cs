@@ -17,10 +17,26 @@ builder.Services.AddDbContext<AppDbContext>(options =>
 builder.Services.Configure<OpenAiOptions>(
     builder.Configuration.GetSection(OpenAiOptions.SectionName));
 
+// Gemini configuration
+builder.Services.Configure<GeminiOptions>(
+    builder.Configuration.GetSection(GeminiOptions.SectionName));
+
+// Replicate configuration
+builder.Services.Configure<ReplicateOptions>(
+    builder.Configuration.GetSection(ReplicateOptions.SectionName));
+
 // HTTP client for downloading images
 builder.Services.AddHttpClient();
 
+// Local ONNX background removal (singleton — model loaded once)
+builder.Services.AddSingleton<IBackgroundRemovalService, OnnxBackgroundRemovalService>();
+
+// Local ONNX image enhancement — Real-ESRGAN 4x upscale (singleton — model loaded once)
+builder.Services.AddSingleton<IImageEnhancerService, OnnxImageEnhancerService>();
+
 // Application services
+builder.Services.AddScoped<IGeminiImageService, GeminiImageService>();
+builder.Services.AddScoped<IReplicateImageService, ReplicateImageService>();
 builder.Services.AddScoped<IImageStorageService, ImageStorageService>();
 builder.Services.AddScoped<IPromptEnhancerService, PromptEnhancerService>();
 builder.Services.AddScoped<IGenerationHistoryService, GenerationHistoryService>();

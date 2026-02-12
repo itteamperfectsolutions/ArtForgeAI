@@ -1,0 +1,32 @@
+## .NET
+bin/
+obj/
+*.user
+*.suo
+*.userosscache
+*.sln.docstates
+.vs/
+
+## NuGet
+*.nupkg
+**/[Pp]ackages/*
+
+## Build
+[Dd]ebug/
+[Rr]elease/
+x64/
+x86/
+
+## User-specific
+*.rsuser
+*.DotSettings.user
+
+## Generated files
+**/wwwroot/uploads/
+**/wwwroot/generated/
+
+## ONNX models (large binary files)
+*.onnx
+
+## Windows artifacts
+nul

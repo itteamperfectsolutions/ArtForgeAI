@@ -33,6 +33,17 @@ public class ImageStorageService : IImageStorageService
         return Path.Combine("generated", fileName).Replace("\\", "/");
     }
 
+    public async Task<string> SaveImageFromBytesAsync(BinaryData imageBytes, string fileName)
+    {
+        var generatedDir = Path.Combine(_env.WebRootPath, "generated");
+        Directory.CreateDirectory(generatedDir);
+
+        var filePath = Path.Combine(generatedDir, fileName);
+        await File.WriteAllBytesAsync(filePath, imageBytes.ToArray());
+
+        return Path.Combine("generated", fileName).Replace("\\", "/");
+    }
+
     public async Task<string> SaveUploadedFileAsync(Stream fileStream, string fileName)
     {
         var uploadsDir = Path.Combine(_env.WebRootPath, "uploads");
