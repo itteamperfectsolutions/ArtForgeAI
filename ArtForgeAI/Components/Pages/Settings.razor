@@ -1,6 +1,10 @@
 @page "/settings"
 @rendermode InteractiveServer
 @inject IGenerationHistoryService HistoryService
+@inject IImageSizeMasterService SizeService
+@inject IStylePresetService StyleService
+@inject IImageGenerationService ImageGenService
+@inject IImageStorageService ImageStorage
 @inject IJSRuntime JS
 
 <PageTitle>ArtForge AI - Settings</PageTitle>
@@ -10,89 +14,677 @@
     <p>Customize your experience</p>
 </div>
 
-<div style="max-width: 600px;">
-    <div class="card">
-        <div class="card-body">
-            <div class="settings-section">
-                <h3>Generation Defaults</h3>
+@* ── Tab bar ── *@
+<div class="settings-tabs">
+    <button class="settings-tab @(_activeTab == "general" ? "active" : "")"
+            @onclick='() => _activeTab = "general"'>
+        &#9881; General
+    </button>
+    <button class="settings-tab @(_activeTab == "sizes" ? "active" : "")"
+            @onclick='() => _activeTab = "sizes"'>
+        &#128208; Image Sizes
+    </button>
+    <button class="settings-tab @(_activeTab == "styles" ? "active" : "")"
+            @onclick='() => _activeTab = "styles"'>
+        &#127912; Style Presets
+        <span class="settings-tab-badge">@_allStyles.Count</span>
+    </button>
+</div>
 
-                <div class="setting-row">
-                    <div>
-                        <div class="setting-label">Default Image Size</div>
-                        <div class="setting-desc">Pre-selected size for new generations</div>
+@* ═══════════ General Tab ═══════════ *@
+@if (_activeTab == "general")
+{
+    <div class="settings-tab-content" style="max-width: 600px;">
+        <div class="card">
+            <div class="card-body">
+                <div class="settings-section">
+                    <h3>Generation Defaults</h3>
+
+                    <div class="setting-row">
+                        <div>
+                            <div class="setting-label">Default Image Size</div>
+                            <div class="setting-desc">Pre-selected size for new generations</div>
+                        </div>
+                        <select class="form-input" style="width: auto; min-width: 160px;"
+                                @bind="_prefs.DefaultImageSize">
+                            @foreach (var size in _activeSizes)
+                            {
+                                <option value="@size.Name">@size.Name (@(size.Width)x@(size.Height))</option>
+                            }
+                        </select>
                     </div>
-                    <select class="form-input" style="width: auto; min-width: 160px;"
-                            @bind="_prefs.DefaultImageSize">
-                        @foreach (var size in Enum.GetValues<ImageSize>())
+
+                    <div class="setting-row">
+                        <div>
+                            <div class="setting-label">Auto-Enhance Prompts</div>
+                            <div class="setting-desc">Use AI to improve prompts before generation</div>
+                        </div>
+                        <label class="toggle-switch">
+                            <input type="checkbox" @bind="_prefs.AutoEnhancePrompt" />
+                            <span class="toggle-slider"></span>
+                        </label>
+                    </div>
+
+                    <div class="setting-row">
+                        <div>
+                            <div class="setting-label">Default Download Format</div>
+                            <div class="setting-desc">Preferred file format for downloads</div>
+                        </div>
+                        <select class="form-input" style="width: auto; min-width: 100px;"
+                                @bind="_prefs.DefaultDownloadFormat">
+                            <option value="png">PNG</option>
+                            <option value="jpg">JPG</option>
+                        </select>
+                    </div>
+                </div>
+
+                <div class="settings-section">
+                    <h3>Appearance</h3>
+
+                    <div class="setting-row">
+                        <div>
+                            <div class="setting-label">Dark Mode</div>
+                            <div class="setting-desc">Toggle between dark and light themes</div>
+                        </div>
+                        <label class="toggle-switch">
+                            <input type="checkbox" @bind="_prefs.DarkMode" @bind:after="ApplyTheme" />
+                            <span class="toggle-slider"></span>
+                        </label>
+                    </div>
+                </div>
+
+                <div style="display: flex; gap: 0.75rem; justify-content: flex-end;">
+                    <button class="btn-primary-gradient" @onclick="SaveSettings" disabled="@_saving">
+                        @(_saving ? "Saving..." : "Save Settings")
+                    </button>
+                </div>
+
+                @if (!string.IsNullOrEmpty(_message))
+                {
+                    <div style="margin-top: 1rem; color: var(--success); font-size: 0.85rem;">
+                        @_message
+                    </div>
+                }
+            </div>
+        </div>
+    </div>
+}
+
+@* ═══════════ Image Sizes Tab ═══════════ *@
+@if (_activeTab == "sizes")
+{
+    <div class="settings-tab-content" style="max-width: 600px;">
+        <div class="card">
+            <div class="card-body">
+                <div class="settings-section" style="margin-bottom: 0;">
+                    <h3>Image Sizes</h3>
+
+                    @foreach (var size in _allSizes)
+                    {
+                        <div class="setting-row" style="gap: 0.5rem;">
+                            @if (_editingSizeId == size.Id)
+                            {
+                                <div style="display: flex; gap: 0.5rem; align-items: center; flex: 1; flex-wrap: wrap;">
+                                    <input class="form-input" style="width: 100px;" @bind="_editName" placeholder="Name" />
+                                    <input type="number" class="form-input" style="width: 72px;" @bind="_editWidth" placeholder="W" step="any" />
+                                    <span style="color: var(--text-muted);">x</span>
+                                    <input type="number" class="form-input" style="width: 72px;" @bind="_editHeight" placeholder="H" step="any" />
+                                    <select class="form-input" style="width: 58px; padding: 0.35rem 0.4rem; font-size: 0.78rem;"
+                                            value="@_editUnit" @onchange="OnEditUnitChanged">
+                                        <option value="px">px</option>
+                                        <option value="in">in</option>
+                                        <option value="cm">cm</option>
+                                    </select>
+                                    @if (_editUnit != "px")
+                                    {
+                                        <span style="font-size: 0.72rem; color: var(--text-muted);">= @(ToPixels(_editWidth, _editUnit))x@(ToPixels(_editHeight, _editUnit)) px</span>
+                                    }
+                                    <label style="display: flex; align-items: center; gap: 0.3rem; font-size: 0.8rem;">
+                                        <input type="checkbox" @bind="_editIsActive" /> Active
+                                    </label>
+                                </div>
+                                <div style="display: flex; gap: 0.35rem;">
+                                    <button class="btn-primary-gradient btn-sm" @onclick="() => SaveEdit(size.Id)">Save</button>
+                                    <button class="btn-secondary btn-sm" @onclick="CancelEdit">Cancel</button>
+                                </div>
+                            }
+                            else
+                            {
+                                <div style="flex: 1;">
+                                    <div class="setting-label">
+                                        @size.Name
+                                        @if (!size.IsActive)
+                                        {
+                                            <span style="color: var(--text-muted); font-size: 0.75rem; margin-left: 0.3rem;">(inactive)</span>
+                                        }
+                                    </div>
+                                    <div class="setting-desc">
+                                        @FormatDisplay(size)
+                                        @if (size.Unit != "px")
+                                        {
+                                            <span> (@(size.Width)x@(size.Height) px)</span>
+                                        }
+                                    </div>
+                                </div>
+                                <div style="display: flex; gap: 0.35rem;">
+                                    <button class="btn-secondary btn-sm" @onclick="() => StartEdit(size)">Edit</button>
+                                    <button class="btn-danger btn-sm" style="padding: 0.25rem 0.5rem; font-size: 0.72rem;" @onclick="() => DeleteSize(size.Id)">Delete</button>
+                                </div>
+                            }
+                        </div>
+                    }
+
+                    @* Add new size form *@
+                    <div style="margin-top: 0.75rem; padding-top: 0.75rem; border-top: 1px solid var(--border-color);">
+                        <div style="font-weight: 600; font-size: 0.85rem; margin-bottom: 0.5rem;">Add New Size</div>
+                        <div style="display: flex; gap: 0.5rem; align-items: center; flex-wrap: wrap;">
+                            <input class="form-input" style="width: 100px;" @bind="_newName" placeholder="Name" />
+                            <input type="number" class="form-input" style="width: 72px;" @bind="_newWidth" placeholder="Width" step="any" />
+                            <span style="color: var(--text-muted);">x</span>
+                            <input type="number" class="form-input" style="width: 72px;" @bind="_newHeight" placeholder="Height" step="any" />
+                            <select class="form-input" style="width: 58px; padding: 0.35rem 0.4rem; font-size: 0.78rem;"
+                                    value="@_newUnit" @onchange="OnNewUnitChanged">
+                                <option value="px">px</option>
+                                <option value="in">in</option>
+                                <option value="cm">cm</option>
+                            </select>
+                            <button class="btn-primary-gradient btn-sm" @onclick="AddSize" disabled="@(string.IsNullOrWhiteSpace(_newName) || _newWidth <= 0 || _newHeight <= 0)">
+                                Add
+                            </button>
+                        </div>
+                        @if (_newUnit != "px" && _newWidth > 0 && _newHeight > 0)
                         {
-                            <option value="@size.ToString()">@size.ToDisplayName()</option>
+                            <div style="margin-top: 0.35rem; font-size: 0.78rem; color: var(--text-muted);">
+                                = @(ToPixels(_newWidth, _newUnit))x@(ToPixels(_newHeight, _newUnit)) px (at 96 DPI)
+                            </div>
                         }
-                    </select>
-                </div>
-
-                <div class="setting-row">
-                    <div>
-                        <div class="setting-label">Auto-Enhance Prompts</div>
-                        <div class="setting-desc">Use GPT-4o to improve prompts before generation</div>
+                        @if (!string.IsNullOrEmpty(_sizeMessage))
+                        {
+                            <div style="margin-top: 0.5rem; color: var(--success); font-size: 0.82rem;">
+                                @_sizeMessage
+                            </div>
+                        }
                     </div>
-                    <label class="toggle-switch">
-                        <input type="checkbox" @bind="_prefs.AutoEnhancePrompt" />
-                        <span class="toggle-slider"></span>
-                    </label>
-                </div>
-
-                <div class="setting-row">
-                    <div>
-                        <div class="setting-label">Default Download Format</div>
-                        <div class="setting-desc">Preferred file format for downloads</div>
-                    </div>
-                    <select class="form-input" style="width: auto; min-width: 100px;"
-                            @bind="_prefs.DefaultDownloadFormat">
-                        <option value="png">PNG</option>
-                        <option value="jpg">JPG</option>
-                    </select>
                 </div>
             </div>
+        </div>
+    </div>
+}
 
-            <div class="settings-section">
-                <h3>Appearance</h3>
-
-                <div class="setting-row">
-                    <div>
-                        <div class="setting-label">Dark Mode</div>
-                        <div class="setting-desc">Toggle between dark and light themes</div>
-                    </div>
-                    <label class="toggle-switch">
-                        <input type="checkbox" @bind="_prefs.DarkMode" @bind:after="ApplyTheme" />
-                        <span class="toggle-slider"></span>
-                    </label>
-                </div>
-            </div>
-
-            <div style="display: flex; gap: 0.75rem; justify-content: flex-end;">
-                <button class="btn-primary-gradient" @onclick="SaveSettings" disabled="@_saving">
-                    @(_saving ? "Saving..." : "Save Settings")
+@* ═══════════ Style Presets Tab ═══════════ *@
+@if (_activeTab == "styles")
+{
+    <div class="settings-tab-content">
+        <div class="settings-section" style="margin-bottom: 0;">
+            <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:0.75rem;flex-wrap:wrap;gap:0.5rem;">
+                <h3 style="margin-bottom:0;border-bottom:none;padding-bottom:0;">Style Presets</h3>
+                <button class="btn-primary-gradient btn-sm" @onclick="GenerateAllThumbnails"
+                        disabled="@(_batchGenerating || _generatingThumbnailId is not null)"
+                        title="Generate thumbnails for all styles without one (8 concurrent)">
+                    @if (_batchGenerating)
+                    {
+                        <span>&#9203; @_batchCompleted / @_batchTotal generating...</span>
+                    }
+                    else
+                    {
+                        <span>&#10024; Generate All Thumbnails</span>
+                    }
                 </button>
             </div>
 
-            @if (!string.IsNullOrEmpty(_message))
+            @if (_batchGenerating)
             {
-                <div style="margin-top: 1rem; color: var(--success); font-size: 0.85rem;">
-                    @_message
+                <div style="margin-bottom:0.75rem;">
+                    <div class="enhance-progress-bar" style="border:1px solid var(--border-color);border-radius:var(--radius-sm);height:20px;">
+                        <div class="enhance-progress-fill" style="width:@(_batchTotal > 0 ? (int)((double)_batchCompleted / _batchTotal * 100) : 0)%;background:var(--accent-gradient);"></div>
+                        <span class="enhance-progress-text">@_batchCompleted / @_batchTotal</span>
+                    </div>
+                </div>
+            }
+
+            @{
+                var pendingStyles = _allStyles.Where(s => string.IsNullOrEmpty(s.ThumbnailPath)).ToList();
+                var completedStyles = _allStyles.Where(s => !string.IsNullOrEmpty(s.ThumbnailPath)).ToList();
+                var groupedCompleted = completedStyles
+                    .GroupBy(s => s.Category)
+                    .OrderBy(g => { var idx = Array.IndexOf(_categoryOrder, g.Key); return idx < 0 ? 99 : idx; })
+                    .ToArray();
+            }
+
+            @if (pendingStyles.Count > 0)
+            {
+                <div class="admin-style-section-header pending">
+                    <span>&#9888; Pending Thumbnail</span>
+                    <span class="admin-style-section-count">@pendingStyles.Count</span>
+                </div>
+            }
+            <div class="admin-style-grid">
+                @foreach (var preset in pendingStyles)
+                {
+                    <div class="admin-style-card @(!preset.IsActive ? "inactive" : "")">
+                        @if (_editingStyleId == preset.Id)
+                        {
+                            @* ── Inline edit form ── *@
+                            <div class="admin-style-card-edit">
+                                <div style="display: flex; gap: 0.5rem; flex-wrap: wrap;">
+                                    <input class="form-input" style="width: 100px;" @bind="_editStyleName" placeholder="Name" />
+                                    <input class="form-input" style="width: 120px;" @bind="_editStyleDesc" placeholder="Description" />
+                                    <select class="form-input" style="width: 110px; padding: 0.35rem 0.4rem; font-size: 0.78rem;" @bind="_editStyleCategory">
+                                        <option value="Artistic">Artistic</option>
+                                        <option value="Fun">Fun</option>
+                                        <option value="Professional">Professional</option>
+                                        <option value="Abstract">Abstract</option>
+                                        <option value="Regional">Regional</option>
+                                    </select>
+                                    <input class="form-input" style="width: 50px;" @bind="_editStyleEmoji" placeholder="Emoji" />
+                                    <input class="form-input" style="width: 80px;" @bind="_editStyleAccent" placeholder="#hex" />
+                                </div>
+                                <textarea class="form-input" style="width: 100%; min-height: 50px; font-size: 0.78rem;" @bind="_editStylePrompt" placeholder="Prompt Template"></textarea>
+                                <div style="display: flex; gap: 0.35rem; justify-content: flex-end;">
+                                    <button class="btn-primary-gradient btn-sm" @onclick="() => SaveStyleEdit(preset.Id)">Save</button>
+                                    <button class="btn-secondary btn-sm" @onclick="CancelStyleEdit">Cancel</button>
+                                </div>
+                            </div>
+                        }
+                        else
+                        {
+                            @* ── Thumbnail area ── *@
+                            <div class="admin-style-thumb">
+                                @if (!string.IsNullOrEmpty(preset.ThumbnailPath))
+                                {
+                                    <img src="/@preset.ThumbnailPath" alt="@preset.Name thumbnail" />
+                                }
+                                else
+                                {
+                                    <div class="admin-style-thumb-placeholder">
+                                        <span>@preset.IconEmoji</span>
+                                    </div>
+                                }
+                                @if (_generatingThumbnailId == preset.Id || _batchActiveIds.Contains(preset.Id))
+                                {
+                                    <div class="admin-style-thumb-overlay">
+                                        <div class="loading-spinner" style="width:24px;height:24px;margin:0;border-width:2px;"></div>
+                                    </div>
+                                }
+                            </div>
+
+                            @* ── Card info ── *@
+                            <div class="admin-style-info">
+                                <div class="admin-style-header">
+                                    <div>
+                                        <div class="admin-style-name">@preset.IconEmoji @preset.Name</div>
+                                        <div class="admin-style-category">@preset.Category</div>
+                                    </div>
+                                    <label class="toggle-switch" style="transform: scale(0.8);">
+                                        <input type="checkbox" checked="@preset.IsActive"
+                                               @onchange="() => ToggleStyleActive(preset)" />
+                                        <span class="toggle-slider"></span>
+                                    </label>
+                                </div>
+                                <div class="admin-style-desc">@preset.Description</div>
+                                <div class="admin-style-actions">
+                                    <label class="btn-primary-gradient btn-sm admin-upload-label" title="Upload a test image to preview this style"
+                                           style="@(_testingStyleId is not null ? "opacity:0.5;pointer-events:none;" : "")">
+                                        &#10024; Test Style
+                                        <InputFile OnChange="(e) => TestStyle(e, preset)" accept="image/*" style="display:none" />
+                                    </label>
+                                    <button class="btn-secondary btn-sm" @onclick="() => GenerateThumbnail(preset)"
+                                            disabled="@(_generatingThumbnailId is not null)"
+                                            title="Auto-generate thumbnail">
+                                        &#127912; Generate
+                                    </button>
+                                    <label class="btn-secondary btn-sm admin-upload-label" title="Upload custom thumbnail">
+                                        &#128247; Upload
+                                        <InputFile OnChange="(e) => UploadThumbnail(e, preset.Id)" accept="image/*" style="display:none" />
+                                    </label>
+                                    <button class="btn-secondary btn-sm" @onclick="() => StartStyleEdit(preset)">Edit</button>
+                                    <button class="btn-danger btn-sm" style="padding: 0.25rem 0.5rem; font-size: 0.72rem;" @onclick="() => DeleteStyle(preset.Id)">Delete</button>
+                                </div>
+                            </div>
+                        }
+                    </div>
+                }
+            </div>
+
+            @if (completedStyles.Count > 0)
+            {
+                <div class="admin-style-section-header completed">
+                    <span>&#10003; Completed</span>
+                    <span class="admin-style-section-count">@completedStyles.Count</span>
+                </div>
+
+                @foreach (var group in groupedCompleted)
+                {
+                    <div class="admin-completed-category-header">@group.Key</div>
+                    <div class="admin-completed-grid">
+                        @foreach (var preset in group)
+                        {
+                            <div class="admin-completed-card @(!preset.IsActive ? "inactive" : "") @(_editingStyleId == preset.Id ? "editing" : "")">
+                                @if (_editingStyleId == preset.Id)
+                                {
+                                    <div class="admin-style-card-edit">
+                                        <div style="display: flex; gap: 0.4rem; flex-wrap: wrap;">
+                                            <input class="form-input" style="width: 90px; font-size:0.72rem;" @bind="_editStyleName" placeholder="Name" />
+                                            <input class="form-input" style="width: 100px; font-size:0.72rem;" @bind="_editStyleDesc" placeholder="Description" />
+                                            <select class="form-input" style="width: 90px; padding: 0.25rem; font-size: 0.72rem;" @bind="_editStyleCategory">
+                                                <option value="Artistic">Artistic</option>
+                                                <option value="Fun">Fun</option>
+                                                <option value="Professional">Professional</option>
+                                                <option value="Abstract">Abstract</option>
+                                            </select>
+                                            <input class="form-input" style="width: 40px; font-size:0.72rem;" @bind="_editStyleEmoji" placeholder="Em" />
+                                        </div>
+                                        <textarea class="form-input" style="width:100%;min-height:36px;font-size:0.72rem;" @bind="_editStylePrompt" placeholder="Prompt"></textarea>
+                                        <div style="display:flex;gap:0.25rem;justify-content:flex-end;">
+                                            <button class="btn-primary-gradient btn-sm" style="font-size:0.68rem;padding:0.2rem 0.4rem;" @onclick="() => SaveStyleEdit(preset.Id)">Save</button>
+                                            <button class="btn-secondary btn-sm" style="font-size:0.68rem;padding:0.2rem 0.4rem;" @onclick="CancelStyleEdit">Cancel</button>
+                                        </div>
+                                    </div>
+                                }
+                                else
+                                {
+                                    <div class="admin-completed-thumb">
+                                        <img src="/@preset.ThumbnailPath" alt="@preset.Name" />
+                                        @if (_generatingThumbnailId == preset.Id || _batchActiveIds.Contains(preset.Id))
+                                        {
+                                            <div class="admin-style-thumb-overlay">
+                                                <div class="loading-spinner" style="width:16px;height:16px;margin:0;border-width:2px;"></div>
+                                            </div>
+                                        }
+                                    </div>
+                                    <div class="admin-completed-info">
+                                        <div class="admin-completed-top">
+                                            <span class="admin-completed-name">@preset.IconEmoji @preset.Name</span>
+                                            <label class="toggle-switch" style="transform: scale(0.65);">
+                                                <input type="checkbox" checked="@preset.IsActive"
+                                                       @onchange="() => ToggleStyleActive(preset)" />
+                                                <span class="toggle-slider"></span>
+                                            </label>
+                                        </div>
+                                        <div class="admin-completed-actions">
+                                            <label class="btn-primary-gradient btn-sm admin-upload-label admin-compact-btn" title="Test style">
+                                                &#10024;
+                                                <InputFile OnChange="(e) => TestStyle(e, preset)" accept="image/*" style="display:none" />
+                                            </label>
+                                            <button class="btn-secondary btn-sm admin-compact-btn" @onclick="() => GenerateThumbnail(preset)"
+                                                    disabled="@(_generatingThumbnailId is not null)" title="Regenerate">&#127912;</button>
+                                            <label class="btn-secondary btn-sm admin-upload-label admin-compact-btn" title="Upload thumbnail">
+                                                &#128247;
+                                                <InputFile OnChange="(e) => UploadThumbnail(e, preset.Id)" accept="image/*" style="display:none" />
+                                            </label>
+                                            <button class="btn-secondary btn-sm admin-compact-btn" @onclick="() => StartStyleEdit(preset)" title="Edit">&#9998;</button>
+                                            <button class="btn-danger btn-sm admin-compact-btn" @onclick="() => DeleteStyle(preset.Id)" title="Delete">&#128465;</button>
+                                        </div>
+                                    </div>
+                                }
+                            </div>
+                        }
+                    </div>
+                }
+            }
+
+            @if (!string.IsNullOrEmpty(_thumbnailMessage))
+            {
+                <div style="margin-top: 0.5rem; color: var(--accent-primary); font-size: 0.82rem;">
+                    @_thumbnailMessage
+                </div>
+            }
+
+            @* Add new style form *@
+            <div style="margin-top: 0.75rem; padding-top: 0.75rem; border-top: 1px solid var(--border-color);">
+                <div style="font-weight: 600; font-size: 0.85rem; margin-bottom: 0.5rem;">Add New Style</div>
+                <div style="display: flex; gap: 0.5rem; align-items: flex-start; flex-wrap: wrap;">
+                    <input class="form-input" style="width: 100px;" @bind="_newStyleName" placeholder="Name" />
+                    <input class="form-input" style="width: 120px;" @bind="_newStyleDesc" placeholder="Description" />
+                    <select class="form-input" style="width: 110px; padding: 0.35rem 0.4rem; font-size: 0.78rem;" @bind="_newStyleCategory">
+                        <option value="Artistic">Artistic</option>
+                        <option value="Fun">Fun</option>
+                        <option value="Professional">Professional</option>
+                        <option value="Abstract">Abstract</option>
+                    </select>
+                    <input class="form-input" style="width: 50px;" @bind="_newStyleEmoji" placeholder="Emoji" />
+                    <input class="form-input" style="width: 80px;" @bind="_newStyleAccent" placeholder="#hex" />
+                    <textarea class="form-input" style="width: 100%; min-height: 50px; font-size: 0.78rem;" @bind="_newStylePrompt" placeholder="Prompt Template"></textarea>
+                </div>
+
+                @* Inline test preview area *@
+                @if (!string.IsNullOrEmpty(_newStyleTestSourcePath))
+                {
+                    <div class="style-test-body" style="margin-top: 0.75rem;">
+                        @* Left: source image *@
+                        <div class="style-test-panel">
+                            <div class="style-test-panel-label">Source</div>
+                            <div class="style-test-image-wrap">
+                                <img src="/@_newStyleTestSourcePath" alt="Source" />
+                            </div>
+                        </div>
+
+                        @* Right: result *@
+                        <div class="style-test-panel">
+                            <div class="style-test-panel-label">Result</div>
+                            <div class="style-test-image-wrap">
+                                @if (_newStyleTestProcessing)
+                                {
+                                    <div style="display:flex;flex-direction:column;align-items:center;gap:0.75rem;padding:2rem;">
+                                        <div class="loading-spinner" style="width:36px;height:36px;margin:0;"></div>
+                                        <span style="font-size:0.85rem;color:var(--text-muted);">Applying style...</span>
+                                    </div>
+                                }
+                                else if (!string.IsNullOrEmpty(_newStyleTestResultPath))
+                                {
+                                    <img src="@(ImageStorage.GetWebPath(_newStyleTestResultPath))" alt="Result" />
+                                }
+                                else
+                                {
+                                    <span style="color:var(--text-muted);font-size:0.85rem;">Waiting...</span>
+                                }
+                            </div>
+                        </div>
+                    </div>
+
+                    @if (!string.IsNullOrEmpty(_newStyleTestError))
+                    {
+                        <div style="margin-top:0.5rem;color:var(--danger);font-size:0.82rem;">@_newStyleTestError</div>
+                    }
+                }
+
+                @* Action buttons *@
+                <div style="display: flex; gap: 0.5rem; align-items: center; flex-wrap: wrap; margin-top: 0.5rem;">
+                    <label class="btn-primary-gradient btn-sm admin-upload-label"
+                           title="Upload a test image to preview this style"
+                           style="@(string.IsNullOrWhiteSpace(_newStylePrompt) || _newStyleTestProcessing ? "opacity:0.5;pointer-events:none;" : "")">
+                        &#10024; Test Prompt
+                        <InputFile OnChange="TestNewStyle" accept="image/*" style="display:none" />
+                    </label>
+
+                    @if (!_newStyleTestProcessing && !string.IsNullOrEmpty(_newStyleTestResultPath))
+                    {
+                        <button class="btn-primary-gradient btn-sm" @onclick="AddStyleWithThumbnail"
+                                disabled="@(string.IsNullOrWhiteSpace(_newStyleName))">
+                            &#10003; Save with Thumbnail
+                        </button>
+                    }
+
+                    <button class="btn-secondary btn-sm" @onclick="AddStyleOnly"
+                            disabled="@(string.IsNullOrWhiteSpace(_newStyleName) || string.IsNullOrWhiteSpace(_newStylePrompt))">
+                        Save without Thumbnail
+                    </button>
+
+                    @if (!string.IsNullOrEmpty(_newStyleTestSourcePath))
+                    {
+                        <button class="btn-secondary btn-sm" @onclick="ClearNewStylePreview" disabled="@_newStyleTestProcessing">
+                            &#10005; Clear Preview
+                        </button>
+                    }
+                </div>
+
+                @if (!string.IsNullOrEmpty(_styleMessage))
+                {
+                    <div style="margin-top: 0.5rem; color: var(--success); font-size: 0.82rem;">
+                        @_styleMessage
+                    </div>
+                }
+            </div>
+        </div>
+    </div>
+}
+
+@* ── Style Test Preview Modal ── *@
+@if (_testingStyleId is not null)
+{
+    <div class="style-test-overlay">
+        <div class="style-test-modal">
+            <div class="style-test-header">
+                <span>Test Style: @_testStyleName</span>
+                <button class="style-test-close" @onclick="DiscardTestResult" disabled="@_testProcessing">&times;</button>
+            </div>
+
+            <div class="style-test-body">
+                @* Left: source image *@
+                <div class="style-test-panel">
+                    <div class="style-test-panel-label">Source</div>
+                    <div class="style-test-image-wrap">
+                        @if (!string.IsNullOrEmpty(_testSourcePath))
+                        {
+                            <img src="/@_testSourcePath" alt="Source" />
+                        }
+                    </div>
+                </div>
+
+                @* Right: result *@
+                <div class="style-test-panel">
+                    <div class="style-test-panel-label">Result</div>
+                    <div class="style-test-image-wrap">
+                        @if (_testProcessing)
+                        {
+                            <div style="display:flex;flex-direction:column;align-items:center;gap:0.75rem;padding:2rem;">
+                                <div class="loading-spinner" style="width:36px;height:36px;margin:0;"></div>
+                                <span style="font-size:0.85rem;color:var(--text-muted);">Applying @_testStyleName style...</span>
+                            </div>
+                        }
+                        else if (!string.IsNullOrEmpty(_testResultPath))
+                        {
+                            <img src="@(ImageStorage.GetWebPath(_testResultPath))" alt="Result" />
+                        }
+                        else
+                        {
+                            <span style="color:var(--text-muted);font-size:0.85rem;">Waiting...</span>
+                        }
+                    </div>
+                </div>
+            </div>
+
+            @if (!string.IsNullOrEmpty(_testError))
+            {
+                <div style="padding:0.5rem 1rem;color:var(--danger);font-size:0.82rem;">@_testError</div>
+            }
+
+            @if (!_testProcessing && !string.IsNullOrEmpty(_testResultPath))
+            {
+                <div class="style-test-footer">
+                    <button class="btn-primary-gradient" @onclick="UseTestResultAsThumbnail">
+                        &#10003; Use as Thumbnail
+                    </button>
+                    <button class="btn-secondary" @onclick="DiscardTestResult">
+                        &#10005; Discard
+                    </button>
                 </div>
             }
         </div>
     </div>
-</div>
+}
 
 @code {
+    private string _activeTab = "general";
     private UserPreference _prefs = new();
     private bool _saving;
     private string? _message;
 
+    // Image sizes
+    private List<ImageSizeMaster> _allSizes = [];
+    private List<ImageSizeMaster> _activeSizes = [];
+    private string? _sizeMessage;
+
+    // Style presets
+    private List<StylePreset> _allStyles = [];
+    private string? _styleMessage;
+    private static readonly string[] _categoryOrder = ["Artistic", "Fun", "Professional", "Abstract", "Regional"];
+    private int? _generatingThumbnailId;
+    private string? _thumbnailMessage;
+
+    // Batch thumbnail generation
+    private bool _batchGenerating;
+    private int _batchTotal;
+    private int _batchCompleted;
+    private HashSet<int> _batchActiveIds = [];
+
+    // Style test preview state
+    private int? _testingStyleId;
+    private string _testStyleName = string.Empty;
+    private string? _testSourcePath;
+    private string? _testResultPath;
+    private bool _testProcessing;
+    private string? _testError;
+
+    // Add form
+    private string _newName = string.Empty;
+    private double _newWidth;
+    private double _newHeight;
+    private string _newUnit = "px";
+
+    // New style form
+    private string _newStyleName = string.Empty;
+    private string _newStyleDesc = string.Empty;
+    private string _newStyleCategory = "Artistic";
+    private string _newStyleEmoji = string.Empty;
+    private string _newStyleAccent = string.Empty;
+    private string _newStylePrompt = string.Empty;
+
+    // New style inline test preview
+    private string? _newStyleTestSourcePath;
+    private string? _newStyleTestResultPath;
+    private bool _newStyleTestProcessing;
+    private string? _newStyleTestError;
+
+    // Style edit state
+    private int? _editingStyleId;
+    private string _editStyleName = string.Empty;
+    private string _editStyleDesc = string.Empty;
+    private string _editStyleCategory = "Artistic";
+    private string _editStyleEmoji = string.Empty;
+    private string _editStyleAccent = string.Empty;
+    private string _editStylePrompt = string.Empty;
+    private bool _editStyleIsActive = true;
+
+    // Edit state
+    private int? _editingSizeId;
+    private string _editName = string.Empty;
+    private double _editWidth;
+    private double _editHeight;
+    private string _editUnit = "px";
+    private bool _editIsActive = true;
+
+    private const double Dpi = 96.0;
+
     protected override async Task OnInitializedAsync()
     {
         _prefs = await HistoryService.GetUserPreferencesAsync();
+        await LoadSizes();
+        await LoadStyles();
+    }
+
+    private async Task LoadSizes()
+    {
+        _allSizes = await SizeService.GetAllAsync();
+        _activeSizes = _allSizes.Where(s => s.IsActive).ToList();
+    }
+
+    private async Task LoadStyles()
+    {
+        _allStyles = (await StyleService.GetAllAsync())
+            .OrderBy(s => string.IsNullOrEmpty(s.ThumbnailPath) ? 0 : 1)
+            .ThenByDescending(s => s.Id)
+            .ToList();
     }
 
     private async Task ApplyTheme()
@@ -121,5 +713,544 @@
         {
             _saving = false;
         }
+    }
+
+    // -- Display helpers --
+
+    private static string FormatDisplay(ImageSizeMaster size)
+    {
+        var unit = size.Unit ?? "px";
+        if (unit == "px" || size.DisplayWidth <= 0)
+            return $"{size.Width}x{size.Height} px";
+
+        // Format: remove trailing zeros for clean display
+        var w = size.DisplayWidth == Math.Floor(size.DisplayWidth)
+            ? size.DisplayWidth.ToString("0") : size.DisplayWidth.ToString("0.##");
+        var h = size.DisplayHeight == Math.Floor(size.DisplayHeight)
+            ? size.DisplayHeight.ToString("0") : size.DisplayHeight.ToString("0.##");
+        return $"{w}x{h} {unit}";
+    }
+
+    // -- Unit conversion --
+
+    private static int ToPixels(double value, string unit) => unit switch
+    {
+        "in" => (int)Math.Round(value * Dpi),
+        "cm" => (int)Math.Round(value * Dpi / 2.54),
+        _ => (int)Math.Round(value)
+    };
+
+    private static double ConvertUnit(double value, string fromUnit, string toUnit)
+    {
+        if (fromUnit == toUnit) return value;
+        // Convert to px first, then to target unit
+        double px = fromUnit switch
+        {
+            "in" => value * Dpi,
+            "cm" => value * Dpi / 2.54,
+            _ => value
+        };
+        return toUnit switch
+        {
+            "in" => Math.Round(px / Dpi, 2),
+            "cm" => Math.Round(px / Dpi * 2.54, 2),
+            _ => Math.Round(px)
+        };
+    }
+
+    private void OnNewUnitChanged(ChangeEventArgs e)
+    {
+        var newUnit = e.Value?.ToString() ?? "px";
+        if (_newWidth > 0) _newWidth = ConvertUnit(_newWidth, _newUnit, newUnit);
+        if (_newHeight > 0) _newHeight = ConvertUnit(_newHeight, _newUnit, newUnit);
+        _newUnit = newUnit;
+    }
+
+    private void OnEditUnitChanged(ChangeEventArgs e)
+    {
+        var newUnit = e.Value?.ToString() ?? "px";
+        if (_editWidth > 0) _editWidth = ConvertUnit(_editWidth, _editUnit, newUnit);
+        if (_editHeight > 0) _editHeight = ConvertUnit(_editHeight, _editUnit, newUnit);
+        _editUnit = newUnit;
+    }
+
+    // -- Size CRUD --
+
+    private async Task AddSize()
+    {
+        if (string.IsNullOrWhiteSpace(_newName) || _newWidth <= 0 || _newHeight <= 0) return;
+
+        var size = new ImageSizeMaster
+        {
+            Name = _newName.Trim(),
+            Width = ToPixels(_newWidth, _newUnit),
+            Height = ToPixels(_newHeight, _newUnit),
+            Unit = _newUnit,
+            DisplayWidth = _newWidth,
+            DisplayHeight = _newHeight,
+            IsActive = true
+        };
+
+        await SizeService.CreateAsync(size);
+        _newName = string.Empty;
+        _newWidth = 0;
+        _newHeight = 0;
+        _newUnit = "px";
+        _sizeMessage = "Size added!";
+        await LoadSizes();
+    }
+
+    private void StartEdit(ImageSizeMaster size)
+    {
+        _editingSizeId = size.Id;
+        _editName = size.Name;
+        _editUnit = size.Unit ?? "px";
+        _editWidth = size.DisplayWidth > 0 ? size.DisplayWidth : size.Width;
+        _editHeight = size.DisplayHeight > 0 ? size.DisplayHeight : size.Height;
+        _editIsActive = size.IsActive;
+    }
+
+    private void CancelEdit()
+    {
+        _editingSizeId = null;
+    }
+
+    private async Task SaveEdit(int id)
+    {
+        var size = await SizeService.GetByIdAsync(id);
+        if (size is null) return;
+
+        size.Name = _editName.Trim();
+        size.Width = ToPixels(_editWidth, _editUnit);
+        size.Height = ToPixels(_editHeight, _editUnit);
+        size.Unit = _editUnit;
+        size.DisplayWidth = _editWidth;
+        size.DisplayHeight = _editHeight;
+        size.IsActive = _editIsActive;
+
+        await SizeService.UpdateAsync(size);
+        _editingSizeId = null;
+        _sizeMessage = "Size updated!";
+        await LoadSizes();
+    }
+
+    private async Task DeleteSize(int id)
+    {
+        await SizeService.DeleteAsync(id);
+        _sizeMessage = "Size deleted.";
+        await LoadSizes();
+    }
+
+    // -- Style CRUD --
+
+    private async Task AddStyleOnly()
+    {
+        if (string.IsNullOrWhiteSpace(_newStyleName) || string.IsNullOrWhiteSpace(_newStylePrompt)) return;
+
+        var preset = new StylePreset
+        {
+            Name = _newStyleName.Trim(),
+            Description = _newStyleDesc.Trim(),
+            PromptTemplate = _newStylePrompt.Trim(),
+            Category = _newStyleCategory,
+            IconEmoji = _newStyleEmoji.Trim(),
+            AccentColor = string.IsNullOrWhiteSpace(_newStyleAccent) ? null : _newStyleAccent.Trim(),
+            IsActive = false
+        };
+
+        await StyleService.CreateAsync(preset);
+        ClearNewStyleForm();
+        _styleMessage = "Style added!";
+        await LoadStyles();
+    }
+
+    private async Task AddStyleWithThumbnail()
+    {
+        if (string.IsNullOrWhiteSpace(_newStyleName) || string.IsNullOrWhiteSpace(_newStylePrompt)
+            || string.IsNullOrEmpty(_newStyleTestResultPath)) return;
+
+        var preset = new StylePreset
+        {
+            Name = _newStyleName.Trim(),
+            Description = _newStyleDesc.Trim(),
+            PromptTemplate = _newStylePrompt.Trim(),
+            Category = _newStyleCategory,
+            IconEmoji = _newStyleEmoji.Trim(),
+            AccentColor = string.IsNullOrWhiteSpace(_newStyleAccent) ? null : _newStyleAccent.Trim(),
+            IsActive = false,
+            ThumbnailPath = _newStyleTestResultPath
+        };
+
+        await StyleService.CreateAsync(preset);
+        ClearNewStyleForm();
+        _styleMessage = "Style added with thumbnail!";
+        await LoadStyles();
+    }
+
+    private void ClearNewStyleForm()
+    {
+        _newStyleName = string.Empty;
+        _newStyleDesc = string.Empty;
+        _newStyleCategory = "Artistic";
+        _newStyleEmoji = string.Empty;
+        _newStyleAccent = string.Empty;
+        _newStylePrompt = string.Empty;
+        ClearNewStylePreview();
+    }
+
+    private async Task TestNewStyle(InputFileChangeEventArgs e)
+    {
+        var file = e.File;
+        if (file is null || file.Size > 10 * 1024 * 1024
+            || string.IsNullOrWhiteSpace(_newStylePrompt) || _newStyleTestProcessing) return;
+
+        _newStyleTestResultPath = null;
+        _newStyleTestError = null;
+        _newStyleTestProcessing = true;
+        StateHasChanged();
+
+        try
+        {
+            // Save uploaded test image
+            using var stream = file.OpenReadStream(10 * 1024 * 1024);
+            _newStyleTestSourcePath = await ImageStorage.SaveUploadedFileAsync(stream, file.Name);
+            StateHasChanged();
+
+            // Run style transfer with the prompt template
+            var request = new GenerationRequest
+            {
+                Prompt = _newStylePrompt,
+                Width = 512,
+                Height = 512,
+                SizeName = "Square",
+                EnhancePrompt = false,
+                ReferenceImagePaths = [_newStyleTestSourcePath],
+                Provider = ImageProvider.Gemini
+            };
+
+            var result = await ImageGenService.GenerateImageAsync(request);
+
+            if (result.Success && !string.IsNullOrEmpty(result.LocalImagePath))
+            {
+                _newStyleTestResultPath = result.LocalImagePath;
+            }
+            else
+            {
+                _newStyleTestError = result.ErrorMessage ?? "Generation failed.";
+            }
+        }
+        catch (Exception ex)
+        {
+            _newStyleTestError = ex.Message;
+        }
+        finally
+        {
+            _newStyleTestProcessing = false;
+            StateHasChanged();
+        }
+    }
+
+    private void ClearNewStylePreview()
+    {
+        _newStyleTestSourcePath = null;
+        _newStyleTestResultPath = null;
+        _newStyleTestProcessing = false;
+        _newStyleTestError = null;
+    }
+
+    private void StartStyleEdit(StylePreset preset)
+    {
+        _editingStyleId = preset.Id;
+        _editStyleName = preset.Name;
+        _editStyleDesc = preset.Description;
+        _editStyleCategory = preset.Category;
+        _editStyleEmoji = preset.IconEmoji;
+        _editStyleAccent = preset.AccentColor ?? string.Empty;
+        _editStylePrompt = preset.PromptTemplate;
+        _editStyleIsActive = preset.IsActive;
+    }
+
+    private void CancelStyleEdit()
+    {
+        _editingStyleId = null;
+    }
+
+    private async Task SaveStyleEdit(int id)
+    {
+        var preset = await StyleService.GetByIdAsync(id);
+        if (preset is null) return;
+
+        preset.Name = _editStyleName.Trim();
+        preset.Description = _editStyleDesc.Trim();
+        preset.PromptTemplate = _editStylePrompt.Trim();
+        preset.Category = _editStyleCategory;
+        preset.IconEmoji = _editStyleEmoji.Trim();
+        preset.AccentColor = string.IsNullOrWhiteSpace(_editStyleAccent) ? null : _editStyleAccent.Trim();
+        preset.IsActive = _editStyleIsActive;
+
+        await StyleService.UpdateAsync(preset);
+        _editingStyleId = null;
+        _styleMessage = "Style updated!";
+        await LoadStyles();
+    }
+
+    private async Task DeleteStyle(int id)
+    {
+        await StyleService.DeleteAsync(id);
+        _styleMessage = "Style deleted.";
+        await LoadStyles();
+    }
+
+    private async Task ToggleStyleActive(StylePreset preset)
+    {
+        var entity = await StyleService.GetByIdAsync(preset.Id);
+        if (entity is null) return;
+
+        entity.IsActive = !entity.IsActive;
+        await StyleService.UpdateAsync(entity);
+        await LoadStyles();
+    }
+
+    private async Task UploadThumbnail(InputFileChangeEventArgs e, int presetId)
+    {
+        var file = e.File;
+        if (file is null || file.Size > 10 * 1024 * 1024) return;
+
+        _thumbnailMessage = "Uploading thumbnail...";
+        StateHasChanged();
+
+        try
+        {
+            using var stream = file.OpenReadStream(10 * 1024 * 1024);
+            var path = await ImageStorage.SaveUploadedFileAsync(stream, file.Name);
+
+            var entity = await StyleService.GetByIdAsync(presetId);
+            if (entity is not null)
+            {
+                entity.ThumbnailPath = path;
+                await StyleService.UpdateAsync(entity);
+            }
+
+            _thumbnailMessage = "Thumbnail uploaded!";
+            await LoadStyles();
+        }
+        catch (Exception ex)
+        {
+            _thumbnailMessage = $"Upload failed: {ex.Message}";
+        }
+
+        StateHasChanged();
+    }
+
+    private async Task TestStyle(InputFileChangeEventArgs e, StylePreset preset)
+    {
+        var file = e.File;
+        if (file is null || file.Size > 10 * 1024 * 1024 || _testingStyleId is not null) return;
+
+        _testingStyleId = preset.Id;
+        _testStyleName = preset.Name;
+        _testResultPath = null;
+        _testError = null;
+        _testProcessing = true;
+        StateHasChanged();
+
+        try
+        {
+            // Save uploaded test image
+            using var stream = file.OpenReadStream(10 * 1024 * 1024);
+            _testSourcePath = await ImageStorage.SaveUploadedFileAsync(stream, file.Name);
+            StateHasChanged();
+
+            // Run style transfer with the preset's prompt
+            var request = new GenerationRequest
+            {
+                Prompt = preset.PromptTemplate,
+                Width = 512,
+                Height = 512,
+                SizeName = "Square",
+                EnhancePrompt = false,
+                ReferenceImagePaths = [_testSourcePath],
+                Provider = ImageProvider.Gemini
+            };
+
+            var result = await ImageGenService.GenerateImageAsync(request);
+
+            if (result.Success && !string.IsNullOrEmpty(result.LocalImagePath))
+            {
+                _testResultPath = result.LocalImagePath;
+            }
+            else
+            {
+                _testError = result.ErrorMessage ?? "Generation failed.";
+            }
+        }
+        catch (Exception ex)
+        {
+            _testError = ex.Message;
+        }
+        finally
+        {
+            _testProcessing = false;
+            StateHasChanged();
+        }
+    }
+
+    private async Task UseTestResultAsThumbnail()
+    {
+        if (_testingStyleId is null || string.IsNullOrEmpty(_testResultPath)) return;
+
+        var entity = await StyleService.GetByIdAsync(_testingStyleId.Value);
+        if (entity is not null)
+        {
+            entity.ThumbnailPath = _testResultPath;
+            await StyleService.UpdateAsync(entity);
+        }
+
+        _thumbnailMessage = $"Thumbnail set for {_testStyleName}!";
+        _testingStyleId = null;
+        _testSourcePath = null;
+        _testResultPath = null;
+        _testError = null;
+        await LoadStyles();
+        StateHasChanged();
+    }
+
+    private void DiscardTestResult()
+    {
+        _testingStyleId = null;
+        _testSourcePath = null;
+        _testResultPath = null;
+        _testError = null;
+        StateHasChanged();
+    }
+
+    private async Task GenerateThumbnail(StylePreset preset)
+    {
+        if (_generatingThumbnailId is not null) return;
+
+        _generatingThumbnailId = preset.Id;
+        _thumbnailMessage = $"Generating thumbnail for {preset.Name}...";
+        StateHasChanged();
+
+        try
+        {
+            var request = new GenerationRequest
+            {
+                Prompt = $"A beautiful landscape, golden hour lighting. {preset.PromptTemplate}",
+                Width = 512,
+                Height = 512,
+                SizeName = "Square",
+                EnhancePrompt = false,
+                Provider = ImageProvider.Gemini
+            };
+
+            var result = await ImageGenService.GenerateImageAsync(request);
+
+            if (result.Success && !string.IsNullOrEmpty(result.LocalImagePath))
+            {
+                var entity = await StyleService.GetByIdAsync(preset.Id);
+                if (entity is not null)
+                {
+                    entity.ThumbnailPath = result.LocalImagePath;
+                    await StyleService.UpdateAsync(entity);
+                }
+                _thumbnailMessage = $"Thumbnail generated for {preset.Name}!";
+            }
+            else
+            {
+                _thumbnailMessage = $"Failed: {result.ErrorMessage}";
+            }
+        }
+        catch (Exception ex)
+        {
+            _thumbnailMessage = $"Error: {ex.Message}";
+        }
+        finally
+        {
+            _generatingThumbnailId = null;
+            await LoadStyles();
+            StateHasChanged();
+        }
+    }
+
+    private async Task GenerateAllThumbnails()
+    {
+        if (_batchGenerating) return;
+
+        // Get styles missing thumbnails
+        var pending = _allStyles
+            .Where(s => string.IsNullOrEmpty(s.ThumbnailPath))
+            .ToList();
+
+        if (pending.Count == 0)
+        {
+            _thumbnailMessage = "All styles already have thumbnails!";
+            StateHasChanged();
+            return;
+        }
+
+        _batchGenerating = true;
+        _batchTotal = pending.Count;
+        _batchCompleted = 0;
+        _batchActiveIds = [];
+        _thumbnailMessage = null;
+        StateHasChanged();
+
+        var semaphore = new SemaphoreSlim(8);
+        var tasks = pending.Select(async preset =>
+        {
+            await semaphore.WaitAsync();
+            try
+            {
+                // Mark as active on UI
+                lock (_batchActiveIds) { _batchActiveIds.Add(preset.Id); }
+                await InvokeAsync(StateHasChanged);
+
+                var request = new GenerationRequest
+                {
+                    Prompt = $"A beautiful landscape, golden hour lighting. {preset.PromptTemplate}",
+                    Width = 512,
+                    Height = 512,
+                    SizeName = "Square",
+                    EnhancePrompt = false,
+                    Provider = ImageProvider.Gemini
+                };
+
+                var result = await ImageGenService.GenerateImageAsync(request);
+
+                if (result.Success && !string.IsNullOrEmpty(result.LocalImagePath))
+                {
+                    var entity = await StyleService.GetByIdAsync(preset.Id);
+                    if (entity is not null)
+                    {
+                        entity.ThumbnailPath = result.LocalImagePath;
+                        await StyleService.UpdateAsync(entity);
+                    }
+                }
+            }
+            catch
+            {
+                // Skip failures silently during batch
+            }
+            finally
+            {
+                lock (_batchActiveIds) { _batchActiveIds.Remove(preset.Id); }
+                Interlocked.Increment(ref _batchCompleted);
+                await InvokeAsync(async () =>
+                {
+                    await LoadStyles();
+                    StateHasChanged();
+                });
+                semaphore.Release();
+            }
+        });
+
+        await Task.WhenAll(tasks);
+
+        _batchGenerating = false;
+        _batchActiveIds = [];
+        _thumbnailMessage = $"Done! Generated {_batchCompleted} thumbnails.";
+        await LoadStyles();
+        StateHasChanged();
     }
 }
