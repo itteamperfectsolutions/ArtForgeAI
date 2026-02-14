@@ -1,0 +1,716 @@
+@page "/mosaic-poster"
+@rendermode InteractiveServer
+@inject IImageStorageService ImageStorage
+@inject IJSRuntime JS
+@implements IDisposable
+
+<PageTitle>ArtForge AI - Mosaic Poster</PageTitle>
+
+<div class="page-header" style="margin-bottom: 0.5rem;">
+    <h2 style="font-size:1.3rem;">Mosaic Poster</h2>
+    <p style="font-size:0.82rem;">Create a stunning mosaic poster with your images</p>
+</div>
+
+<div class="create-layout">
+    @* ── Left column: controls ── *@
+    <div class="create-left">
+        <div class="card">
+            <div class="card-body" style="padding: 1rem 1.5rem;">
+
+                @* Hidden plain HTML file inputs — no Blazor InputFile *@
+                <input type="file" id="mosaicMainInput" accept="image/*" style="display:none;" />
+                <input type="file" id="mosaicBgInput" accept="image/*" multiple style="display:none;" />
+
+                @* Main Image Upload *@
+                <div class="mb-3">
+                    <label class="form-label">Main Image (Foreground)</label>
+                    @if (_mainImagePath is not null)
+                    {
+                        <div class="mosaic-main-thumb">
+                            <img src="/@_mainImagePath" alt="Main" />
+                            <button class="mosaic-thumb-remove" @onclick="RemoveMainImage" title="Remove">&#10005;</button>
+                        </div>
+                    }
+                    else
+                    {
+                        <div class="upload-area" style="cursor:pointer;" @onclick="ClickMainInput">
+                            <div class="upload-icon">&#128444;</div>
+                            <div style="font-size:0.82rem;">Click to upload main image</div>
+                        </div>
+                    }
+                </div>
+
+                @* Background Images Upload *@
+                <div class="mb-3">
+                    <label class="form-label">
+                        Background Images
+                        <span style="color:var(--text-muted); font-weight:400; font-size:0.75rem;">
+                            (@_bgImagePaths.Count / 60 — min 6)
+                        </span>
+                    </label>
+
+                    @if (_bgImagePaths.Count > 0)
+                    {
+                        <div class="mosaic-bg-grid">
+                            @for (int i = 0; i < Math.Min(_bgImagePaths.Count, 12); i++)
+                            {
+                                var idx = i;
+                                var path = _bgImagePaths[idx];
+                                <div class="mosaic-bg-thumb">
+                                    <img src="/@path" alt="BG @(idx + 1)" />
+                                    <button class="mosaic-thumb-remove" @onclick="() => RemoveBgImage(idx)" title="Remove">&#10005;</button>
+                                </div>
+                            }
+                            @if (_bgImagePaths.Count > 12)
+                            {
+                                <div class="mosaic-bg-count">+@(_bgImagePaths.Count - 12) more</div>
+                            }
+                        </div>
+                    }
+
+                    @if (_bgImagePaths.Count < 60)
+                    {
+                        <div class="upload-area upload-area-compact" style="cursor:pointer; margin-top:0.4rem;" @onclick="ClickBgInput">
+                            <span class="upload-icon">&#43;</span>
+                            <span style="font-size:0.82rem;">Add background images</span>
+                        </div>
+                    }
+                </div>
+
+                @* Canvas Size *@
+                <div class="mb-3">
+                    <label class="form-label">Canvas Size</label>
+                    <select class="form-input" @onchange="OnCanvasSizeChanged" disabled="@_isProcessing">
+                        @foreach (var size in _canvasSizes)
+                        {
+                            <option value="@size.Key" selected="@(size.Key == _selectedCanvasSize)">@size.Value.name</option>
+                        }
+                    </select>
+                </div>
+
+                @* Layout Mode *@
+                <div class="mb-3">
+                    <label class="form-label">Layout Mode</label>
+                    <div class="mosaic-layout-grid">
+                        @foreach (var layout in _layoutModes)
+                        {
+                            var l = layout;
+                            <button class="mosaic-layout-tile @(_selectedLayout == l.Key ? "selected" : "")"
+                                    @onclick="() => OnLayoutChanged(l.Key)"
+                                    disabled="@(!_isCanvasReady)">
+                                <span class="mosaic-layout-icon">@l.Value.icon</span>
+                                <span class="mosaic-layout-name">@l.Value.name</span>
+                            </button>
+                        }
+                    </div>
+                </div>
+
+                @* BG Settings *@
+                <div class="mb-3">
+                    <label class="form-label">Background Settings</label>
+
+                    <div class="mosaic-slider-row">
+                        <span>Gutter</span>
+                        <input type="range" min="0" max="20" step="1"
+                               value="@_settings.TileGutter"
+                               @onchange="OnGutterChanged"
+                               disabled="@(!_isCanvasReady)" />
+                        <span class="mosaic-slider-val">@_settings.TileGutter</span>
+                    </div>
+
+                    <div class="mosaic-slider-row">
+                        <span>Opacity</span>
+                        <input type="range" min="0.1" max="1" step="0.05"
+                               value="@_settings.BgOpacity.ToString(System.Globalization.CultureInfo.InvariantCulture)"
+                               @onchange="OnOpacityChanged"
+                               disabled="@(!_isCanvasReady)" />
+                        <span class="mosaic-slider-val">@_settings.BgOpacity.ToString("F2")</span>
+                    </div>
+
+                    <div class="mosaic-slider-row">
+                        <span>Blur</span>
+                        <input type="range" min="0" max="50" step="1"
+                               value="@_settings.BgBlurPx"
+                               @onchange="OnBlurChanged"
+                               disabled="@(!_isCanvasReady)" />
+                        <span class="mosaic-slider-val">@_settings.BgBlurPx</span>
+                    </div>
+
+                    <div class="mosaic-slider-row">
+                        <span>Saturation</span>
+                        <input type="range" min="-1" max="1" step="0.1"
+                               value="@_settings.BgSaturation.ToString(System.Globalization.CultureInfo.InvariantCulture)"
+                               @onchange="OnSaturationChanged"
+                               disabled="@(!_isCanvasReady)" />
+                        <span class="mosaic-slider-val">@_settings.BgSaturation.ToString("F1")</span>
+                    </div>
+
+                    <div class="mosaic-slider-row">
+                        <span>Brightness</span>
+                        <input type="range" min="-0.5" max="0.5" step="0.05"
+                               value="@_settings.BgBrightness.ToString(System.Globalization.CultureInfo.InvariantCulture)"
+                               @onchange="OnBrightnessChanged"
+                               disabled="@(!_isCanvasReady)" />
+                        <span class="mosaic-slider-val">@_settings.BgBrightness.ToString("F2")</span>
+                    </div>
+                </div>
+
+                @* Foreground Settings *@
+                <div class="mb-3">
+                    <label class="form-label">Foreground Settings</label>
+
+                    <div class="mosaic-slider-row">
+                        <span>Scale</span>
+                        <input type="range" min="0.2" max="0.8" step="0.05"
+                               value="@_settings.ForegroundScale.ToString(System.Globalization.CultureInfo.InvariantCulture)"
+                               @onchange="OnScaleChanged"
+                               disabled="@(!_isCanvasReady)" />
+                        <span class="mosaic-slider-val">@((_settings.ForegroundScale * 100).ToString("F0"))%</span>
+                    </div>
+
+                    <div class="mosaic-slider-row">
+                        <span>Border</span>
+                        <input type="range" min="0" max="40" step="2"
+                               value="@_settings.BorderWidth"
+                               @onchange="OnBorderChanged"
+                               disabled="@(!_isCanvasReady)" />
+                        <span class="mosaic-slider-val">@_settings.BorderWidth</span>
+                    </div>
+
+                    <div class="mosaic-slider-row">
+                        <span>Corners</span>
+                        <input type="range" min="0" max="40" step="2"
+                               value="@_settings.CornerRadius"
+                               @onchange="OnCornerRadiusChanged"
+                               disabled="@(!_isCanvasReady)" />
+                        <span class="mosaic-slider-val">@_settings.CornerRadius</span>
+                    </div>
+                </div>
+
+                @* Quick Presets *@
+                <div class="mb-3">
+                    <label class="form-label">Quick Presets</label>
+                    <div class="mosaic-presets">
+                        <button class="btn-secondary" @onclick='() => ApplyPreset("classicGrid")' disabled="@(!_isCanvasReady)">
+                            &#9632; Classic Grid
+                        </button>
+                        <button class="btn-secondary" @onclick='() => ApplyPreset("premiumMasonry")' disabled="@(!_isCanvasReady)">
+                            &#9638; Premium Masonry
+                        </button>
+                        <button class="btn-secondary" @onclick='() => ApplyPreset("festivePolaroid")' disabled="@(!_isCanvasReady)">
+                            &#127881; Festive Polaroid
+                        </button>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        @if (!string.IsNullOrEmpty(_errorMessage))
+        {
+            <div class="card" style="margin-top: 0.75rem; border-left: 3px solid var(--danger);">
+                <div class="card-body" style="padding: 0.75rem 1rem; color: var(--danger); font-size: 0.85rem;">
+                    <strong>Error:</strong> @_errorMessage
+                </div>
+            </div>
+        }
+    </div>
+
+    @* ── Right column: canvas preview + export ── *@
+    <div class="create-right">
+        @if (_isCanvasReady)
+        {
+            <div class="right-panel-card">
+                <div class="right-panel-label">Mosaic Preview</div>
+                <div class="mosaic-canvas-wrap">
+                    <canvas id="mosaicCanvas"></canvas>
+                </div>
+                <div class="right-panel-actions">
+                    <button class="btn-primary-gradient" @onclick="ExportPng" disabled="@_isProcessing">
+                        &#11015; Download PNG
+                    </button>
+                    <button class="btn-secondary" @onclick="ExportZip" disabled="@_isProcessing">
+                        &#128230; Download BG ZIP
+                    </button>
+                    <button class="btn-secondary" @onclick="ExportMetadata" disabled="@_isProcessing">
+                        &#128196; Metadata JSON
+                    </button>
+                </div>
+            </div>
+        }
+        else
+        {
+            <div class="right-panel-empty">
+                <div class="empty-icon">&#129513;</div>
+                <p>
+                    @if (_mainImagePath is null)
+                    {
+                        <span>Upload a main image and at least 6 background images to get started</span>
+                    }
+                    else if (_bgImagePaths.Count < 6)
+                    {
+                        <span>Add @(6 - _bgImagePaths.Count) more background image@(6 - _bgImagePaths.Count == 1 ? "" : "s") to create your mosaic</span>
+                    }
+                </p>
+            </div>
+        }
+    </div>
+</div>
+
+<Toast @ref="_toast" />
+
+@code {
+    private string? _mainImagePath;
+    private List<string> _bgImagePaths = new();
+    private string _selectedCanvasSize = "poster";
+    private string _selectedLayout = "grid";
+    private bool _isCanvasReady;
+    private bool _isProcessing;
+    private string? _errorMessage;
+    private Toast? _toast;
+    private bool _pendingInit;
+
+    private MosaicSettings _settings = new();
+    private DotNetObjectReference<MosaicPoster>? _dotNetRef;
+
+    protected override async Task OnAfterRenderAsync(bool firstRender)
+    {
+        if (firstRender)
+        {
+            _dotNetRef = DotNetObjectReference.Create(this);
+            await JS.InvokeVoidAsync("mosaicFileHelper.register", "mosaicMainInput", _dotNetRef, "OnMainFilesReceived");
+            await JS.InvokeVoidAsync("mosaicFileHelper.register", "mosaicBgInput", _dotNetRef, "OnBgFilesReceived");
+        }
+        if (_pendingInit)
+        {
+            _pendingInit = false;
+            await InitCanvas();
+        }
+    }
+
+    public void Dispose()
+    {
+        _dotNetRef?.Dispose();
+    }
+
+    // Canvas sizes
+    private static readonly Dictionary<string, (string name, int w, int h)> _canvasSizes = new()
+    {
+        ["a4portrait"] = ("A4 Portrait (2480×3508)", 2480, 3508),
+        ["a4landscape"] = ("A4 Landscape (3508×2480)", 3508, 2480),
+        ["square"] = ("Square (3000×3000)", 3000, 3000),
+        ["poster"] = ("Poster (3000×2000)", 3000, 2000)
+    };
+
+    // Layout modes
+    private static readonly Dictionary<string, (string name, string icon)> _layoutModes = new()
+    {
+        ["grid"] = ("Grid", "&#9632;"),
+        ["masonry"] = ("Masonry", "&#9638;"),
+        ["polaroid"] = ("Polaroid", "&#128247;"),
+        ["hex"] = ("Hex", "&#11042;")
+    };
+
+    private async Task ClickMainInput()
+    {
+        await JS.InvokeVoidAsync("mosaicFileHelper.click", "mosaicMainInput");
+    }
+
+    private async Task ClickBgInput()
+    {
+        await JS.InvokeVoidAsync("mosaicFileHelper.click", "mosaicBgInput");
+    }
+
+    [JSInvokable]
+    public async Task OnMainFilesReceived(List<FileData> files)
+    {
+        if (files is null || files.Count == 0) return;
+        _errorMessage = null;
+        try
+        {
+            var f = files[0];
+            var ext = Path.GetExtension(f.Name);
+            if (string.IsNullOrEmpty(ext)) ext = ".png";
+            var fileName = $"mosaic_main_{Guid.NewGuid():N}{ext}";
+            var bytes = Convert.FromBase64String(f.Base64);
+            using var ms = new MemoryStream(bytes);
+            _mainImagePath = await ImageStorage.SaveUploadedFileAsync(ms, fileName);
+            TryScheduleInit();
+        }
+        catch (Exception ex)
+        {
+            _errorMessage = $"Upload failed: {ex.Message}";
+        }
+        StateHasChanged();
+    }
+
+    [JSInvokable]
+    public async Task OnBgFilesReceived(List<FileData> files)
+    {
+        if (files is null || files.Count == 0) return;
+        _errorMessage = null;
+        try
+        {
+            foreach (var f in files)
+            {
+                if (_bgImagePaths.Count >= 60) break;
+                var ext = Path.GetExtension(f.Name);
+                if (string.IsNullOrEmpty(ext)) ext = ".png";
+                var fileName = $"mosaic_bg_{Guid.NewGuid():N}{ext}";
+                var bytes = Convert.FromBase64String(f.Base64);
+                using var ms = new MemoryStream(bytes);
+                var path = await ImageStorage.SaveUploadedFileAsync(ms, fileName);
+                _bgImagePaths.Add(path);
+            }
+            TryScheduleInit();
+        }
+        catch (Exception ex)
+        {
+            _errorMessage = $"Upload failed: {ex.Message}";
+        }
+        StateHasChanged();
+    }
+
+    public class FileData
+    {
+        public string Name { get; set; } = "";
+        public string Base64 { get; set; } = "";
+    }
+
+    private void RemoveMainImage()
+    {
+        _mainImagePath = null;
+        _isCanvasReady = false;
+    }
+
+    private async Task RemoveBgImage(int index)
+    {
+        if (index >= 0 && index < _bgImagePaths.Count)
+        {
+            _bgImagePaths.RemoveAt(index);
+            if (_bgImagePaths.Count < 6)
+            {
+                _isCanvasReady = false;
+            }
+            else if (_isCanvasReady)
+            {
+                await UpdateCanvas();
+            }
+        }
+    }
+
+    // ── Slider Handlers ──
+
+    private async Task OnGutterChanged(ChangeEventArgs e)
+    {
+        if (int.TryParse(e.Value?.ToString(), out var val)) _settings.TileGutter = val;
+        await UpdateCanvasLayout();
+    }
+
+    private async Task OnOpacityChanged(ChangeEventArgs e)
+    {
+        if (double.TryParse(e.Value?.ToString(), System.Globalization.CultureInfo.InvariantCulture, out var val)) _settings.BgOpacity = val;
+        await UpdateCanvasLayout();
+    }
+
+    private async Task OnBlurChanged(ChangeEventArgs e)
+    {
+        if (int.TryParse(e.Value?.ToString(), out var val)) _settings.BgBlurPx = val;
+        await UpdateCanvasLayout();
+    }
+
+    private async Task OnSaturationChanged(ChangeEventArgs e)
+    {
+        if (double.TryParse(e.Value?.ToString(), System.Globalization.CultureInfo.InvariantCulture, out var val)) _settings.BgSaturation = val;
+        await UpdateCanvasLayout();
+    }
+
+    private async Task OnBrightnessChanged(ChangeEventArgs e)
+    {
+        if (double.TryParse(e.Value?.ToString(), System.Globalization.CultureInfo.InvariantCulture, out var val)) _settings.BgBrightness = val;
+        await UpdateCanvasLayout();
+    }
+
+    private async Task OnScaleChanged(ChangeEventArgs e)
+    {
+        if (double.TryParse(e.Value?.ToString(), System.Globalization.CultureInfo.InvariantCulture, out var val)) _settings.ForegroundScale = val;
+        await UpdateCanvasLayout();
+    }
+
+    private async Task OnBorderChanged(ChangeEventArgs e)
+    {
+        if (int.TryParse(e.Value?.ToString(), out var val)) _settings.BorderWidth = val;
+        await UpdateCanvasLayout();
+    }
+
+    private async Task OnCornerRadiusChanged(ChangeEventArgs e)
+    {
+        if (int.TryParse(e.Value?.ToString(), out var val)) _settings.CornerRadius = val;
+        await UpdateCanvasLayout();
+    }
+
+    private async Task OnCanvasSizeChanged(ChangeEventArgs e)
+    {
+        _selectedCanvasSize = e.Value?.ToString() ?? "poster";
+        if (_isCanvasReady)
+        {
+            await InitCanvas();
+        }
+    }
+
+    private void OnLayoutChanged(string layout)
+    {
+        _selectedLayout = layout;
+        if (_isCanvasReady)
+        {
+            _ = UpdateCanvasLayout();
+        }
+    }
+
+    private void TryScheduleInit()
+    {
+        if (_mainImagePath is not null && _bgImagePaths.Count >= 6 && !_isCanvasReady)
+        {
+            _pendingInit = true;
+        }
+    }
+
+    private async Task InitCanvas()
+    {
+        _isProcessing = true;
+        _errorMessage = null;
+        StateHasChanged();
+
+        try
+        {
+            var size = _canvasSizes[_selectedCanvasSize];
+            _isCanvasReady = true;
+            StateHasChanged();
+
+            // Wait for DOM to render the canvas element
+            await Task.Delay(100);
+
+            await JS.InvokeVoidAsync("mosaicPoster.init", "mosaicCanvas", size.w, size.h);
+
+            // Load main image
+            var mainUrl = "/" + _mainImagePath;
+            await JS.InvokeVoidAsync("mosaicPoster.setMainImage", mainUrl);
+
+            // Load BG images
+            var bgUrls = _bgImagePaths.Select(p => "/" + p).ToArray();
+            await JS.InvokeAsync<object>("mosaicPoster.setBgImages", (object)bgUrls);
+
+            // Apply layout with settings
+            await JS.InvokeVoidAsync("mosaicPoster.setLayout", _selectedLayout, _buildJsSettings());
+
+            if (_toast is not null)
+                _ = _toast.ShowAsync("Mosaic canvas ready!");
+        }
+        catch (Exception ex)
+        {
+            _errorMessage = $"Canvas initialization failed: {ex.Message}";
+            _isCanvasReady = false;
+        }
+        finally
+        {
+            _isProcessing = false;
+            StateHasChanged();
+        }
+    }
+
+    private async Task UpdateCanvas()
+    {
+        if (!_isCanvasReady) return;
+
+        try
+        {
+            // Reload BG images in case they changed
+            var bgUrls = _bgImagePaths.Select(p => "/" + p).ToArray();
+            await JS.InvokeAsync<object>("mosaicPoster.setBgImages", (object)bgUrls);
+            await JS.InvokeVoidAsync("mosaicPoster.updateSettings", _buildJsSettings());
+        }
+        catch (Exception ex)
+        {
+            _errorMessage = $"Update failed: {ex.Message}";
+        }
+    }
+
+    private async Task UpdateCanvasLayout()
+    {
+        if (!_isCanvasReady) return;
+        try
+        {
+            await JS.InvokeVoidAsync("mosaicPoster.setLayout", _selectedLayout, _buildJsSettings());
+        }
+        catch (Exception ex)
+        {
+            _errorMessage = $"Layout update failed: {ex.Message}";
+        }
+    }
+
+    private async Task ApplyPreset(string presetName)
+    {
+        if (!_isCanvasReady) return;
+
+        try
+        {
+            await JS.InvokeVoidAsync("mosaicPoster.applyPreset", presetName);
+
+            // Sync local settings with preset values
+            switch (presetName)
+            {
+                case "classicGrid":
+                    _selectedLayout = "grid";
+                    _settings = new MosaicSettings
+                    {
+                        TileGutter = 4, BgOpacity = 0.9, BgBlurPx = 0, BgSaturation = 0, BgBrightness = 0,
+                        ForegroundScale = 0.45, BorderWidth = 12, CornerRadius = 12
+                    };
+                    break;
+                case "premiumMasonry":
+                    _selectedLayout = "masonry";
+                    _settings = new MosaicSettings
+                    {
+                        TileGutter = 6, BgOpacity = 0.6, BgBlurPx = 15, BgSaturation = -0.3, BgBrightness = -0.1,
+                        ForegroundScale = 0.5, BorderWidth = 16, CornerRadius = 20
+                    };
+                    break;
+                case "festivePolaroid":
+                    _selectedLayout = "polaroid";
+                    _settings = new MosaicSettings
+                    {
+                        TileGutter = 0, BgOpacity = 1, BgBlurPx = 0, BgSaturation = 0.2, BgBrightness = 0.05,
+                        ForegroundScale = 0.4, BorderWidth = 20, CornerRadius = 8
+                    };
+                    break;
+            }
+            StateHasChanged();
+        }
+        catch (Exception ex)
+        {
+            _errorMessage = $"Preset failed: {ex.Message}";
+        }
+    }
+
+    private async Task ExportPng()
+    {
+        if (!_isCanvasReady || _isProcessing) return;
+        _isProcessing = true;
+        StateHasChanged();
+
+        try
+        {
+            var dataUrl = await JS.InvokeAsync<string>("mosaicPoster.exportComposite");
+            if (!string.IsNullOrEmpty(dataUrl))
+            {
+                // dataUrl is "data:image/png;base64,..."
+                var base64 = dataUrl.Substring(dataUrl.IndexOf(",") + 1);
+                var fileName = $"mosaic_poster_{DateTime.Now:yyyyMMdd_HHmmss}.png";
+                await JS.InvokeVoidAsync("downloadFileFromBytes", fileName, "image/png", base64);
+
+                if (_toast is not null)
+                    _ = _toast.ShowAsync("PNG downloaded!");
+            }
+        }
+        catch (Exception ex)
+        {
+            _errorMessage = $"Export failed: {ex.Message}";
+        }
+        finally
+        {
+            _isProcessing = false;
+            StateHasChanged();
+        }
+    }
+
+    private async Task ExportZip()
+    {
+        if (!_isCanvasReady || _isProcessing) return;
+        _isProcessing = true;
+        StateHasChanged();
+
+        try
+        {
+            var base64 = await JS.InvokeAsync<string>("mosaicPoster.exportNormalizedZip");
+            if (!string.IsNullOrEmpty(base64))
+            {
+                var fileName = $"mosaic_bg_tiles_{DateTime.Now:yyyyMMdd_HHmmss}.zip";
+                await JS.InvokeVoidAsync("downloadFileFromBytes", fileName, "application/zip", base64);
+
+                if (_toast is not null)
+                    _ = _toast.ShowAsync("ZIP downloaded!");
+            }
+        }
+        catch (Exception ex)
+        {
+            _errorMessage = $"Export failed: {ex.Message}";
+        }
+        finally
+        {
+            _isProcessing = false;
+            StateHasChanged();
+        }
+    }
+
+    private async Task ExportMetadata()
+    {
+        if (!_isCanvasReady || _isProcessing) return;
+        _isProcessing = true;
+        StateHasChanged();
+
+        try
+        {
+            var json = await JS.InvokeAsync<string>("mosaicPoster.exportMetadata");
+            if (!string.IsNullOrEmpty(json))
+            {
+                var base64 = Convert.ToBase64String(System.Text.Encoding.UTF8.GetBytes(json));
+                var fileName = $"mosaic_metadata_{DateTime.Now:yyyyMMdd_HHmmss}.json";
+                await JS.InvokeVoidAsync("downloadFileFromBytes", fileName, "application/json", base64);
+
+                if (_toast is not null)
+                    _ = _toast.ShowAsync("Metadata exported!");
+            }
+        }
+        catch (Exception ex)
+        {
+            _errorMessage = $"Export failed: {ex.Message}";
+        }
+        finally
+        {
+            _isProcessing = false;
+            StateHasChanged();
+        }
+    }
+
+    private object _buildJsSettings() => new
+    {
+        layout = _selectedLayout,
+        tileGutter = _settings.TileGutter,
+        bgOpacity = _settings.BgOpacity,
+        bgBlurPx = _settings.BgBlurPx,
+        bgSaturation = _settings.BgSaturation,
+        bgBrightness = _settings.BgBrightness,
+        bgTintColor = _settings.BgTintColor,
+        bgTintOpacity = _settings.BgTintOpacity,
+        foregroundScale = _settings.ForegroundScale,
+        borderWidth = _settings.BorderWidth,
+        cornerRadius = _settings.CornerRadius,
+        shadowBlur = 40,
+        shadowOffsetX = 0,
+        shadowOffsetY = 8,
+        shadowColor = "rgba(0,0,0,0.5)"
+    };
+
+    private class MosaicSettings
+    {
+        public int TileGutter { get; set; } = 4;
+        public double BgOpacity { get; set; } = 0.85;
+        public int BgBlurPx { get; set; } = 0;
+        public double BgSaturation { get; set; } = 0;
+        public double BgBrightness { get; set; } = 0;
+        public string BgTintColor { get; set; } = "";
+        public double BgTintOpacity { get; set; } = 0;
+        public double ForegroundScale { get; set; } = 0.45;
+        public int BorderWidth { get; set; } = 12;
+        public int CornerRadius { get; set; } = 16;
+    }
+}

@@ -7,10 +7,25 @@
         <h1>ArtForge AI</h1>
     </div>
 
-    <div class="sidebar-nav">
+    <div class="sidebar-nav" onclick="if(window.innerWidth<=768)toggleSidebar()">
         <NavLink class="nav-item" href="" Match="NavLinkMatch.All">
             <span class="nav-icon">&#127912;</span>
             Create
+        </NavLink>
+
+        <NavLink class="nav-item" href="style-transfer">
+            <span class="nav-icon">&#10024;</span>
+            Style Transfer
+        </NavLink>
+
+        <NavLink class="nav-item" href="quick-style">
+            <span class="nav-icon">&#9889;</span>
+            Quick Style
+        </NavLink>
+
+        <NavLink class="nav-item" href="mosaic-poster">
+            <span class="nav-icon">&#129513;</span>
+            Mosaic Poster
         </NavLink>
 
         <NavLink class="nav-item" href="gallery">
