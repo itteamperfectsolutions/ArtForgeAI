@@ -64,7 +64,7 @@ public class ImageGenerationService : IImageGenerationService
                 if (request.EnhancePrompt)
                 {
                     var enhancement = await _promptEnhancer.EnhanceForImageEditAsync(
-                        request.Prompt, request.Provider, request.ReferenceImagePaths.Count);
+                        request.Prompt, request.Provider, request.ReferenceImagePaths.Count, request.ReferenceImagePaths);
                     if (enhancement.Success)
                         localEnhanced = enhancement.EnhancedPrompt;
                 }
@@ -116,7 +116,7 @@ public class ImageGenerationService : IImageGenerationService
                     }
                 }
 
-                (localPath, imageUrl) = await GenerateTextToImageAsync(finalPrompt, request.Size);
+                (localPath, imageUrl) = await GenerateTextToImageAsync(finalPrompt, request.Width, request.Height);
             }
 
             // Save to history (store all reference paths joined by semicolon)
@@ -131,7 +131,7 @@ public class ImageGenerationService : IImageGenerationService
                 ReferenceImagePath = Truncate(refPaths, 500),
                 GeneratedImageUrl = Truncate(imageUrl, 2000),
                 LocalImagePath = Truncate(localPath, 500),
-                ImageSize = request.Size.ToString(),
+                ImageSize = request.SizeName,
                 IsSuccess = true
             };
 
@@ -161,7 +161,7 @@ public class ImageGenerationService : IImageGenerationService
                 OriginalPrompt = Truncate(request.Prompt, 2000)!,
                 EnhancedPrompt = Truncate(enhancedPrompt, 4000),
                 ReferenceImagePath = Truncate(errRefPaths, 500),
-                ImageSize = request.Size.ToString(),
+                ImageSize = request.SizeName,
                 IsSuccess = false,
                 ErrorMessage = Truncate(errorMsg, 1000)
             };
@@ -188,7 +188,7 @@ public class ImageGenerationService : IImageGenerationService
         {
             var enhancement = request.HasReferenceImages
                 ? await _promptEnhancer.EnhanceForImageEditAsync(
-                    request.Prompt, request.Provider, request.ReferenceImagePaths.Count)
+                    request.Prompt, request.Provider, request.ReferenceImagePaths.Count, request.ReferenceImagePaths)
                 : await _promptEnhancer.EnhancePromptAsync(request.Prompt, request.Provider);
 
             if (enhancement.Success)
@@ -205,12 +205,11 @@ public class ImageGenerationService : IImageGenerationService
                         + finalPrompt;
         }
 
-        byte[] imageBytes;
-
+        // Pre-load reference images (used for both attempts)
+        List<(byte[] data, string mimeType)>? images = null;
         if (request.HasReferenceImages)
         {
-            // Load all reference images
-            var images = new List<(byte[] data, string mimeType)>();
+            images = new List<(byte[] data, string mimeType)>();
             foreach (var refPath in request.ReferenceImagePaths)
             {
                 var fullPath = Path.Combine(_env.WebRootPath,
@@ -230,14 +229,38 @@ public class ImageGenerationService : IImageGenerationService
                 };
                 images.Add((refBytes, mimeType));
             }
-
-            _logger.LogInformation("Sending image-to-image request to Gemini with {Count} reference images", images.Count);
-            (_, imageBytes) = await _geminiImageService.EditImageAsync(finalPrompt, images, request.Size);
         }
-        else
+
+        byte[] imageBytes;
+
+        try
         {
-            _logger.LogInformation("Sending text-to-image request to Gemini");
-            (_, imageBytes) = await _geminiImageService.GenerateImageAsync(finalPrompt, request.Size);
+            if (images is not null)
+            {
+                _logger.LogInformation("Sending image-to-image request to Gemini with {Count} reference images", images.Count);
+                (_, imageBytes) = await _geminiImageService.EditImageAsync(finalPrompt, images, request.Width, request.Height);
+            }
+            else
+            {
+                _logger.LogInformation("Sending text-to-image request to Gemini");
+                (_, imageBytes) = await _geminiImageService.GenerateImageAsync(finalPrompt, request.Width, request.Height);
+            }
+        }
+        catch (InvalidOperationException ex) when (request.EnhancePrompt && finalPrompt != request.Prompt)
+        {
+            // Enhanced prompt failed — retry with original user prompt
+            _logger.LogWarning(ex, "Gemini failed with enhanced prompt, retrying with original prompt");
+
+            if (images is not null)
+            {
+                (_, imageBytes) = await _geminiImageService.EditImageAsync(request.Prompt, images, request.Width, request.Height);
+            }
+            else
+            {
+                (_, imageBytes) = await _geminiImageService.GenerateImageAsync(request.Prompt, request.Width, request.Height);
+            }
+
+            enhancedPrompt = $"[Retry with original] {request.Prompt}";
         }
 
         var fileName = $"{Guid.NewGuid():N}.png";
@@ -259,7 +282,7 @@ public class ImageGenerationService : IImageGenerationService
         {
             var enhancement = request.HasReferenceImages
                 ? await _promptEnhancer.EnhanceForImageEditAsync(
-                    request.Prompt, request.Provider, request.ReferenceImagePaths.Count)
+                    request.Prompt, request.Provider, request.ReferenceImagePaths.Count, request.ReferenceImagePaths)
                 : await _promptEnhancer.EnhancePromptAsync(request.Prompt, request.Provider);
 
             if (enhancement.Success)
@@ -291,12 +314,12 @@ public class ImageGenerationService : IImageGenerationService
             };
 
             _logger.LogInformation("Sending image-guided request to Replicate (first of {Count} reference images)", request.ReferenceImagePaths.Count);
-            imageBytes = await _replicateImageService.EditImageAsync(finalPrompt, refBytes, mimeType, request.Size);
+            imageBytes = await _replicateImageService.EditImageAsync(finalPrompt, refBytes, mimeType, request.Width, request.Height);
         }
         else
         {
             _logger.LogInformation("Sending text-to-image request to Replicate");
-            imageBytes = await _replicateImageService.GenerateImageAsync(finalPrompt, request.Size);
+            imageBytes = await _replicateImageService.GenerateImageAsync(finalPrompt, request.Width, request.Height);
         }
 
         var fileName = $"{Guid.NewGuid():N}.png";
@@ -321,7 +344,7 @@ public class ImageGenerationService : IImageGenerationService
         if (request.EnhancePrompt)
         {
             var enhancement = await _promptEnhancer.EnhanceForImageEditAsync(
-                request.Prompt, request.Provider, request.ReferenceImagePaths.Count);
+                request.Prompt, request.Provider, request.ReferenceImagePaths.Count, request.ReferenceImagePaths);
             if (enhancement.Success)
             {
                 editPrompt = enhancement.EnhancedPrompt;
@@ -333,7 +356,7 @@ public class ImageGenerationService : IImageGenerationService
         try
         {
             _logger.LogInformation("Attempting gpt-image-1 edit with enhanced prompt");
-            var localPath = await GenerateWithEditAsync(editPrompt, request.ReferenceImagePath!, request.Size);
+            var localPath = await GenerateWithEditAsync(editPrompt, request.ReferenceImagePath!, request.Width, request.Height);
             return (localPath, null, enhancedPrompt);
         }
         catch (Exception ex) when (ex.Message.Contains("content_policy", StringComparison.OrdinalIgnoreCase))
@@ -350,7 +373,7 @@ public class ImageGenerationService : IImageGenerationService
         {
             var safePrompt = StripIdentityLanguage(request.Prompt);
             _logger.LogInformation("Retrying gpt-image-1 edit with simplified prompt");
-            var localPath = await GenerateWithEditAsync(safePrompt, request.ReferenceImagePath!, request.Size);
+            var localPath = await GenerateWithEditAsync(safePrompt, request.ReferenceImagePath!, request.Width, request.Height);
             enhancedPrompt = safePrompt;
             return (localPath, null, enhancedPrompt);
         }
@@ -371,7 +394,7 @@ public class ImageGenerationService : IImageGenerationService
             }
         }
 
-        var (fallbackPath, fallbackUrl) = await GenerateTextToImageAsync(editPrompt, request.Size);
+        var (fallbackPath, fallbackUrl) = await GenerateTextToImageAsync(editPrompt, request.Width, request.Height);
         return (fallbackPath, fallbackUrl, enhancedPrompt);
     }
 
@@ -418,7 +441,7 @@ public class ImageGenerationService : IImageGenerationService
     /// gpt-image-1 edit endpoint — sends the actual reference image pixels to the model.
     /// The model "sees" the real image and can preserve identity, facial features, etc.
     /// </summary>
-    private async Task<string> GenerateWithEditAsync(string prompt, string referenceImagePath, ImageSize size)
+    private async Task<string> GenerateWithEditAsync(string prompt, string referenceImagePath, int width, int height)
     {
         var fullPath = Path.Combine(_env.WebRootPath,
             referenceImagePath.Replace("/", Path.DirectorySeparatorChar.ToString()));
@@ -427,12 +450,7 @@ public class ImageGenerationService : IImageGenerationService
             throw new FileNotFoundException("Reference image not found.", fullPath);
 
 #pragma warning disable OPENAI001
-        var imageSize = size switch
-        {
-            ImageSize.Landscape => GeneratedImageSize.W1536xH1024,
-            ImageSize.Portrait => GeneratedImageSize.W1024xH1536,
-            _ => GeneratedImageSize.W1024xH1024
-        };
+        var imageSize = MapToEditSize(width, height);
 #pragma warning restore OPENAI001
 
         var options = new ImageEditOptions
@@ -456,14 +474,9 @@ public class ImageGenerationService : IImageGenerationService
     /// <summary>
     /// DALL-E 3 text-to-image generation.
     /// </summary>
-    private async Task<(string localPath, string imageUrl)> GenerateTextToImageAsync(string prompt, ImageSize size)
+    private async Task<(string localPath, string imageUrl)> GenerateTextToImageAsync(string prompt, int width, int height)
     {
-        var imageSize = size switch
-        {
-            ImageSize.Landscape => GeneratedImageSize.W1792xH1024,
-            ImageSize.Portrait => GeneratedImageSize.W1024xH1792,
-            _ => GeneratedImageSize.W1024xH1024
-        };
+        var imageSize = MapToGenerateSize(width, height);
 
         var options = new ImageGenerationOptions
         {
@@ -483,4 +496,24 @@ public class ImageGenerationService : IImageGenerationService
 
     private static string? Truncate(string? value, int maxLength) =>
         value is not null && value.Length > maxLength ? value[..maxLength] : value;
+
+    /// <summary>Map width/height to the closest DALL-E 3 text-to-image size.</summary>
+    private static GeneratedImageSize MapToGenerateSize(int width, int height)
+    {
+        var ratio = (double)width / height;
+        if (ratio > 1.2) return GeneratedImageSize.W1792xH1024;   // landscape
+        if (ratio < 0.8) return GeneratedImageSize.W1024xH1792;   // portrait
+        return GeneratedImageSize.W1024xH1024;                     // square
+    }
+
+    /// <summary>Map width/height to the closest gpt-image-1 edit size.</summary>
+    private static GeneratedImageSize MapToEditSize(int width, int height)
+    {
+        var ratio = (double)width / height;
+#pragma warning disable OPENAI001
+        if (ratio > 1.2) return GeneratedImageSize.W1536xH1024;   // landscape
+        if (ratio < 0.8) return GeneratedImageSize.W1024xH1536;   // portrait
+#pragma warning restore OPENAI001
+        return GeneratedImageSize.W1024xH1024;                     // square
+    }
 }

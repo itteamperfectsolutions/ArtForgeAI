@@ -19,7 +19,8 @@ public interface IPromptEnhancerService
     /// explicitly instructs the model to combine subjects from all reference images.
     /// </summary>
     Task<PromptEnhancementResult> EnhanceForImageEditAsync(
-        string rawPrompt, ImageProvider provider, int referenceImageCount = 1);
+        string rawPrompt, ImageProvider provider, int referenceImageCount = 1,
+        List<string>? referenceImagePaths = null);
 
     /// <summary>
     /// Returns true if the prompt is a pure background removal request

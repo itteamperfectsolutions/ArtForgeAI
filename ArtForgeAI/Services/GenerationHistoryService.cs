@@ -6,23 +6,24 @@ namespace ArtForgeAI.Services;
 
 public class GenerationHistoryService : IGenerationHistoryService
 {
-    private readonly AppDbContext _db;
+    private readonly IDbContextFactory<AppDbContext> _dbFactory;
     private readonly IImageStorageService _imageStorage;
     private readonly ILogger<GenerationHistoryService> _logger;
 
     public GenerationHistoryService(
-        AppDbContext db,
+        IDbContextFactory<AppDbContext> dbFactory,
         IImageStorageService imageStorage,
         ILogger<GenerationHistoryService> logger)
     {
-        _db = db;
+        _dbFactory = dbFactory;
         _imageStorage = imageStorage;
         _logger = logger;
     }
 
     public async Task<List<ImageGeneration>> GetHistoryAsync(string userId = "default", int page = 1, int pageSize = 20)
     {
-        return await _db.ImageGenerations
+        await using var db = await _dbFactory.CreateDbContextAsync();
+        return await db.ImageGenerations
             .Where(g => g.UserId == userId && g.IsSuccess)
             .OrderByDescending(g => g.CreatedAt)
             .Skip((page - 1) * pageSize)
@@ -32,18 +33,21 @@ public class GenerationHistoryService : IGenerationHistoryService
 
     public async Task<ImageGeneration?> GetByIdAsync(int id)
     {
-        return await _db.ImageGenerations.FindAsync(id);
+        await using var db = await _dbFactory.CreateDbContextAsync();
+        return await db.ImageGenerations.FindAsync(id);
     }
 
     public async Task SaveGenerationAsync(ImageGeneration generation)
     {
-        _db.ImageGenerations.Add(generation);
-        await _db.SaveChangesAsync();
+        await using var db = await _dbFactory.CreateDbContextAsync();
+        db.ImageGenerations.Add(generation);
+        await db.SaveChangesAsync();
     }
 
     public async Task<bool> DeleteGenerationAsync(int id)
     {
-        var generation = await _db.ImageGenerations.FindAsync(id);
+        await using var db = await _dbFactory.CreateDbContextAsync();
+        var generation = await db.ImageGenerations.FindAsync(id);
         if (generation is null)
             return false;
 
@@ -54,20 +58,22 @@ public class GenerationHistoryService : IGenerationHistoryService
         if (!string.IsNullOrEmpty(generation.ReferenceImagePath))
             await _imageStorage.DeleteImageAsync(generation.ReferenceImagePath);
 
-        _db.ImageGenerations.Remove(generation);
-        await _db.SaveChangesAsync();
+        db.ImageGenerations.Remove(generation);
+        await db.SaveChangesAsync();
         return true;
     }
 
     public async Task<int> GetTotalCountAsync(string userId = "default")
     {
-        return await _db.ImageGenerations
+        await using var db = await _dbFactory.CreateDbContextAsync();
+        return await db.ImageGenerations
             .CountAsync(g => g.UserId == userId && g.IsSuccess);
     }
 
     public async Task<UserPreference> GetUserPreferencesAsync(string userId = "default")
     {
-        var prefs = await _db.UserPreferences
+        await using var db = await _dbFactory.CreateDbContextAsync();
+        var prefs = await db.UserPreferences
             .FirstOrDefaultAsync(p => p.UserId == userId);
 
         return prefs ?? new UserPreference { UserId = userId };
@@ -75,12 +81,13 @@ public class GenerationHistoryService : IGenerationHistoryService
 
     public async Task SaveUserPreferencesAsync(UserPreference preferences)
     {
-        var existing = await _db.UserPreferences
+        await using var db = await _dbFactory.CreateDbContextAsync();
+        var existing = await db.UserPreferences
             .FirstOrDefaultAsync(p => p.UserId == preferences.UserId);
 
         if (existing is null)
         {
-            _db.UserPreferences.Add(preferences);
+            db.UserPreferences.Add(preferences);
         }
         else
         {
@@ -91,6 +98,6 @@ public class GenerationHistoryService : IGenerationHistoryService
             existing.UpdatedAt = DateTime.UtcNow;
         }
 
-        await _db.SaveChangesAsync();
+        await db.SaveChangesAsync();
     }
 }

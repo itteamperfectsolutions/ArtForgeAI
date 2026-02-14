@@ -1,6 +1,5 @@
 using System.Net.Http.Headers;
 using System.Text.Json;
-using ArtForgeAI.Models;
 using Microsoft.Extensions.Options;
 
 namespace ArtForgeAI.Services;
@@ -24,12 +23,12 @@ public class ReplicateImageService : IReplicateImageService
         _logger = logger;
     }
 
-    public async Task<byte[]> GenerateImageAsync(string prompt, ImageSize size)
+    public async Task<byte[]> GenerateImageAsync(string prompt, int width, int height)
     {
         var input = new Dictionary<string, object>
         {
             ["prompt"] = prompt,
-            ["aspect_ratio"] = MapAspectRatio(size),
+            ["aspect_ratio"] = MapAspectRatio(width, height),
             ["output_format"] = "png",
             ["output_quality"] = 95,
             ["safety_tolerance"] = 2
@@ -39,7 +38,7 @@ public class ReplicateImageService : IReplicateImageService
         return await DownloadImageAsync(outputUrl);
     }
 
-    public async Task<byte[]> EditImageAsync(string prompt, byte[] imageBytes, string mimeType, ImageSize size)
+    public async Task<byte[]> EditImageAsync(string prompt, byte[] imageBytes, string mimeType, int width, int height)
     {
         var base64 = Convert.ToBase64String(imageBytes);
         var dataUrl = $"data:{mimeType};base64,{base64}";
@@ -166,10 +165,18 @@ public class ReplicateImageService : IReplicateImageService
         return await _httpClient.GetByteArrayAsync(imageUrl);
     }
 
-    private static string MapAspectRatio(ImageSize size) => size switch
+    private static string MapAspectRatio(int width, int height)
     {
-        ImageSize.Landscape => "16:9",
-        ImageSize.Portrait => "9:16",
-        _ => "1:1"
-    };
+        if (width == height) return "1:1";
+        var gcd = Gcd(width, height);
+        var w = width / gcd;
+        var h = height / gcd;
+        return $"{w}:{h}";
+    }
+
+    private static int Gcd(int a, int b)
+    {
+        while (b != 0) { (a, b) = (b, a % b); }
+        return a;
+    }
 }

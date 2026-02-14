@@ -1,0 +1,138 @@
+<div class="mb-3">
+    <label class="form-label">Choose a Style</label>
+
+    @* Category filter tabs *@
+    <div class="style-category-tabs">
+        @foreach (var cat in _categories)
+        {
+            <button class="style-category-tab @(_selectedCategory == cat ? "active" : "")"
+                    @onclick="() => FilterByCategory(cat)"
+                    disabled="@IsDisabled">
+                @cat
+            </button>
+        }
+    </div>
+
+    @* Compact thumbnail grid *@
+    <div class="style-thumb-grid">
+        @foreach (var style in _filteredStyles)
+        {
+            var isSelected = SelectedStyleId == style.Id;
+            var cssClass = GetStyleCssClass(style.Name);
+            <div class="style-thumb-tile @(isSelected ? "selected" : "")"
+                 style="@(!string.IsNullOrEmpty(style.AccentColor) ? $"--card-accent: {style.AccentColor};" : "")"
+                 @onclick="() => SelectStyle(style)">
+                @if (!string.IsNullOrEmpty(style.ThumbnailPath))
+                {
+                    <img src="/@style.ThumbnailPath" alt="@style.Name" />
+                }
+                else
+                {
+                    <div class="style-thumb-tile-fallback @cssClass">
+                        <span>@style.IconEmoji</span>
+                    </div>
+                }
+                <div class="style-thumb-tile-label">
+                    <span>@style.Name</span>
+                </div>
+            </div>
+        }
+    </div>
+
+    @* Expanded detail for selected style *@
+    @if (_selectedStyle is not null)
+    {
+        <div class="style-detail-bar">
+            @if (!string.IsNullOrEmpty(_selectedStyle.ThumbnailPath))
+            {
+                <img src="/@_selectedStyle.ThumbnailPath" alt="@_selectedStyle.Name" class="style-detail-thumb" />
+            }
+            else
+            {
+                <div class="style-detail-thumb-fallback @GetStyleCssClass(_selectedStyle.Name)">
+                    <span>@_selectedStyle.IconEmoji</span>
+                </div>
+            }
+            <div class="style-detail-text">
+                <div class="style-detail-name">@_selectedStyle.IconEmoji @_selectedStyle.Name</div>
+                <div class="style-detail-desc">@_selectedStyle.Description</div>
+                <div class="style-detail-category">@_selectedStyle.Category</div>
+            </div>
+        </div>
+    }
+</div>
+
+@code {
+    [Parameter] public int SelectedStyleId { get; set; }
+    [Parameter] public EventCallback<StylePreset> SelectedStyleChanged { get; set; }
+    [Parameter] public bool IsDisabled { get; set; }
+    [Parameter] public List<StylePreset> Styles { get; set; } = [];
+
+    private List<StylePreset> _allStyles = [];
+    private List<StylePreset> _filteredStyles = [];
+    private StylePreset? _selectedStyle;
+    private string _selectedCategory = "All";
+
+    private static readonly string[] _categories = ["All", "Artistic", "Fun", "Professional", "Abstract"];
+
+    protected override void OnParametersSet()
+    {
+        if (Styles.Count > 0 && _allStyles.Count == 0)
+        {
+            _allStyles = Styles;
+            _filteredStyles = _allStyles;
+
+            if (SelectedStyleId > 0)
+            {
+                _selectedStyle = _allStyles.FirstOrDefault(s => s.Id == SelectedStyleId);
+            }
+        }
+    }
+
+    private void FilterByCategory(string category)
+    {
+        if (IsDisabled) return;
+        _selectedCategory = category;
+        _filteredStyles = category == "All"
+            ? _allStyles
+            : _allStyles.Where(s => s.Category == category).ToList();
+    }
+
+    private async Task SelectStyle(StylePreset style)
+    {
+        if (IsDisabled) return;
+        _selectedStyle = style;
+        SelectedStyleId = style.Id;
+        await SelectedStyleChanged.InvokeAsync(style);
+    }
+
+    private static string GetStyleCssClass(string name) => name switch
+    {
+        "Anime" => "sp-anime",
+        "Manga" => "sp-manga",
+        "Oil Painting" => "sp-oil",
+        "Watercolor" => "sp-watercolor",
+        "Charcoal" => "sp-charcoal",
+        "Impressionist" => "sp-impressionist",
+        "Vintage/Retro" => "sp-vintage",
+        "Flower Petals" => "sp-flower",
+        "Cartoon" => "sp-cartoon",
+        "Pop Art" => "sp-popart",
+        "Pixel Art" => "sp-pixel",
+        "Comic" => "sp-comic",
+        "Clay/Claymation" => "sp-clay",
+        "Caricature" => "sp-caricature",
+        "Neon Glow" => "sp-neon",
+        "Sketch" => "sp-sketch",
+        "3D Render" => "sp-3d",
+        "Vector Art" => "sp-vector",
+        "Line Art" => "sp-lineart",
+        "Gold/Metallic" => "sp-gold",
+        "Paparazzi" => "sp-paparazzi",
+        "Stained Glass" => "sp-stainedglass",
+        "Low Poly" => "sp-lowpoly",
+        "Clouds/Dreamy" => "sp-clouds",
+        "Surreal" => "sp-surreal",
+        _ => "sp-default"
+    };
+}

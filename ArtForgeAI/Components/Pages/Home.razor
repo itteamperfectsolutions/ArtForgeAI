@@ -4,6 +4,7 @@
 @inject IImageStorageService ImageStorage
 @inject IBackgroundRemovalService BgRemoval
 @inject IImageEnhancerService ImageEnhancer
+@inject IColorEnhancementService ColorEnhancer
 @inject IJSRuntime JS
 @inject IWebHostEnvironment Env
 
@@ -28,7 +29,8 @@
                 <ProviderSelector @bind-SelectedProvider="_selectedProvider"
                                  IsDisabled="_isGenerating" />
 
-                <SizeSelector @bind-SelectedSize="_selectedSize"
+                <SizeSelector SelectedSizeId="_selectedSize?.Id ?? 0"
+                              SelectedSizeChanged="OnSizeChanged"
                               IsDisabled="_isGenerating" />
 
                 @if (BgRemoval.IsAvailable)
@@ -106,6 +108,10 @@
                             @if (ImageEnhancer.IsAvailable && !state.IsProcessing)
                             {
                                 <button class="btn-enhance btn-sm" @onclick="() => EnhanceRefImage(p)" disabled="@state.IsProcessing">&#9889; 4x</button>
+                            }
+                            @if (ColorEnhancer.IsAvailable && !state.IsProcessing)
+                            {
+                                <button class="btn-color-enhance btn-sm" @onclick="() => ColorEnhanceRefImage(p)" disabled="@state.IsProcessing">&#127912; Colors</button>
                             }
                         </div>
 
@@ -222,6 +228,19 @@
                             }
                         </button>
                     }
+                    @if (ColorEnhancer.IsAvailable)
+                    {
+                        <button class="btn-color-enhance" @onclick="ColorEnhanceImage" disabled="@_isColorEnhancing">
+                            @if (_isColorEnhancing)
+                            {
+                                <span>Enhancing...</span>
+                            }
+                            else
+                            {
+                                <span>&#127912; Enhance Colors</span>
+                            }
+                        </button>
+                    }
                     @if (_result.WasLocalProcessing)
                     {
                         <button class="btn-retry-ai" @onclick="RetryWithAi">&#9729; Retry with AI</button>
@@ -332,7 +351,7 @@
     private bool _enhancePrompt = false;
     private bool _autoRemoveBg;
     private List<string> _referenceImagePaths = [];
-    private ImageSize _selectedSize = ImageSize.Square;
+    private ImageSizeMaster? _selectedSize;
     private ImageProvider _selectedProvider = ImageProvider.Gemini;
     private bool _isGenerating;
     private int _loadingStep = 1;
@@ -343,6 +362,7 @@
     // Enhancement state
     private bool _isEnhancing;
     private int _enhanceProgress;
+    private bool _isColorEnhancing;
 
     // Reference image processing state
     private readonly Dictionary<string, RefImageState> _refImageStates = new();
@@ -397,7 +417,9 @@
             var request = new GenerationRequest
             {
                 Prompt = _prompt,
-                Size = _selectedSize,
+                Width = _selectedSize?.Width ?? 1024,
+                Height = _selectedSize?.Height ?? 1024,
+                SizeName = _selectedSize?.Name ?? "Square",
                 EnhancePrompt = _enhancePrompt,
                 ReferenceImagePaths = _referenceImagePaths,
                 Provider = _selectedProvider
@@ -474,6 +496,11 @@
     private void OnAutoRemoveBgChange(ChangeEventArgs e)
     {
         _autoRemoveBg = (bool)(e.Value ?? false);
+    }
+
+    private void OnSizeChanged(ImageSizeMaster size)
+    {
+        _selectedSize = size;
     }
 
     private Task DownloadPng() => DownloadAs("png");
@@ -590,7 +617,9 @@
             var request = new GenerationRequest
             {
                 Prompt = _prompt,
-                Size = _selectedSize,
+                Width = _selectedSize?.Width ?? 1024,
+                Height = _selectedSize?.Height ?? 1024,
+                SizeName = _selectedSize?.Name ?? "Square",
                 EnhancePrompt = _enhancePrompt,
                 ReferenceImagePaths = _referenceImagePaths,
                 Provider = _selectedProvider,
@@ -939,6 +968,63 @@
         catch (Exception ex)
         {
             _errorMessage = $"Enhancement failed: {ex.Message}";
+        }
+        finally
+        {
+            state.IsProcessing = false;
+            StateHasChanged();
+        }
+    }
+
+    private async Task ColorEnhanceImage()
+    {
+        if (_result?.LocalImagePath is null || _isColorEnhancing) return;
+
+        _isColorEnhancing = true;
+        _errorMessage = null;
+        StateHasChanged();
+
+        try
+        {
+            var enhancedPath = await ColorEnhancer.EnhanceColorsAsync(_result.LocalImagePath);
+            _result.LocalImagePath = enhancedPath;
+            _imgVersion++;
+
+            if (_toast is not null)
+                _ = _toast.ShowAsync("Colors enhanced!");
+        }
+        catch (Exception ex)
+        {
+            _errorMessage = $"Color enhancement failed: {ex.Message}";
+        }
+        finally
+        {
+            _isColorEnhancing = false;
+            StateHasChanged();
+        }
+    }
+
+    private async Task ColorEnhanceRefImage(string path)
+    {
+        var state = GetRefState(path);
+        if (state.IsProcessing) return;
+
+        state.IsProcessing = true;
+        StateHasChanged();
+
+        try
+        {
+            var sourcePath = state.ProcessedPath ?? path;
+            var enhancedPath = await ColorEnhancer.EnhanceColorsAsync(sourcePath);
+            state.ProcessedPath = enhancedPath;
+            state.Version++;
+
+            if (_toast is not null)
+                _ = _toast.ShowAsync("Reference colors enhanced!");
+        }
+        catch (Exception ex)
+        {
+            _errorMessage = $"Color enhancement failed: {ex.Message}";
         }
         finally
         {

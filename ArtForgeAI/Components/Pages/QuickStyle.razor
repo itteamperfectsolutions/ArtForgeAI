@@ -1,0 +1,179 @@
+@page "/quick-style"
+@rendermode InteractiveServer
+@inject IStylePresetService StyleService
+@inject IImageGenerationService ImageGenService
+@inject IImageStorageService ImageStorage
+@inject IJSRuntime JS
+
+<PageTitle>ArtForge AI - Quick Style</PageTitle>
+
+<div class="page-header">
+    <h2>Quick Style</h2>
+    <p>Click any style to upload a photo and get a 12x18 print-ready result</p>
+</div>
+
+@* ── Style grid is always visible ── *@
+@foreach (var group in _grouped)
+{
+    <div class="qs-category-section">
+        <div class="qs-category-header">@group.Key</div>
+        <div class="qs-grid">
+            @foreach (var style in group)
+            {
+                <label class="qs-tile" style="@(!string.IsNullOrEmpty(style.AccentColor) ? $"--card-accent: {style.AccentColor};" : "")">
+                    @if (!string.IsNullOrEmpty(style.ThumbnailPath))
+                    {
+                        <img src="/@style.ThumbnailPath" alt="@style.Name" />
+                    }
+                    else
+                    {
+                        <div class="qs-tile-fallback">
+                            <span>@style.IconEmoji</span>
+                        </div>
+                    }
+                    <div class="qs-tile-label">@style.Name</div>
+                    <InputFile OnChange="(e) => HandleTileClick(e, style)" accept="image/*" style="display:none" />
+                </label>
+            }
+        </div>
+    </div>
+}
+
+@if (!string.IsNullOrEmpty(_error))
+{
+    <div style="margin-top:0.75rem;color:var(--danger);font-size:0.85rem;">@_error</div>
+}
+
+@* ── Processing overlay ── *@
+@if (_isProcessing)
+{
+    <div class="qs-processing-overlay">
+        <div class="qs-processing-card">
+            <div class="loading-spinner" style="width:48px;height:48px;margin:0;"></div>
+            <div>Applying <strong>@_selectedStyle?.Name</strong> style...</div>
+            <div style="font-size:0.78rem;color:var(--text-muted);">Output: 1152 x 1728 px (12x18 in)</div>
+        </div>
+    </div>
+}
+
+@* ── Result popup modal ── *@
+@if (_result is not null && _result.Success)
+{
+    <div class="qs-modal-overlay" @onclick="StartOver">
+        <div class="qs-modal" @onclick:stopPropagation="true">
+            <div class="qs-modal-header">
+                <span>@_selectedStyle?.IconEmoji @_selectedStyle?.Name — 12x18</span>
+                <button class="qs-modal-close" @onclick="StartOver">&times;</button>
+            </div>
+            <div class="qs-modal-body">
+                <div class="qs-modal-img-card">
+                    <div class="qs-modal-img-label">Source</div>
+                    <img src="/@_sourcePath" alt="Source" />
+                </div>
+                <div class="qs-modal-img-card">
+                    <div class="qs-modal-img-label">Result</div>
+                    <img src="@(ImageStorage.GetWebPath(_result.LocalImagePath ?? ""))" alt="Result" />
+                </div>
+            </div>
+            <div class="qs-modal-footer">
+                <button class="btn-primary-gradient" @onclick="DownloadPng">&#11015; Download PNG</button>
+                <button class="btn-secondary" @onclick="DownloadJpg">&#11015; Download JPG</button>
+                <button class="btn-secondary" @onclick="StartOver">&times; Close</button>
+            </div>
+        </div>
+    </div>
+}
+
+@code {
+    private List<StylePreset> _styles = [];
+    private IGrouping<string, StylePreset>[] _grouped = [];
+    private StylePreset? _selectedStyle;
+    private string? _sourcePath;
+    private GenerationResult? _result;
+    private bool _isProcessing;
+    private string? _error;
+
+    private static readonly string[] _categoryOrder = ["Artistic", "Fun", "Professional", "Abstract", "Regional"];
+
+    protected override async Task OnInitializedAsync()
+    {
+        _styles = await StyleService.GetActivePresetsAsync();
+        _grouped = _styles
+            .GroupBy(s => s.Category)
+            .OrderBy(g => Array.IndexOf(_categoryOrder, g.Key) is var i && i < 0 ? 999 : i)
+            .ToArray();
+    }
+
+    private async Task HandleTileClick(InputFileChangeEventArgs e, StylePreset style)
+    {
+        var file = e.File;
+        if (file is null || file.Size > 10 * 1024 * 1024 || _isProcessing) return;
+
+        _selectedStyle = style;
+        _isProcessing = true;
+        _error = null;
+        _result = null;
+        StateHasChanged();
+
+        try
+        {
+            using var stream = file.OpenReadStream(10 * 1024 * 1024);
+            _sourcePath = await ImageStorage.SaveUploadedFileAsync(stream, file.Name);
+
+            var request = new GenerationRequest
+            {
+                Prompt = style.PromptTemplate,
+                Width = 1152,
+                Height = 1728,
+                SizeName = "12x18",
+                EnhancePrompt = false,
+                ReferenceImagePaths = [_sourcePath],
+                Provider = ImageProvider.Gemini
+            };
+
+            _result = await ImageGenService.GenerateImageAsync(request);
+
+            if (!_result.Success)
+            {
+                _error = _result.ErrorMessage;
+            }
+        }
+        catch (Exception ex)
+        {
+            _error = ex.Message;
+        }
+        finally
+        {
+            _isProcessing = false;
+            StateHasChanged();
+        }
+    }
+
+    private void StartOver()
+    {
+        _result = null;
+        _sourcePath = null;
+        _error = null;
+        _selectedStyle = null;
+    }
+
+    private Task DownloadPng() => DownloadAs("png");
+    private Task DownloadJpg() => DownloadAs("jpg");
+
+    private async Task DownloadAs(string format)
+    {
+        if (_result?.LocalImagePath is null) return;
+        try
+        {
+            var bytes = await ImageStorage.GetImageAsBytesAsync(_result.LocalImagePath, format);
+            var base64 = Convert.ToBase64String(bytes);
+            var contentType = format == "jpg" ? "image/jpeg" : "image/png";
+            var fileName = $"artforge_quick_{_selectedStyle?.Name ?? "style"}_{_result.GenerationId}.{format}";
+            await JS.InvokeVoidAsync("downloadFileFromBytes", fileName, contentType, base64);
+        }
+        catch (Exception ex)
+        {
+            _error = $"Download failed: {ex.Message}";
+        }
+    }
+}

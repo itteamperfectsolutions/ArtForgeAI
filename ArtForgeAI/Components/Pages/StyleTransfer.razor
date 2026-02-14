@@ -1,0 +1,664 @@
+@page "/style-transfer"
+@rendermode InteractiveServer
+@inject IImageGenerationService ImageGenService
+@inject IImageStorageService ImageStorage
+@inject IBackgroundRemovalService BgRemoval
+@inject IImageEnhancerService ImageEnhancer
+@inject IColorEnhancementService ColorEnhancer
+@inject IJSRuntime JS
+@inject IWebHostEnvironment Env
+@inject IStylePresetService StylePresetService
+@inject IImageSizeMasterService SizeMasterService
+
+<PageTitle>ArtForge AI - Style Transfer</PageTitle>
+
+<div class="page-header" style="margin-bottom: 0.5rem;">
+    <h2 style="font-size:1.3rem;">Style Transfer</h2>
+    <p style="font-size:0.82rem;">Upload a photo and transform it into any artistic style</p>
+</div>
+
+<div class="create-layout">
+    @* ── Left column: controls ── *@
+    <div class="create-left">
+        <div class="card">
+            <div class="card-body" style="padding: 1rem 1.5rem;">
+
+                @* Step 1: Style selection *@
+                <StyleSelector SelectedStyleId="_selectedStyle?.Id ?? 0"
+                               SelectedStyleChanged="OnStyleChanged"
+                               Styles="_stylePresets"
+                               IsDisabled="_isGenerating" />
+
+                @* Step 2: Upload reference image *@
+                <div class="mb-3">
+                    <label class="form-label">Upload Your Photo</label>
+                    @if (_referenceImagePaths.Count > 0)
+                    {
+                        <div class="ref-thumbnails">
+                            @foreach (var path in _referenceImagePaths)
+                            {
+                                <div class="ref-thumb">
+                                    <img src="/@path" alt="Reference" />
+                                    <button class="ref-thumb-remove" @onclick="() => RemoveImage(path)" disabled="@(_isGenerating || _isUploading)">&#10005;</button>
+                                </div>
+                            }
+                            @if (_referenceImagePaths.Count < 3)
+                            {
+                                <label class="ref-thumb-add @(_isUploading ? "disabled" : "")" title="Add more images">
+                                    <span>+</span>
+                                    <InputFile OnChange="HandleFileUpload" accept="image/*" multiple style="display:none" disabled="@(_isGenerating || _isUploading)" />
+                                </label>
+                            }
+                        </div>
+                    }
+                    else
+                    {
+                        <label class="upload-area upload-area-compact @(_isUploading ? "disabled" : "")">
+                            <span class="upload-icon">&#128247;</span>
+                            <span>Upload photo to transform</span>
+                            <span style="font-size: 0.7rem; color: var(--text-muted); margin-left: 0.5rem;">JPG, PNG up to 10MB</span>
+                            <InputFile OnChange="HandleFileUpload" accept="image/*" multiple style="display:none" disabled="@(_isGenerating || _isUploading)" />
+                        </label>
+                    }
+
+                    @if (_isUploading)
+                    {
+                        <div class="upload-progress-bar" style="margin-top: 0.35rem;">
+                            <div class="upload-progress-fill" style="width: @(_uploadProgress)%"></div>
+                            <span class="upload-progress-text">Uploading... @(_uploadProgress)%</span>
+                        </div>
+                    }
+                </div>
+
+                @* Step 3: Optional custom instructions (collapsed by default) *@
+                <div class="mb-3">
+                    <button class="style-custom-toggle" @onclick="() => _showCustomInstructions = !_showCustomInstructions" disabled="@_isGenerating">
+                        @if (_showCustomInstructions)
+                        {
+                            <span>&#9660; Custom Instructions</span>
+                        }
+                        else
+                        {
+                            <span>&#9654; Add custom instructions (optional)</span>
+                        }
+                    </button>
+                    @if (_showCustomInstructions)
+                    {
+                        <textarea class="form-input" rows="2" style="margin-top: 0.35rem;"
+                                  placeholder="e.g. in a forest setting, wearing a crown, dramatic lighting..."
+                                  @bind="_customInstructions"
+                                  disabled="@_isGenerating"></textarea>
+                    }
+                </div>
+
+                @* Step 4: Provider selector *@
+                <ProviderSelector @bind-SelectedProvider="_selectedProvider"
+                                  IsDisabled="_isGenerating" />
+
+                @* Step 5: Size selector *@
+                <SizeSelector SelectedSizeId="_selectedSize?.Id ?? 0"
+                              SelectedSizeChanged="OnSizeChanged"
+                              Sizes="_activeSizes"
+                              IsDisabled="_isGenerating" />
+
+                @* Generate button *@
+                <button class="btn-primary-gradient"
+                        style="width: 100%; justify-content: center; padding: 0.55rem;"
+                        @onclick="GenerateStyleTransfer"
+                        disabled="@(_isGenerating || _selectedStyle is null || _referenceImagePaths.Count == 0)">
+                    @if (_isGenerating)
+                    {
+                        <span>Transforming...</span>
+                    }
+                    else
+                    {
+                        <span>&#10024; Transform Image</span>
+                    }
+                </button>
+            </div>
+        </div>
+
+        @if (!string.IsNullOrEmpty(_errorMessage))
+        {
+            <div class="card" style="margin-top: 0.75rem; border-left: 3px solid var(--danger);">
+                <div class="card-body" style="padding: 0.75rem 1rem; color: var(--danger); font-size: 0.85rem;">
+                    <strong>Error:</strong> @_errorMessage
+                </div>
+            </div>
+        }
+    </div>
+
+    @* ── Right column: image preview ── *@
+    <div class="create-right">
+        @if (_referenceImagePaths.Count > 0 && _result is null)
+        {
+            <div class="ref-images-grid ref-count-@(_referenceImagePaths.Count)">
+                @foreach (var path in _referenceImagePaths)
+                {
+                    <div class="right-panel-card">
+                        <div class="right-panel-label">Reference Photo</div>
+                        <div class="ref-image-wrap">
+                            <img src="/@path" alt="Reference" />
+                        </div>
+                    </div>
+                }
+            </div>
+        }
+
+        @if (_result is not null && _result.Success)
+        {
+            <div class="right-panel-card">
+                <div class="right-panel-label">
+                    Styled Result
+                    @if (_selectedStyle is not null)
+                    {
+                        <span style="margin-left: 0.5rem; font-weight: 400; text-transform: none; letter-spacing: 0;">
+                            @_selectedStyle.IconEmoji @_selectedStyle.Name
+                        </span>
+                    }
+                </div>
+                <div class="right-panel-image-wrap" @key="@_imgVersion">
+                    <img src="@($"{ImageStorage.GetWebPath(_result.LocalImagePath ?? "")}?v={_imgVersion}")" alt="Styled image" />
+                    @if (_isReprocessing)
+                    {
+                        <div class="ref-processing-overlay">
+                            <div class="loading-spinner" style="width:36px;height:36px;margin:0;"></div>
+                        </div>
+                    }
+                </div>
+                @if (!string.IsNullOrEmpty(_recolorError))
+                {
+                    <div style="padding: 0.5rem 0.75rem; color: var(--danger); font-size: 0.8rem; border-top: 1px solid var(--border-color);">
+                        @_recolorError
+                    </div>
+                }
+                <div class="right-panel-actions">
+                    <button class="btn-secondary" @onclick="DownloadPng">&#11015; PNG</button>
+                    <button class="btn-secondary" @onclick="DownloadJpg">&#11015; JPG</button>
+                    @if (_transparentImageBytes is not null)
+                    {
+                        <button class="btn-transparent-download" @onclick="DownloadTransparent" title="Download with transparent background">
+                            &#11015; Transparent
+                        </button>
+                    }
+                    @if (ImageEnhancer.IsAvailable)
+                    {
+                        <button class="btn-enhance" @onclick="EnhanceImage" disabled="@_isEnhancing">
+                            @if (_isEnhancing)
+                            {
+                                <span>Enhancing...</span>
+                            }
+                            else
+                            {
+                                <span>&#9889; Enhance 4x</span>
+                            }
+                        </button>
+                    }
+                    @if (ColorEnhancer.IsAvailable)
+                    {
+                        <button class="btn-color-enhance" @onclick="ColorEnhanceImage" disabled="@_isColorEnhancing">
+                            @if (_isColorEnhancing)
+                            {
+                                <span>Enhancing...</span>
+                            }
+                            else
+                            {
+                                <span>&#127912; Enhance Colors</span>
+                            }
+                        </button>
+                    }
+                    <button class="btn-primary-gradient" @onclick="StartNew">&#10024; New</button>
+                </div>
+                @if (_isEnhancing)
+                {
+                    <div class="enhance-progress-bar">
+                        <div class="enhance-progress-fill" style="width: @(_enhanceProgress)%"></div>
+                        <span class="enhance-progress-text">@(_enhanceProgress)%</span>
+                    </div>
+                }
+
+                @* Remove Background section *@
+                @if (BgRemoval.IsAvailable)
+                {
+                    <div class="bg-remove-section">
+                        @if (!_showBgOptions)
+                        {
+                            <button class="ref-bg-remove-btn" @onclick="RemoveGeneratedBackground" disabled="@_isReprocessing">
+                                @if (_isReprocessing)
+                                {
+                                    <span class="loading-spinner" style="width:16px;height:16px;margin:0;border-width:2px;"></span>
+                                    <span>Removing...</span>
+                                }
+                                else
+                                {
+                                    <span>&#9986; Remove Background</span>
+                                }
+                            </button>
+                        }
+
+                        @if (_showBgOptions)
+                        {
+                            <div class="bg-options-header">
+                                <span>Background Options</span>
+                                @if (_isReprocessing)
+                                {
+                                    <span class="bg-reprocessing-indicator">Applying...</span>
+                                }
+                            </div>
+
+                            <div class="bg-color-swatches">
+                                @foreach (var swatch in _bgSwatches)
+                                {
+                                    <button class="bg-color-swatch @(swatch.Hex == _selectedBgColor ? "active" : "")"
+                                            style="@(swatch.Hex == "transparent"
+                                                ? "background: repeating-conic-gradient(#ccc 0% 25%, #fff 0% 50%) 50% / 10px 10px;"
+                                                : $"background-color: {swatch.Hex};")"
+                                            title="@swatch.Name"
+                                            disabled="@_isReprocessing"
+                                            @onclick="() => ChangeBackgroundColor(swatch.Hex)">
+                                    </button>
+                                }
+                            </div>
+
+                            <div class="bg-custom-row">
+                                <input type="text" class="form-input bg-hex-input"
+                                       placeholder="#FF6600"
+                                       @bind="_customHexColor"
+                                       @bind:event="oninput"
+                                       disabled="@_isReprocessing" />
+                                <button class="btn-secondary" @onclick="ApplyCustomHex" disabled="@_isReprocessing">Apply</button>
+                            </div>
+                        }
+                    </div>
+                }
+            </div>
+
+            @if (!string.IsNullOrEmpty(_result.EnhancedPrompt))
+            {
+                <div class="result-prompt" style="margin-top: 0.75rem;">
+                    <strong>Prompt used:</strong> @_result.EnhancedPrompt
+                </div>
+            }
+        }
+        else if (_referenceImagePaths.Count == 0)
+        {
+            <div class="right-panel-empty">
+                <div class="empty-icon">&#127912;</div>
+                <p>Select a style, upload a photo, and transform it</p>
+            </div>
+        }
+    </div>
+</div>
+
+<LoadingOverlay IsVisible="_isGenerating" CurrentStep="_loadingStep" Provider="_selectedProvider" />
+<Toast @ref="_toast" />
+
+@code {
+    private List<StylePreset> _stylePresets = [];
+    private List<ImageSizeMaster> _activeSizes = [];
+    private StylePreset? _selectedStyle;
+    private string _customInstructions = string.Empty;
+    private bool _showCustomInstructions;
+    private List<string> _referenceImagePaths = [];
+    private ImageSizeMaster? _selectedSize;
+    private ImageProvider _selectedProvider = ImageProvider.Gemini;
+    private bool _isGenerating;
+    private int _loadingStep = 1;
+    private string? _errorMessage;
+    private GenerationResult? _result;
+    private Toast? _toast;
+
+    // Upload state
+    private bool _isUploading;
+    private int _uploadProgress;
+
+    // Enhancement state
+    private bool _isEnhancing;
+    private int _enhanceProgress;
+    private bool _isColorEnhancing;
+
+    // Background options state
+    private byte[]? _transparentImageBytes;
+    private string _selectedBgColor = "#FFFFFF";
+    private string _customHexColor = string.Empty;
+    private bool _isReprocessing;
+    private bool _showBgOptions;
+    private long _imgVersion;
+    private string? _recolorError;
+
+    private static readonly (string Name, string Hex)[] _bgSwatches =
+    [
+        ("White", "#FFFFFF"),
+        ("Black", "#000000"),
+        ("Transparent", "transparent"),
+        ("Red", "#FF0000"),
+        ("Blue", "#0000FF"),
+        ("Green", "#008000"),
+        ("Gray", "#808080"),
+        ("Pink", "#FFC0CB"),
+        ("Navy", "#000080"),
+        ("Teal", "#008080"),
+    ];
+
+    protected override async Task OnInitializedAsync()
+    {
+        // Load sequentially to avoid concurrent DbContext access
+        _stylePresets = await StylePresetService.GetActivePresetsAsync();
+        _activeSizes = await SizeMasterService.GetActiveSizesAsync();
+    }
+
+    private void OnStyleChanged(StylePreset style)
+    {
+        _selectedStyle = style;
+    }
+
+    private void OnSizeChanged(ImageSizeMaster size)
+    {
+        _selectedSize = size;
+    }
+
+    private async Task HandleFileUpload(InputFileChangeEventArgs e)
+    {
+        var files = e.GetMultipleFiles(3);
+        if (files.Count == 0) return;
+
+        _isUploading = true;
+        _uploadProgress = 0;
+        StateHasChanged();
+
+        var newPaths = new List<string>(_referenceImagePaths);
+        var completed = 0;
+
+        foreach (var file in files)
+        {
+            if (file.Size > 10 * 1024 * 1024)
+            {
+                completed++;
+                continue;
+            }
+
+            using var stream = file.OpenReadStream(10 * 1024 * 1024);
+            var path = await ImageStorage.SaveUploadedFileAsync(stream, file.Name);
+            newPaths.Add(path);
+
+            completed++;
+            _uploadProgress = (int)((double)completed / files.Count * 100);
+            StateHasChanged();
+        }
+
+        _referenceImagePaths = newPaths;
+        _isUploading = false;
+        _uploadProgress = 0;
+        StateHasChanged();
+    }
+
+    private async Task RemoveImage(string path)
+    {
+        await ImageStorage.DeleteImageAsync(path);
+        _referenceImagePaths = _referenceImagePaths.Where(p => p != path).ToList();
+    }
+
+    private async Task GenerateStyleTransfer()
+    {
+        if (_selectedStyle is null || _referenceImagePaths.Count == 0) return;
+
+        _isGenerating = true;
+        _errorMessage = null;
+        _result = null;
+        _loadingStep = 1;
+        _showBgOptions = false;
+        _transparentImageBytes = null;
+        _recolorError = null;
+        StateHasChanged();
+
+        try
+        {
+            // Build the prompt from the style template + optional custom instructions
+            var prompt = _selectedStyle.PromptTemplate;
+            if (_showCustomInstructions && !string.IsNullOrWhiteSpace(_customInstructions))
+            {
+                prompt = $"{prompt}. Additional instructions: {_customInstructions.Trim()}";
+            }
+
+            _loadingStep = 2;
+            StateHasChanged();
+
+            var request = new GenerationRequest
+            {
+                Prompt = prompt,
+                Width = _selectedSize?.Width ?? 1024,
+                Height = _selectedSize?.Height ?? 1024,
+                SizeName = _selectedSize?.Name ?? "Square",
+                EnhancePrompt = false, // Templates are pre-optimized
+                ReferenceImagePaths = _referenceImagePaths,
+                Provider = _selectedProvider
+            };
+
+            _result = await ImageGenService.GenerateImageAsync(request);
+
+            _loadingStep = 3;
+            StateHasChanged();
+            await Task.Delay(300);
+
+            if (!_result.Success)
+            {
+                _errorMessage = _result.ErrorMessage;
+            }
+            else
+            {
+                if (_result.TransparentImagePath is not null)
+                {
+                    _transparentImageBytes = _result.TransparentPngBytes;
+                    _showBgOptions = true;
+                    _selectedBgColor = "#FFFFFF";
+                }
+
+                if (_toast is not null)
+                {
+                    _ = _toast.ShowAsync("Style transfer complete!");
+                }
+            }
+        }
+        catch (Exception ex)
+        {
+            _errorMessage = $"An unexpected error occurred: {ex.Message}";
+        }
+        finally
+        {
+            _isGenerating = false;
+            StateHasChanged();
+        }
+    }
+
+    private void StartNew()
+    {
+        _result = null;
+        _errorMessage = null;
+        _showBgOptions = false;
+        _transparentImageBytes = null;
+        _selectedBgColor = "#FFFFFF";
+        _customHexColor = string.Empty;
+        _recolorError = null;
+    }
+
+    // ── Download helpers ──
+
+    private Task DownloadPng() => DownloadAs("png");
+    private Task DownloadJpg() => DownloadAs("jpg");
+
+    private async Task DownloadAs(string format)
+    {
+        if (_result?.LocalImagePath is null) return;
+        try
+        {
+            var bytes = await ImageStorage.GetImageAsBytesAsync(_result.LocalImagePath, format);
+            var base64 = Convert.ToBase64String(bytes);
+            var contentType = format == "jpg" ? "image/jpeg" : "image/png";
+            var fileName = $"artforge_style_{_result.GenerationId}.{format}";
+            await JS.InvokeVoidAsync("downloadFileFromBytes", fileName, contentType, base64);
+        }
+        catch (Exception ex)
+        {
+            _errorMessage = $"Download failed: {ex.Message}";
+        }
+    }
+
+    private async Task DownloadTransparent()
+    {
+        if (_transparentImageBytes is null) return;
+        try
+        {
+            var base64 = Convert.ToBase64String(_transparentImageBytes);
+            var fileName = $"artforge_style_{_result?.GenerationId ?? 0}_transparent.png";
+            await JS.InvokeVoidAsync("downloadFileFromBytes", fileName, "image/png", base64);
+        }
+        catch (Exception ex)
+        {
+            _errorMessage = $"Download failed: {ex.Message}";
+        }
+    }
+
+    // ── Enhancement ──
+
+    private async Task EnhanceImage()
+    {
+        if (_result?.LocalImagePath is null || _isEnhancing) return;
+
+        _isEnhancing = true;
+        _enhanceProgress = 0;
+        _errorMessage = null;
+        StateHasChanged();
+
+        try
+        {
+            var progress = new Progress<int>(pct =>
+            {
+                _enhanceProgress = pct;
+                InvokeAsync(StateHasChanged);
+            });
+
+            var enhancedPath = await ImageEnhancer.EnhanceImageAsync(_result.LocalImagePath, progress);
+            _result.LocalImagePath = enhancedPath;
+            _imgVersion++;
+
+            if (_toast is not null)
+                _ = _toast.ShowAsync("Image enhanced (4x upscale)!");
+        }
+        catch (Exception ex)
+        {
+            _errorMessage = $"Enhancement failed: {ex.Message}";
+        }
+        finally
+        {
+            _isEnhancing = false;
+            StateHasChanged();
+        }
+    }
+
+    private async Task ColorEnhanceImage()
+    {
+        if (_result?.LocalImagePath is null || _isColorEnhancing) return;
+
+        _isColorEnhancing = true;
+        _errorMessage = null;
+        StateHasChanged();
+
+        try
+        {
+            var enhancedPath = await ColorEnhancer.EnhanceColorsAsync(_result.LocalImagePath);
+            _result.LocalImagePath = enhancedPath;
+            _imgVersion++;
+
+            if (_toast is not null)
+                _ = _toast.ShowAsync("Colors enhanced!");
+        }
+        catch (Exception ex)
+        {
+            _errorMessage = $"Color enhancement failed: {ex.Message}";
+        }
+        finally
+        {
+            _isColorEnhancing = false;
+            StateHasChanged();
+        }
+    }
+
+    // ── Background removal ──
+
+    private string ResolveFullPath(string webRelativePath) =>
+        Path.Combine(Env.WebRootPath, webRelativePath.Replace("/", Path.DirectorySeparatorChar.ToString()));
+
+    private async Task RemoveGeneratedBackground()
+    {
+        if (_result?.LocalImagePath is null || _isReprocessing) return;
+
+        _isReprocessing = true;
+        _recolorError = null;
+        StateHasChanged();
+
+        try
+        {
+            var fullPath = ResolveFullPath(_result.LocalImagePath);
+            var bgResult = await BgRemoval.RemoveBackgroundAsync(fullPath, "#FFFFFF");
+            _transparentImageBytes = bgResult.TransparentPngBytes;
+            _result.LocalImagePath = bgResult.ColoredImagePath;
+            _selectedBgColor = "#FFFFFF";
+            _showBgOptions = true;
+            _imgVersion++;
+        }
+        catch (Exception ex)
+        {
+            _recolorError = $"Background removal failed: {ex.Message}";
+        }
+        finally
+        {
+            _isReprocessing = false;
+            StateHasChanged();
+        }
+    }
+
+    private async Task ChangeBackgroundColor(string color)
+    {
+        if (_result is null || _isReprocessing || _transparentImageBytes is null) return;
+
+        _isReprocessing = true;
+        _selectedBgColor = color;
+        _recolorError = null;
+        StateHasChanged();
+
+        try
+        {
+            var newPath = await BgRemoval.RecolorBackgroundFromBytesAsync(_transparentImageBytes, color);
+            _result.LocalImagePath = newPath;
+            _imgVersion++;
+        }
+        catch (Exception ex)
+        {
+            _recolorError = $"Recolor failed: {ex.Message}";
+        }
+        finally
+        {
+            _isReprocessing = false;
+            StateHasChanged();
+        }
+    }
+
+    private async Task ApplyCustomHex()
+    {
+        var hex = _customHexColor.Trim();
+        if (string.IsNullOrEmpty(hex)) return;
+
+        if (hex.Length == 6 && !hex.StartsWith('#'))
+            hex = "#" + hex;
+
+        if (System.Text.RegularExpressions.Regex.IsMatch(hex, @"^#[0-9a-fA-F]{6}$"))
+        {
+            await ChangeBackgroundColor(hex);
+        }
+        else
+        {
+            _errorMessage = "Invalid hex color. Use format #RRGGBB.";
+            StateHasChanged();
+        }
+    }
+}

@@ -1,34 +1,79 @@
+@inject IImageSizeMasterService SizeService
+
 <div class="mb-3">
     <label class="form-label">Image Size</label>
     <div class="size-selector">
-        @foreach (var size in Enum.GetValues<ImageSize>())
+        @foreach (var size in _sizes)
         {
-            var aspect = size switch
-            {
-                ImageSize.Square => "1/1",
-                ImageSize.Landscape => "1792/1024",
-                ImageSize.Portrait => "1024/1792",
-                _ => "1/1"
-            };
-            <div class="size-option @(SelectedSize == size ? "selected" : "")"
+            <div class="size-option @(SelectedSizeId == size.Id ? "selected" : "")"
                  @onclick="() => SelectSize(size)">
-                <div class="size-preview" style="--aspect: @aspect"></div>
-                <div class="size-label">@size</div>
-                <div class="size-dims">@size.ToDallESize()</div>
+                <div class="size-label">@size.Name</div>
+                <div class="size-dims">@FormatDims(size)</div>
             </div>
         }
     </div>
 </div>
 
 @code {
-    [Parameter] public ImageSize SelectedSize { get; set; } = ImageSize.Square;
-    [Parameter] public EventCallback<ImageSize> SelectedSizeChanged { get; set; }
+    [Parameter] public int SelectedSizeId { get; set; }
+    [Parameter] public EventCallback<ImageSizeMaster> SelectedSizeChanged { get; set; }
     [Parameter] public bool IsDisabled { get; set; }
+    [Parameter] public List<ImageSizeMaster>? Sizes { get; set; }
 
-    private async Task SelectSize(ImageSize size)
+    private List<ImageSizeMaster> _sizes = [];
+    private bool _initialized;
+
+    protected override async Task OnInitializedAsync()
+    {
+        // Only load from DB if no preloaded sizes were passed
+        if (Sizes is null || Sizes.Count == 0)
+        {
+            _sizes = await SizeService.GetActiveSizesAsync();
+        }
+        else
+        {
+            _sizes = Sizes;
+        }
+
+        await AutoSelectFirst();
+        _initialized = true;
+    }
+
+    protected override async Task OnParametersSetAsync()
+    {
+        // Handle late-arriving preloaded sizes (parent loads after us)
+        if (_initialized && Sizes is not null && Sizes.Count > 0 && _sizes.Count == 0)
+        {
+            _sizes = Sizes;
+            await AutoSelectFirst();
+        }
+    }
+
+    private async Task AutoSelectFirst()
+    {
+        if (SelectedSizeId == 0 && _sizes.Count > 0)
+        {
+            await SelectSize(_sizes[0]);
+        }
+    }
+
+    private async Task SelectSize(ImageSizeMaster size)
     {
         if (IsDisabled) return;
-        SelectedSize = size;
+        SelectedSizeId = size.Id;
         await SelectedSizeChanged.InvokeAsync(size);
+    }
+
+    private static string FormatDims(ImageSizeMaster size)
+    {
+        var unit = size.Unit ?? "px";
+        if (unit == "px" || size.DisplayWidth <= 0)
+            return $"{size.Width}x{size.Height}";
+
+        var w = size.DisplayWidth == Math.Floor(size.DisplayWidth)
+            ? size.DisplayWidth.ToString("0") : size.DisplayWidth.ToString("0.##");
+        var h = size.DisplayHeight == Math.Floor(size.DisplayHeight)
+            ? size.DisplayHeight.ToString("0") : size.DisplayHeight.ToString("0.##");
+        return $"{w}x{h} {unit}";
     }
 }

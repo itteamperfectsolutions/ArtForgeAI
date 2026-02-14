@@ -1,0 +1,108 @@
+You are a Fabric.js (v6.x) expert. I’m building a web feature in my .NET web app called “Mosaic Poster” using Fabric.js canvas.
+
+GOAL
+Create a composite design where:
+1) BACKGROUND is a mosaic made from multiple user-selected images (bgImages[]).
+2) FOREGROUND is ONE main image centered on top, with border + shadow (premium look).
+3) Export outputs:
+   A) finalComposite.png at full canvas size (300 DPI print-ready)
+   B) bgImagesNormalized.zip (each bg image separately normalized)
+   C) layoutMetadata.json (placements + crop + settings) so the layout can be recreated exactly.
+
+ASSUMPTIONS / ENV
+- Fabric.js 6.x
+- Browser app (no server processing)
+- Inputs are File/Blob URLs (createObjectURL) or base64
+- canvasSize example: 2480x3508 (A4 @ 300 DPI) or 3000x2000
+- Must be fast with 6–60 bg images
+
+INPUTS
+- mainImage: Blob/File (jpg/png)
+- bgImages[]: Blob/File list (6–60)
+- canvasSize: {w,h}
+- layoutMode: "grid" | "masonry" | "random-polaroid" | "hex"
+- settings:
+  - tileGutter: 10
+  - bgOpacity: 0.28
+  - bgBlurPx: 2 (simulate blur with imageFilters)
+  - bgSaturation: 0.9
+  - bgBrightness: 0.95
+  - bgTintColor: optional hex (e.g., #0b2a55)
+  - bgTintStrength: 0 to 0.25
+  - safeMarginPct: 0.04
+  - foregroundScale: 0.65 (of shortest canvas side)
+  - foregroundCornerRadius: 40
+  - foregroundBorderPx: 10 (white)
+  - foregroundShadow: {color:"rgba(0,0,0,0.25)", blur:30, offsetX:0, offsetY:8}
+
+REQUIRED OUTPUTS
+1) finalComposite.png (or jpg) as Blob
+2) bgImagesNormalized.zip
+   - normalize each bg image:
+     - auto-orient EXIF
+     - convert to sRGB (assume browser)
+     - resize longest side to 1200px (or 800x800 tile)
+     - optional mild sharpen
+     - export as jpg quality 0.9
+     - file names: bg_001.jpg ... bg_060.jpg
+3) layoutMetadata.json
+   - canvasSize, settings, layoutMode
+   - tiles[]: for each tile:
+     { i, x, y, w, h, rotation, opacity, srcName, crop:{sx,sy,sw,sh}, filters:{...} }
+   - foreground:
+     { x, y, w, h, cornerRadius, borderPx, shadow:{...}, crop:{sx,sy,sw,sh} }
+
+WHAT TO PRODUCE (VERY IMPORTANT)
+Return a complete implementation plan + Fabric.js pseudo-code (not vague).
+Return exactly these sections:
+
+SECTION 1 — “Fabric Object Strategy”
+- Which Fabric objects to use for tiles and foreground (fabric.Image, fabric.Rect, fabric.Group, clipPath)
+- How to implement “cover crop” inside a tile rectangle using clipPath + scale + position math
+- How to apply background harmony filters (brightness/contrast/saturation) using Fabric filters (v6)
+- How to simulate blur (explain realistic browser constraints)
+
+SECTION 2 — “Layout Algorithms”
+Provide step-by-step algorithms for each mode:
+A) Grid:
+- compute cols/rows based on count and aspect ratio
+- compute tileW/tileH with gutters and safe margins
+B) Masonry:
+- 2–4 columns, variable tile heights based on image aspect ratio, fill shortest column
+C) Random Polaroid:
+- fixed tile size, random rotation ±6°, layered but ensure no overlap in center area reserved for foreground
+D) Hex:
+- approximate hex tiling math (staggered rows), convert to bounding boxes for cropping
+
+SECTION 3 — “Exact Cover-Crop Math”
+Give formulas:
+- Given tileRect (tw,th) and image (iw,ih), compute scale = max(tw/iw, th/ih)
+- imageDrawW = iw*scale, imageDrawH = ih*scale
+- offsetX = (tw - imageDrawW)/2, offsetY = (th - imageDrawH)/2
+- Then place image at (tileX + offsetX, tileY + offsetY) and clip to tile rect
+Also provide cropRect in source coordinates:
+- sx, sy, sw, sh in original image pixels that correspond to visible area.
+
+SECTION 4 — “Export Pipeline”
+- How to export finalComposite using canvas.toDataURL / toBlob at full size
+- How to export bgImagesNormalized.zip in browser (JSZip approach)
+- How to generate layoutMetadata.json and store/restore the Fabric canvas from it
+
+SECTION 5 — “Performance Notes”
+- decode images at limited size for background
+- use Promise.all with concurrency limit
+- use requestIdleCallback or worker/offscreen canvas if available
+- avoid heavy filters for 60 images; cache filtered thumbnails
+
+SECTION 6 — “Deliverables”
+- Provide a single JSON block called “presetDefaults” with 3 presets:
+  1) Classic Grid
+  2) Premium Masonry
+  3) Festive Polaroid
+
+CONSTRAINTS
+- No server. Must run in browser.
+- Must be deterministic if a seed is provided (seeded RNG for random mode).
+- Do not ask questions. Make reasonable defaults.
+
+Return only the 6 sections, with clear bullets and code-like blocks where needed.

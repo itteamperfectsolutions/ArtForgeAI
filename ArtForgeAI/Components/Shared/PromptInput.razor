@@ -1,6 +1,6 @@
 @inject IImageStorageService ImageStorage
 
-@* ── Upload area (above prompt) ── *@
+@* -- Upload area (above prompt) -- *@
 <div class="mb-3">
     @if (ReferenceImagePaths.Count > 0)
     {
@@ -9,33 +9,41 @@
             {
                 <div class="ref-thumb">
                     <img src="/@path" alt="Reference" />
-                    <button class="ref-thumb-remove" @onclick="() => RemoveImage(path)" disabled="@IsDisabled">&#10005;</button>
+                    <button class="ref-thumb-remove" @onclick="() => RemoveImage(path)" disabled="@(IsDisabled || _isUploading)">&#10005;</button>
                     @if (OnRemoveBackground.HasDelegate)
                     {
-                        <button class="ref-thumb-bg-btn" @onclick="() => OnRemoveBackground.InvokeAsync(path)" disabled="@IsDisabled" title="Remove Background">
+                        <button class="ref-thumb-bg-btn" @onclick="() => OnRemoveBackground.InvokeAsync(path)" disabled="@(IsDisabled || _isUploading)" title="Remove Background">
                             &#9986;
                         </button>
                     }
                 </div>
             }
-            <label class="ref-thumb-add" title="Add more images">
+            <label class="ref-thumb-add @(_isUploading ? "disabled" : "")" title="Add more images">
                 <span>+</span>
-                <InputFile OnChange="HandleFileUpload" accept="image/*" multiple style="display:none" disabled="@IsDisabled" />
+                <InputFile OnChange="HandleFileUpload" accept="image/*" multiple style="display:none" disabled="@(IsDisabled || _isUploading)" />
             </label>
         </div>
     }
     else
     {
-        <label class="upload-area upload-area-compact">
+        <label class="upload-area upload-area-compact @(_isUploading ? "disabled" : "")">
             <span class="upload-icon">&#128247;</span>
             <span>Upload reference images (optional)</span>
             <span style="font-size: 0.7rem; color: var(--text-muted); margin-left: 0.5rem;">JPG, PNG up to 10MB each</span>
-            <InputFile OnChange="HandleFileUpload" accept="image/*" multiple style="display:none" disabled="@IsDisabled" />
+            <InputFile OnChange="HandleFileUpload" accept="image/*" multiple style="display:none" disabled="@(IsDisabled || _isUploading)" />
         </label>
+    }
+
+    @if (_isUploading)
+    {
+        <div class="upload-progress-bar" style="margin-top: 0.35rem;">
+            <div class="upload-progress-fill" style="width: @(_uploadProgress)%"></div>
+            <span class="upload-progress-text">Uploading... @(_uploadProgress)%</span>
+        </div>
     }
 </div>
 
-@* ── Prompt textarea ── *@
+@* -- Prompt textarea -- *@
 <div class="mb-3">
     <label class="form-label">Describe your image</label>
     <textarea class="form-input" rows="2"
@@ -45,12 +53,11 @@
               disabled="@IsDisabled"></textarea>
 </div>
 
-@* ── Enhance prompt checkbox ── *@
+@* -- Enhance prompt checkbox -- *@
 <div class="mb-3">
     <label class="form-check-enhanced">
         <input type="checkbox" checked="@EnhancePrompt" @onchange="OnEnhancePromptChange" disabled="@IsDisabled" />
         <span>AI Prompt Enhancement</span>
-        <span class="enhance-badge">&#10024; GPT-4o</span>
     </label>
 </div>
 
@@ -63,6 +70,9 @@
     [Parameter] public EventCallback<List<string>> ReferenceImagePathsChanged { get; set; }
     [Parameter] public bool IsDisabled { get; set; }
     [Parameter] public EventCallback<string> OnRemoveBackground { get; set; }
+
+    private bool _isUploading;
+    private int _uploadProgress;
 
     private async Task OnPromptInput(ChangeEventArgs e)
     {
@@ -78,19 +88,39 @@
 
     private async Task HandleFileUpload(InputFileChangeEventArgs e)
     {
-        var newPaths = new List<string>(ReferenceImagePaths);
+        var files = e.GetMultipleFiles(10);
+        if (files.Count == 0) return;
 
-        foreach (var file in e.GetMultipleFiles(10))
+        _isUploading = true;
+        _uploadProgress = 0;
+        StateHasChanged();
+
+        var newPaths = new List<string>(ReferenceImagePaths);
+        var completed = 0;
+
+        foreach (var file in files)
         {
-            if (file.Size > 10 * 1024 * 1024) continue;
+            if (file.Size > 10 * 1024 * 1024)
+            {
+                completed++;
+                continue;
+            }
 
             using var stream = file.OpenReadStream(10 * 1024 * 1024);
             var path = await ImageStorage.SaveUploadedFileAsync(stream, file.Name);
             newPaths.Add(path);
+
+            completed++;
+            _uploadProgress = (int)((double)completed / files.Count * 100);
+            StateHasChanged();
         }
 
         ReferenceImagePaths = newPaths;
         await ReferenceImagePathsChanged.InvokeAsync(ReferenceImagePaths);
+
+        _isUploading = false;
+        _uploadProgress = 0;
+        StateHasChanged();
     }
 
     private async Task RemoveImage(string path)

@@ -416,11 +416,12 @@ public partial class PromptEnhancerService : IPromptEnhancerService
 
     private const string SystemPromptCreativeEdit = """
         You are a world-class AI image editing prompt engineer.
-        The AI model receives the original image directly — it can SEE it.
+        The target AI model (Gemini/DALL-E) receives the original image directly — it can SEE it.
+        You may also receive the reference image(s) for context — use them to understand what the user is working with.
 
         ## TASK
-        The user wants a CREATIVE transformation of their image.
-        Use the provided style direction to make it spectacular and unique.
+        Write a DIRECT IMPERATIVE editing instruction for the AI image model.
+        The user wants a transformation of their image. Use the style direction below.
 
         Art style: {ART_STYLE}
         Lighting: {LIGHTING}
@@ -428,13 +429,15 @@ public partial class PromptEnhancerService : IPromptEnhancerService
         Atmosphere: {ATMOSPHERE}
 
         ## RULES
-        - NEVER describe the subject's physical appearance
-        - Focus on scene, environment, style, mood
-        - Be vivid and specific
+        - Write as a DIRECT COMMAND to the image model: "Transform...", "Place...", "Edit..."
+        - Reference the subject as "the subject in the image" — do NOT exhaustively describe it
+        - Focus on what to DO: scene, environment, style, mood, composition
+        - Keep it concise and action-oriented
+        - Do NOT ask questions or provide commentary — output ONLY the editing instruction
 
         {PROVIDER_GUIDELINES}
 
-        Under 700 chars (DALL-E/Gemini) or 400 chars (FLUX). Output ONLY the prompt.
+        Under 700 chars (DALL-E/Gemini) or 400 chars (FLUX). Output ONLY the prompt, nothing else.
         """;
 
     /// <summary>
@@ -477,22 +480,23 @@ public partial class PromptEnhancerService : IPromptEnhancerService
     /// </summary>
     private const string SystemPromptMultiInstructionEdit = """
         You are an expert AI image editing prompt engineer.
-        The AI model receives the original image directly — it can SEE it.
+        The target AI model (Gemini/DALL-E) receives the original image directly — it can SEE it.
+        You may also receive the reference image(s) for context — use them to understand what the user is working with.
 
         ## CRITICAL RULE
         The user has given MULTIPLE instructions. You MUST address EVERY SINGLE ONE.
         Do NOT skip, merge, or simplify any instruction. Each action must be explicitly stated.
 
         ## YOUR TASK
+        Write a DIRECT IMPERATIVE editing instruction for the AI image model.
         1. Parse the user's request into individual instructions
         2. For EACH instruction, write a clear, specific directive
         3. Combine them into a single cohesive editing prompt
-        4. Preserve the subject's identity (face, body, proportions) unless the user says otherwise
+        4. Preserve the subject's identity unless the user says otherwise
 
         ## FORMAT
-        Write a direct, imperative editing prompt that covers ALL requested changes.
-        Be specific about what to change and what to keep.
-        State each change as a clear action: "Remove X", "Change Y to Z", "Add W"
+        Write a direct command: "Remove X", "Change Y to Z", "Add W", "Place..."
+        Do NOT describe the image. Do NOT ask questions. Output ONLY the editing instruction.
 
         ## EXAMPLES
         User: "remove background change clothing to suit with tie"
@@ -503,7 +507,7 @@ public partial class PromptEnhancerService : IPromptEnhancerService
 
         {PROVIDER_GUIDELINES}
 
-        Under 800 chars (DALL-E/Gemini) or 500 chars (FLUX). Output ONLY the prompt.
+        Under 800 chars (DALL-E/Gemini) or 500 chars (FLUX). Output ONLY the prompt, nothing else.
         """;
 
     private const string SystemPromptIdentityPreservation = """
@@ -584,12 +588,49 @@ public partial class PromptEnhancerService : IPromptEnhancerService
         _logger = logger;
     }
 
+    /// <summary>
+    /// Loads reference images from disk and creates ChatMessageContentPart list
+    /// for including in vision-enabled AI calls.
+    /// </summary>
+    private async Task<List<ChatMessageContentPart>> LoadReferenceImagePartsAsync(List<string>? paths)
+    {
+        var parts = new List<ChatMessageContentPart>();
+        if (paths is null || paths.Count == 0) return parts;
+
+        foreach (var refPath in paths)
+        {
+            try
+            {
+                var fullPath = Path.Combine(_env.WebRootPath,
+                    refPath.Replace("/", Path.DirectorySeparatorChar.ToString()));
+                if (!File.Exists(fullPath)) continue;
+
+                var imageBytes = await File.ReadAllBytesAsync(fullPath);
+                var ext = Path.GetExtension(fullPath).ToLowerInvariant();
+                var mediaType = ext switch
+                {
+                    ".png" => "image/png",
+                    ".webp" => "image/webp",
+                    _ => "image/jpeg"
+                };
+                parts.Add(ChatMessageContentPart.CreateImagePart(
+                    BinaryData.FromBytes(imageBytes), mediaType));
+            }
+            catch
+            {
+                // Skip images that can't be loaded
+            }
+        }
+        return parts;
+    }
+
     // ═══════════════════════════════════════════════════════════════════
     //  PUBLIC API — IMAGE EDIT
     // ═══════════════════════════════════════════════════════════════════
 
     public async Task<PromptEnhancementResult> EnhanceForImageEditAsync(
-        string rawPrompt, ImageProvider provider, int referenceImageCount = 1)
+        string rawPrompt, ImageProvider provider, int referenceImageCount = 1,
+        List<string>? referenceImagePaths = null)
     {
         try
         {
@@ -598,7 +639,7 @@ public partial class PromptEnhancerService : IPromptEnhancerService
             // that explicitly tells the model to combine subjects from ALL images.
             if (referenceImageCount > 1)
             {
-                return await EnhanceForMultiImageCompositionAsync(rawPrompt, provider, referenceImageCount);
+                return await EnhanceForMultiImageCompositionAsync(rawPrompt, provider, referenceImageCount, referenceImagePaths);
             }
 
             // ── Step 1: Check cache ──
@@ -624,10 +665,14 @@ public partial class PromptEnhancerService : IPromptEnhancerService
                     var systemPrompt = SystemPromptMultiInstructionEdit
                         .Replace("{PROVIDER_GUIDELINES}", GetProviderGuidelines(provider));
 
+                    var imageParts = await LoadReferenceImagePartsAsync(referenceImagePaths);
+                    var userParts = new List<ChatMessageContentPart> { ChatMessageContentPart.CreateTextPart(rawPrompt) };
+                    userParts.AddRange(imageParts);
+
                     var messages = new List<ChatMessage>
                     {
                         new SystemChatMessage(systemPrompt),
-                        new UserChatMessage(rawPrompt)
+                        new UserChatMessage(userParts)
                     };
 
                     var options = new ChatCompletionOptions { Temperature = 0.6f };
@@ -680,10 +725,14 @@ public partial class PromptEnhancerService : IPromptEnhancerService
                         .Replace("{ATMOSPHERE}", styleSeed.Atmosphere)
                         .Replace("{PROVIDER_GUIDELINES}", GetProviderGuidelines(provider));
 
+                    var imageParts = await LoadReferenceImagePartsAsync(referenceImagePaths);
+                    var userParts = new List<ChatMessageContentPart> { ChatMessageContentPart.CreateTextPart(rawPrompt) };
+                    userParts.AddRange(imageParts);
+
                     var messages = new List<ChatMessage>
                     {
                         new SystemChatMessage(systemPrompt),
-                        new UserChatMessage(rawPrompt)
+                        new UserChatMessage(userParts)
                     };
 
                     var options = new ChatCompletionOptions { Temperature = 0.8f };
@@ -717,7 +766,7 @@ public partial class PromptEnhancerService : IPromptEnhancerService
     // ═══════════════════════════════════════════════════════════════════
 
     private async Task<PromptEnhancementResult> EnhanceForMultiImageCompositionAsync(
-        string rawPrompt, ImageProvider provider, int imageCount)
+        string rawPrompt, ImageProvider provider, int imageCount, List<string>? referenceImagePaths = null)
     {
         try
         {
@@ -734,10 +783,14 @@ public partial class PromptEnhancerService : IPromptEnhancerService
 
             var userMessage = $"I have provided {imageCount} reference images. My instruction: {rawPrompt}";
 
+            var imageParts = await LoadReferenceImagePartsAsync(referenceImagePaths);
+            var userParts = new List<ChatMessageContentPart> { ChatMessageContentPart.CreateTextPart(userMessage) };
+            userParts.AddRange(imageParts);
+
             var messages = new List<ChatMessage>
             {
                 new SystemChatMessage(systemPrompt),
-                new UserChatMessage(userMessage)
+                new UserChatMessage(userParts)
             };
 
             var options = new ChatCompletionOptions { Temperature = 0.6f };

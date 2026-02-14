@@ -1,5 +1,4 @@
 using System.Text.Json;
-using ArtForgeAI.Models;
 using Microsoft.Extensions.Options;
 
 namespace ArtForgeAI.Services;
@@ -20,7 +19,7 @@ public class GeminiImageService : IGeminiImageService
         _logger = logger;
     }
 
-    public async Task<(string? text, byte[] imageBytes)> GenerateImageAsync(string prompt, ImageSize size)
+    public async Task<(string? text, byte[] imageBytes)> GenerateImageAsync(string prompt, int width, int height)
     {
         var requestBody = new
         {
@@ -45,7 +44,7 @@ public class GeminiImageService : IGeminiImageService
     }
 
     public async Task<(string? text, byte[] imageBytes)> EditImageAsync(
-        string prompt, List<(byte[] data, string mimeType)> images, ImageSize size)
+        string prompt, List<(byte[] data, string mimeType)> images, int width, int height)
     {
         // Build parts: labeled reference images first, then text prompt last.
         // Placing images before the text prompt gives Gemini visual context
@@ -133,7 +132,13 @@ public class GeminiImageService : IGeminiImageService
         }
 
         if (imageBytesResult is null)
-            throw new InvalidOperationException("Gemini did not return an image in the response.");
+        {
+            _logger.LogWarning("Gemini returned text but no image. Text: {Text}", textResult);
+            var msg = "Gemini did not return an image in the response.";
+            if (!string.IsNullOrEmpty(textResult))
+                msg += $" Gemini said: {(textResult.Length > 300 ? textResult[..300] + "..." : textResult)}";
+            throw new InvalidOperationException(msg);
+        }
 
         return (textResult, imageBytesResult);
     }
