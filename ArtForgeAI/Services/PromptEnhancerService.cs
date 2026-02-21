@@ -30,7 +30,7 @@ public partial class PromptEnhancerService : IPromptEnhancerService
     private readonly ChatClient _chatClient;
     private readonly IWebHostEnvironment _env;
     private readonly ILogger<PromptEnhancerService> _logger;
-    private static readonly Random _rng = new();
+    // Random.Shared is thread-safe (.NET 6+)
 
     // ═══════════════════════════════════════════════════════════════════
     //  CACHE — avoid duplicate AI calls
@@ -275,15 +275,15 @@ public partial class PromptEnhancerService : IPromptEnhancerService
         {
             // FLUX: concise, quality tokens
             sb.Append(", ");
-            sb.Append(QualityBoosters[_rng.Next(QualityBoosters.Length)]);
+            sb.Append(QualityBoosters[Random.Shared.Next(QualityBoosters.Length)]);
         }
         else
         {
             // DALL-E / Gemini: more descriptive
             sb.Append(". ");
-            sb.Append(CameraSpecs[_rng.Next(CameraSpecs.Length)]);
+            sb.Append(CameraSpecs[Random.Shared.Next(CameraSpecs.Length)]);
             sb.Append(". ");
-            sb.Append(QualityBoosters[_rng.Next(QualityBoosters.Length)]);
+            sb.Append(QualityBoosters[Random.Shared.Next(QualityBoosters.Length)]);
         }
 
         var result = sb.ToString();
@@ -381,10 +381,10 @@ public partial class PromptEnhancerService : IPromptEnhancerService
     private record StyleSeed(string ArtStyle, string Lighting, string ColorPalette, string Atmosphere);
 
     private static StyleSeed GenerateStyleSeed() => new(
-        ArtStyles[_rng.Next(ArtStyles.Length)],
-        LightingStyles[_rng.Next(LightingStyles.Length)],
-        ColorPalettes[_rng.Next(ColorPalettes.Length)],
-        Atmospheres[_rng.Next(Atmospheres.Length)]
+        ArtStyles[Random.Shared.Next(ArtStyles.Length)],
+        LightingStyles[Random.Shared.Next(LightingStyles.Length)],
+        ColorPalettes[Random.Shared.Next(ColorPalettes.Length)],
+        Atmospheres[Random.Shared.Next(Atmospheres.Length)]
     );
 
     // ═══════════════════════════════════════════════════════════════════
@@ -601,8 +601,7 @@ public partial class PromptEnhancerService : IPromptEnhancerService
         {
             try
             {
-                var fullPath = Path.Combine(_env.WebRootPath,
-                    refPath.Replace("/", Path.DirectorySeparatorChar.ToString()));
+                var fullPath = SafeResolvePath(refPath);
                 if (!File.Exists(fullPath)) continue;
 
                 var imageBytes = await File.ReadAllBytesAsync(fullPath);
@@ -616,9 +615,9 @@ public partial class PromptEnhancerService : IPromptEnhancerService
                 parts.Add(ChatMessageContentPart.CreateImagePart(
                     BinaryData.FromBytes(imageBytes), mediaType));
             }
-            catch
+            catch (Exception ex)
             {
-                // Skip images that can't be loaded
+                _logger.LogWarning(ex, "Could not load reference image");
             }
         }
         return parts;
@@ -756,7 +755,7 @@ public partial class PromptEnhancerService : IPromptEnhancerService
             {
                 Success = false,
                 EnhancedPrompt = rawPrompt,
-                ErrorMessage = $"Enhancement failed: {ex.Message}. Using original prompt."
+                ErrorMessage = "Enhancement failed. Using original prompt."
             };
         }
     }
@@ -925,7 +924,7 @@ public partial class PromptEnhancerService : IPromptEnhancerService
             {
                 Success = false,
                 EnhancedPrompt = rawPrompt,
-                ErrorMessage = $"Enhancement failed: {ex.Message}. Using original prompt."
+                ErrorMessage = "Enhancement failed. Using original prompt."
             };
         }
     }
@@ -970,8 +969,7 @@ public partial class PromptEnhancerService : IPromptEnhancerService
     {
         try
         {
-            var fullPath = Path.Combine(_env.WebRootPath,
-                referenceImagePath.Replace("/", Path.DirectorySeparatorChar.ToString()));
+            var fullPath = SafeResolvePath(referenceImagePath);
             if (!File.Exists(fullPath)) return null;
 
             var imageBytes = await File.ReadAllBytesAsync(fullPath);
@@ -1001,5 +999,15 @@ public partial class PromptEnhancerService : IPromptEnhancerService
             _logger.LogWarning(ex, "Failed to describe reference image");
             return null;
         }
+    }
+
+    private string SafeResolvePath(string localPath)
+    {
+        var normalized = localPath.Replace("/", Path.DirectorySeparatorChar.ToString());
+        var fullPath = Path.GetFullPath(Path.Combine(_env.WebRootPath, normalized));
+        var webRoot = Path.GetFullPath(_env.WebRootPath);
+        if (!fullPath.StartsWith(webRoot, StringComparison.OrdinalIgnoreCase))
+            throw new UnauthorizedAccessException("Access to the specified path is denied.");
+        return fullPath;
     }
 }

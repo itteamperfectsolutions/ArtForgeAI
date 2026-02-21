@@ -41,6 +41,7 @@ window.mosaicPoster = (function () {
     let bgTiles = [];         // fabric objects on canvas
     let foregroundGroup = null;
     let canvasW = 3000, canvasH = 2000;
+    let resizeObserver = null;
 
     // Current settings
     let settings = {
@@ -81,6 +82,19 @@ window.mosaicPoster = (function () {
 
         // Scale canvas element to fit container
         _fitCanvasToContainer();
+
+        // Observe container resizes for mobile responsiveness
+        if (resizeObserver) {
+            resizeObserver.disconnect();
+        }
+        const wrapper = canvas.getElement().parentElement;
+        if (wrapper && typeof ResizeObserver !== "undefined") {
+            resizeObserver = new ResizeObserver(function () {
+                _fitCanvasToContainer();
+            });
+            resizeObserver.observe(wrapper);
+        }
+
         return true;
     }
 
@@ -197,20 +211,17 @@ window.mosaicPoster = (function () {
 
     function exportComposite() {
         if (!canvas) return null;
-        // Temporarily set zoom to 1 for full-res export
         const oldZoom = canvas.getZoom();
-        canvas.setZoom(1);
-        canvas.setDimensions({ width: canvasW, height: canvasH });
-        canvas.renderAll();
-        const dataUrl = canvas.toDataURL({ format: "png", multiplier: 1 });
-        // Restore display zoom
-        canvas.setZoom(oldZoom);
-        canvas.setDimensions({
-            width: canvasW * oldZoom,
-            height: canvasH * oldZoom
-        });
-        canvas.renderAll();
-        return dataUrl;
+        try {
+            canvas.setZoom(1);
+            canvas.setDimensions({ width: canvasW, height: canvasH });
+            canvas.renderAll();
+            return canvas.toDataURL({ format: "png", multiplier: 1 });
+        } finally {
+            canvas.setZoom(oldZoom);
+            canvas.setDimensions({ width: canvasW * oldZoom, height: canvasH * oldZoom });
+            canvas.renderAll();
+        }
     }
 
     async function exportNormalizedZip() {
@@ -259,6 +270,10 @@ window.mosaicPoster = (function () {
     }
 
     function dispose() {
+        if (resizeObserver) {
+            resizeObserver.disconnect();
+            resizeObserver = null;
+        }
         if (canvas) {
             canvas.dispose();
             canvas = null;

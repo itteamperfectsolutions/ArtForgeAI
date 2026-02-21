@@ -1,5 +1,6 @@
 @inject IJSRuntime JS
 @inject IImageStorageService ImageStorage
+@inject ILogger<ImagePreviewModal> Logger
 
 @if (Generation is not null)
 {
@@ -74,7 +75,7 @@
         }
         catch (Exception ex)
         {
-            Console.Error.WriteLine($"Download failed: {ex.Message}");
+            Logger.LogError(ex, "Image download failed");
         }
     }
 

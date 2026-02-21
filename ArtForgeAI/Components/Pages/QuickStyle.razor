@@ -3,13 +3,15 @@
 @inject IStylePresetService StyleService
 @inject IImageGenerationService ImageGenService
 @inject IImageStorageService ImageStorage
+@inject ICinematicProfileService CinematicProfile
 @inject IJSRuntime JS
+@inject ILogger<QuickStyle> Logger
 
 <PageTitle>ArtForge AI - Quick Style</PageTitle>
 
 <div class="page-header">
     <h2>Quick Style</h2>
-    <p>Click any style to upload a photo and get a 12x18 print-ready result</p>
+    <p>Click any style to upload a photo and get a 20x30 print-ready result</p>
 </div>
 
 @* ── Style grid is always visible ── *@
@@ -32,7 +34,7 @@
                         </div>
                     }
                     <div class="qs-tile-label">@style.Name</div>
-                    <InputFile OnChange="(e) => HandleTileClick(e, style)" accept="image/*" style="display:none" />
+                    <InputFile OnChange="(e) => HandleTileClick(e, style)" accept=".jpg,.jpeg,.png,.webp,.gif" style="display:none" />
                 </label>
             }
         </div>
@@ -51,7 +53,7 @@
         <div class="qs-processing-card">
             <div class="loading-spinner" style="width:48px;height:48px;margin:0;"></div>
             <div>Applying <strong>@_selectedStyle?.Name</strong> style...</div>
-            <div style="font-size:0.78rem;color:var(--text-muted);">Output: 1152 x 1728 px (12x18 in)</div>
+            <div style="font-size:0.78rem;color:var(--text-muted);">Output: 1440 x 2160 px (20x30 in)</div>
         </div>
     </div>
 }
@@ -62,7 +64,7 @@
     <div class="qs-modal-overlay" @onclick="StartOver">
         <div class="qs-modal" @onclick:stopPropagation="true">
             <div class="qs-modal-header">
-                <span>@_selectedStyle?.IconEmoji @_selectedStyle?.Name — 12x18</span>
+                <span>@_selectedStyle?.IconEmoji @_selectedStyle?.Name — 20x30</span>
                 <button class="qs-modal-close" @onclick="StartOver">&times;</button>
             </div>
             <div class="qs-modal-body">
@@ -120,12 +122,26 @@
             using var stream = file.OpenReadStream(10 * 1024 * 1024);
             _sourcePath = await ImageStorage.SaveUploadedFileAsync(stream, file.Name);
 
+            // Multi-face cinematic pipeline: detect multiple faces, transform individually, composite
+            if (CinematicProfile.IsMultiFaceStyle(style.Name))
+            {
+                var cinResult = await CinematicProfile.ProcessAsync(_sourcePath, style.EffectivePrompt, 1440, 2160);
+                if (cinResult is not null)
+                {
+                    _result = cinResult;
+                    if (!_result.Success)
+                        _error = _result.ErrorMessage;
+                    return;
+                }
+                // null = 0-1 faces detected, fall through to normal pipeline
+            }
+
             var request = new GenerationRequest
             {
-                Prompt = style.PromptTemplate,
-                Width = 1152,
-                Height = 1728,
-                SizeName = "12x18",
+                Prompt = style.EffectivePrompt,
+                Width = 1440,
+                Height = 2160,
+                SizeName = "20x30",
                 EnhancePrompt = false,
                 ReferenceImagePaths = [_sourcePath],
                 Provider = ImageProvider.Gemini
@@ -140,7 +156,8 @@
         }
         catch (Exception ex)
         {
-            _error = ex.Message;
+            Logger.LogError(ex, "Quick style processing failed for style {StyleName}", style.Name);
+            _error = "An unexpected error occurred. Please try again.";
         }
         finally
         {
@@ -173,7 +190,8 @@
         }
         catch (Exception ex)
         {
-            _error = $"Download failed: {ex.Message}";
+            Logger.LogError(ex, "Quick style download failed");
+            _error = "Download failed. Please try again.";
         }
     }
 }

@@ -78,7 +78,7 @@ public class ReplicateImageService : IReplicateImageService
         if (!response.IsSuccessStatusCode)
         {
             _logger.LogError("Replicate API error: {StatusCode} - {Response}", response.StatusCode, responseJson);
-            throw new HttpRequestException($"Replicate API error ({response.StatusCode}): {responseJson}");
+            throw new HttpRequestException($"Replicate API error ({response.StatusCode}). Please try again.");
         }
 
         using var doc = JsonDocument.Parse(responseJson);
@@ -118,7 +118,7 @@ public class ReplicateImageService : IReplicateImageService
             var responseJson = await response.Content.ReadAsStringAsync();
 
             if (!response.IsSuccessStatusCode)
-                throw new HttpRequestException($"Replicate poll error ({response.StatusCode}): {responseJson}");
+                throw new HttpRequestException($"Replicate API error ({response.StatusCode}). Please try again.");
 
             using var doc = JsonDocument.Parse(responseJson);
             var root = doc.RootElement;

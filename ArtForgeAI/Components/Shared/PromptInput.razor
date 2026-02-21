@@ -20,7 +20,7 @@
             }
             <label class="ref-thumb-add @(_isUploading ? "disabled" : "")" title="Add more images">
                 <span>+</span>
-                <InputFile OnChange="HandleFileUpload" accept="image/*" multiple style="display:none" disabled="@(IsDisabled || _isUploading)" />
+                <InputFile OnChange="HandleFileUpload" accept=".jpg,.jpeg,.png,.webp,.gif" multiple style="display:none" disabled="@(IsDisabled || _isUploading)" />
             </label>
         </div>
     }
@@ -30,7 +30,7 @@
             <span class="upload-icon">&#128247;</span>
             <span>Upload reference images (optional)</span>
             <span style="font-size: 0.7rem; color: var(--text-muted); margin-left: 0.5rem;">JPG, PNG up to 10MB each</span>
-            <InputFile OnChange="HandleFileUpload" accept="image/*" multiple style="display:none" disabled="@(IsDisabled || _isUploading)" />
+            <InputFile OnChange="HandleFileUpload" accept=".jpg,.jpeg,.png,.webp,.gif" multiple style="display:none" disabled="@(IsDisabled || _isUploading)" />
         </label>
     }
 

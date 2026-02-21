@@ -9,6 +9,8 @@
 @inject IWebHostEnvironment Env
 @inject IStylePresetService StylePresetService
 @inject IImageSizeMasterService SizeMasterService
+@inject ICinematicProfileService CinematicProfile
+@inject ILogger<StyleTransfer> Logger
 
 <PageTitle>ArtForge AI - Style Transfer</PageTitle>
 
@@ -46,7 +48,7 @@
                             {
                                 <label class="ref-thumb-add @(_isUploading ? "disabled" : "")" title="Add more images">
                                     <span>+</span>
-                                    <InputFile OnChange="HandleFileUpload" accept="image/*" multiple style="display:none" disabled="@(_isGenerating || _isUploading)" />
+                                    <InputFile OnChange="HandleFileUpload" accept=".jpg,.jpeg,.png,.webp,.gif" multiple style="display:none" disabled="@(_isGenerating || _isUploading)" />
                                 </label>
                             }
                         </div>
@@ -57,7 +59,7 @@
                             <span class="upload-icon">&#128247;</span>
                             <span>Upload photo to transform</span>
                             <span style="font-size: 0.7rem; color: var(--text-muted); margin-left: 0.5rem;">JPG, PNG up to 10MB</span>
-                            <InputFile OnChange="HandleFileUpload" accept="image/*" multiple style="display:none" disabled="@(_isGenerating || _isUploading)" />
+                            <InputFile OnChange="HandleFileUpload" accept=".jpg,.jpeg,.png,.webp,.gif" multiple style="display:none" disabled="@(_isGenerating || _isUploading)" />
                         </label>
                     }
 
@@ -414,7 +416,7 @@
         try
         {
             // Build the prompt from the style template + optional custom instructions
-            var prompt = _selectedStyle.PromptTemplate;
+            var prompt = _selectedStyle.EffectivePrompt;
             if (_showCustomInstructions && !string.IsNullOrWhiteSpace(_customInstructions))
             {
                 prompt = $"{prompt}. Additional instructions: {_customInstructions.Trim()}";
@@ -422,6 +424,29 @@
 
             _loadingStep = 2;
             StateHasChanged();
+
+            // Multi-face cinematic pipeline: only for single-image uploads
+            if (_referenceImagePaths.Count == 1 && CinematicProfile.IsMultiFaceStyle(_selectedStyle.Name))
+            {
+                var cinResult = await CinematicProfile.ProcessAsync(
+                    _referenceImagePaths[0], prompt,
+                    _selectedSize?.Width ?? 1024, _selectedSize?.Height ?? 1024);
+                if (cinResult is not null)
+                {
+                    _result = cinResult;
+                    // Skip normal pipeline — jump straight to result handling
+                    _loadingStep = 3;
+                    StateHasChanged();
+                    await Task.Delay(300);
+
+                    if (!_result.Success)
+                        _errorMessage = _result.ErrorMessage;
+                    else if (_toast is not null)
+                        _ = _toast.ShowAsync("Style transfer complete!");
+                    return;
+                }
+                // null = 0-1 faces detected, fall through to normal pipeline
+            }
 
             var request = new GenerationRequest
             {
@@ -461,7 +486,8 @@
         }
         catch (Exception ex)
         {
-            _errorMessage = $"An unexpected error occurred: {ex.Message}";
+            Logger.LogError(ex, "Style transfer generation failed");
+            _errorMessage = "An unexpected error occurred. Please try again.";
         }
         finally
         {
@@ -499,7 +525,8 @@
         }
         catch (Exception ex)
         {
-            _errorMessage = $"Download failed: {ex.Message}";
+            Logger.LogError(ex, "Style transfer download failed");
+            _errorMessage = "Download failed. Please try again.";
         }
     }
 
@@ -514,7 +541,8 @@
         }
         catch (Exception ex)
         {
-            _errorMessage = $"Download failed: {ex.Message}";
+            Logger.LogError(ex, "Style transfer transparent download failed");
+            _errorMessage = "Download failed. Please try again.";
         }
     }
 
@@ -546,7 +574,8 @@
         }
         catch (Exception ex)
         {
-            _errorMessage = $"Enhancement failed: {ex.Message}";
+            Logger.LogError(ex, "Style transfer enhancement failed");
+            _errorMessage = "Enhancement failed. Please try again.";
         }
         finally
         {
@@ -574,7 +603,8 @@
         }
         catch (Exception ex)
         {
-            _errorMessage = $"Color enhancement failed: {ex.Message}";
+            Logger.LogError(ex, "Style transfer color enhancement failed");
+            _errorMessage = "Color enhancement failed. Please try again.";
         }
         finally
         {
@@ -608,7 +638,8 @@
         }
         catch (Exception ex)
         {
-            _recolorError = $"Background removal failed: {ex.Message}";
+            Logger.LogError(ex, "Style transfer background removal failed");
+            _recolorError = "Background removal failed. Please try again.";
         }
         finally
         {
@@ -634,7 +665,8 @@
         }
         catch (Exception ex)
         {
-            _recolorError = $"Recolor failed: {ex.Message}";
+            Logger.LogError(ex, "Style transfer recolor failed");
+            _recolorError = "Recolor failed. Please try again.";
         }
         finally
         {

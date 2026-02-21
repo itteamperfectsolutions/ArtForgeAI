@@ -4,6 +4,8 @@ namespace ArtForgeAI.Models;
 
 public class StylePreset
 {
+    public const string FacialIdentitySuffix = " Preserve biometric facial identity exactly as in the original image without modification.";
+
     public int Id { get; set; }
 
     [Required]
@@ -15,6 +17,12 @@ public class StylePreset
 
     [Required]
     public string PromptTemplate { get; set; } = string.Empty;
+
+    /// <summary>
+    /// Returns the PromptTemplate with the facial identity preservation instruction appended.
+    /// Use this instead of PromptTemplate when generating images.
+    /// </summary>
+    public string EffectivePrompt => PromptTemplate + FacialIdentitySuffix;
 
     [Required]
     [MaxLength(50)]

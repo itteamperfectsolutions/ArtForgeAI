@@ -7,6 +7,7 @@
 @inject IColorEnhancementService ColorEnhancer
 @inject IJSRuntime JS
 @inject IWebHostEnvironment Env
+@inject ILogger<Home> Logger
 
 <PageTitle>ArtForge AI - Create</PageTitle>
 
@@ -171,7 +172,7 @@
                                         <button class="bg-upload-btn btn-sm" @onclick="() => ClickRefBgFileInput(p)" disabled="@state.IsProcessing">
                                             &#128247; Upload BG
                                         </button>
-                                        <InputFile id="@($"refBgFile_{p.GetHashCode():X}")" OnChange="(e) => OnRefBgImageSelected(e, p)" style="display: none;" accept="image/*" />
+                                        <InputFile id="@($"refBgFile_{p.GetHashCode():X}")" OnChange="(e) => OnRefBgImageSelected(e, p)" style="display: none;" accept=".jpg,.jpeg,.png,.webp,.gif" />
                                     </div>
                                 }
                             </div>
@@ -311,7 +312,7 @@
                                 <button class="bg-upload-btn" @onclick="ClickBgFileInput" disabled="@_isReprocessing">
                                     &#128247; Upload Background Image
                                 </button>
-                                <InputFile id="bgFileInput" @ref="_bgFileInput" OnChange="OnBgImageSelected" style="display: none;" accept="image/*" />
+                                <InputFile id="bgFileInput" @ref="_bgFileInput" OnChange="OnBgImageSelected" style="display: none;" accept=".jpg,.jpeg,.png,.webp,.gif" />
                             </div>
                         }
                     </div>
@@ -472,7 +473,8 @@
                     }
                     catch (Exception bgEx)
                     {
-                        _recolorError = $"Auto BG removal failed: {bgEx.Message}";
+                        Logger.LogError(bgEx, "Auto background removal failed");
+                        _recolorError = "Auto background removal failed. Please try again.";
                     }
                 }
 
@@ -484,7 +486,8 @@
         }
         catch (Exception ex)
         {
-            _errorMessage = $"An unexpected error occurred: {ex.Message}";
+            Logger.LogError(ex, "Image generation failed");
+            _errorMessage = "An unexpected error occurred. Please try again.";
         }
         finally
         {
@@ -517,7 +520,8 @@
         }
         catch (Exception ex)
         {
-            _errorMessage = $"Download failed: {ex.Message}";
+            Logger.LogError(ex, "Transparent download failed");
+            _errorMessage = "Download failed. Please try again.";
         }
     }
 
@@ -533,7 +537,8 @@
         }
         catch (Exception ex)
         {
-            _errorMessage = $"Download failed: {ex.Message}";
+            Logger.LogError(ex, "Ref transparent download failed");
+            _errorMessage = "Download failed. Please try again.";
         }
     }
 
@@ -552,7 +557,8 @@
         }
         catch (Exception ex)
         {
-            _errorMessage = $"Download failed: {ex.Message}";
+            Logger.LogError(ex, "Download failed for format {Format}", format);
+            _errorMessage = "Download failed. Please try again.";
         }
     }
 
@@ -584,7 +590,8 @@
         }
         catch (Exception ex)
         {
-            _errorMessage = $"Enhancement failed: {ex.Message}";
+            Logger.LogError(ex, "Image enhancement failed");
+            _errorMessage = "Enhancement failed. Please try again.";
         }
         finally
         {
@@ -643,7 +650,8 @@
         }
         catch (Exception ex)
         {
-            _errorMessage = $"An unexpected error occurred: {ex.Message}";
+            Logger.LogError(ex, "Retry with AI failed");
+            _errorMessage = "An unexpected error occurred. Please try again.";
         }
         finally
         {
@@ -695,7 +703,8 @@
         }
         catch (Exception ex)
         {
-            _recolorError = $"Recolor failed: {ex.Message}";
+            Logger.LogError(ex, "Background recolor failed");
+            _recolorError = "Recolor failed. Please try again.";
         }
         finally
         {
@@ -761,7 +770,8 @@
         }
         catch (Exception ex)
         {
-            _recolorError = $"Background image failed: {ex.Message}";
+            Logger.LogError(ex, "Background image upload failed");
+            _recolorError = "Background image failed. Please try again.";
         }
         finally
         {
@@ -806,7 +816,8 @@
         }
         catch (Exception ex)
         {
-            _errorMessage = $"Background removal failed: {ex.Message}";
+            Logger.LogError(ex, "Reference background removal failed");
+            _errorMessage = "Background removal failed. Please try again.";
         }
         finally
         {
@@ -836,7 +847,8 @@
         }
         catch (Exception ex)
         {
-            _recolorError = $"Background removal failed: {ex.Message}";
+            Logger.LogError(ex, "Generated background removal failed");
+            _recolorError = "Background removal failed. Please try again.";
         }
         finally
         {
@@ -862,7 +874,8 @@
         }
         catch (Exception ex)
         {
-            _errorMessage = $"Recolor failed: {ex.Message}";
+            Logger.LogError(ex, "Reference recolor failed");
+            _errorMessage = "Recolor failed. Please try again.";
         }
         finally
         {
@@ -885,7 +898,8 @@
         }
         catch (Exception ex)
         {
-            _errorMessage = $"Download failed: {ex.Message}";
+            Logger.LogError(ex, "Reference image download failed");
+            _errorMessage = "Download failed. Please try again.";
         }
     }
 
@@ -938,7 +952,8 @@
         }
         catch (Exception ex)
         {
-            _errorMessage = $"Background image failed: {ex.Message}";
+            Logger.LogError(ex, "Reference background image upload failed");
+            _errorMessage = "Background image failed. Please try again.";
         }
         finally
         {
@@ -967,7 +982,8 @@
         }
         catch (Exception ex)
         {
-            _errorMessage = $"Enhancement failed: {ex.Message}";
+            Logger.LogError(ex, "Reference image enhancement failed");
+            _errorMessage = "Enhancement failed. Please try again.";
         }
         finally
         {
@@ -995,7 +1011,8 @@
         }
         catch (Exception ex)
         {
-            _errorMessage = $"Color enhancement failed: {ex.Message}";
+            Logger.LogError(ex, "Color enhancement failed");
+            _errorMessage = "Color enhancement failed. Please try again.";
         }
         finally
         {
@@ -1024,7 +1041,8 @@
         }
         catch (Exception ex)
         {
-            _errorMessage = $"Color enhancement failed: {ex.Message}";
+            Logger.LogError(ex, "Reference color enhancement failed");
+            _errorMessage = "Color enhancement failed. Please try again.";
         }
         finally
         {

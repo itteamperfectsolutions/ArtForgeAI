@@ -1,6 +1,8 @@
+using System.Threading.RateLimiting;
 using ArtForgeAI.Components;
 using ArtForgeAI.Data;
 using ArtForgeAI.Services;
+using Microsoft.AspNetCore.RateLimiting;
 using Microsoft.EntityFrameworkCore;
 
 var builder = WebApplication.CreateBuilder(args);
@@ -13,8 +15,8 @@ builder.Services.AddRazorComponents()
 builder.Services.Configure<Microsoft.AspNetCore.Components.Server.CircuitOptions>(
     options => options.DetailedErrors = builder.Environment.IsDevelopment());
 
-// Increase SignalR buffer for file uploads (default 32KB is too small for images)
-builder.Services.AddSignalR(options => options.MaximumReceiveMessageSize = null);
+// Increase SignalR buffer for file uploads (cap at 10MB to match upload limits)
+builder.Services.AddSignalR(options => options.MaximumReceiveMessageSize = 10 * 1024 * 1024);
 
 // Database — use factory to avoid DbContext concurrency issues in Blazor Server
 builder.Services.AddDbContextFactory<AppDbContext>(options =>
@@ -59,6 +61,21 @@ builder.Services.AddScoped<IImageStorageService, ImageStorageService>();
 builder.Services.AddScoped<IPromptEnhancerService, PromptEnhancerService>();
 builder.Services.AddScoped<IGenerationHistoryService, GenerationHistoryService>();
 builder.Services.AddScoped<IImageGenerationService, ImageGenerationService>();
+builder.Services.AddScoped<ICinematicProfileService, CinematicProfileService>();
+
+// Rate limiting: 100 requests per minute per IP
+builder.Services.AddRateLimiter(options =>
+{
+    options.RejectionStatusCode = StatusCodes.Status429TooManyRequests;
+    options.GlobalLimiter = PartitionedRateLimiter.Create<HttpContext, string>(context =>
+        RateLimitPartition.GetFixedWindowLimiter(
+            partitionKey: context.Connection.RemoteIpAddress?.ToString() ?? "unknown",
+            factory: _ => new FixedWindowRateLimiterOptions
+            {
+                PermitLimit = 100,
+                Window = TimeSpan.FromMinutes(1)
+            }));
+});
 
 var app = builder.Build();
 
@@ -66,7 +83,7 @@ var app = builder.Build();
 using (var scope = app.Services.CreateScope())
 {
     var db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
-    db.Database.EnsureCreated();
+    await db.Database.EnsureCreatedAsync();
 
     // EnsureCreated won't add new tables to an existing DB, so create ImageSizeMasters if missing
     try
@@ -118,6 +135,23 @@ using (var scope = app.Services.CreateScope())
         app.Logger.LogWarning(ex, "ImageSizeMasters column migration failed (non-fatal)");
     }
 
+    // Seed 20x30 and 30x40 print sizes if missing
+    try
+    {
+        await db.Database.ExecuteSqlRawAsync(@"
+            IF NOT EXISTS (SELECT 1 FROM ImageSizeMasters WHERE Name = '20x30')
+                INSERT INTO ImageSizeMasters (Name, Width, Height, IsActive, SortOrder, Unit, DisplayWidth, DisplayHeight)
+                VALUES ('20x30', 1440, 2160, 1, 4, 'in', 20, 30)");
+        await db.Database.ExecuteSqlRawAsync(@"
+            IF NOT EXISTS (SELECT 1 FROM ImageSizeMasters WHERE Name = '30x40')
+                INSERT INTO ImageSizeMasters (Name, Width, Height, IsActive, SortOrder, Unit, DisplayWidth, DisplayHeight)
+                VALUES ('30x40', 1536, 2048, 1, 5, 'in', 30, 40)");
+    }
+    catch (Exception ex)
+    {
+        app.Logger.LogWarning(ex, "Additional print sizes seeding failed (non-fatal)");
+    }
+
     // Create StylePresets table if missing (same pattern as ImageSizeMasters)
     try
     {
@@ -161,7 +195,8 @@ using (var scope = app.Services.CreateScope())
                 (22, 'Stained Glass', 'Cathedral stained glass design', 'Transform into a stained glass window design. Bold black lead lines, jewel-toned translucent colors. Geometric segmentation. Cathedral-quality craftsmanship. Light shining through colored glass.', 'Abstract', N'🪟', '#AB47BC', 1, 22),
                 (23, 'Low Poly', 'Geometric faceted art', 'Transform into low-poly 3D art style. Geometric faceted surfaces, minimal polygon count. Clean flat-shaded triangles. Modern minimalist aesthetic. Vibrant gradient colors across faces.', 'Abstract', N'🔷', '#1E88E5', 1, 23),
                 (24, 'Clouds/Dreamy', 'Ethereal cloud portrait', 'Transform into an ethereal dreamy cloud artwork. The subject form composed of soft billowing clouds and mist against a pastel sky. Wispy cirrus clouds trace the features and contours. Golden hour sunlight illuminating the cloud formations. Heavenly, serene, and otherworldly atmosphere. Soft focus with luminous edges.', 'Abstract', N'☁️', '#90CAF9', 1, 24),
-                (25, 'Surreal', 'Dali-inspired surrealism', 'Transform into a surrealist artwork inspired by Salvador Dali. Dreamlike impossible geometry and melting forms. The subject existing in a bizarre landscape with floating objects, distorted perspectives, and impossible architecture. Rich detailed oil painting technique with hyperreal textures in an unreal context. Mysterious, thought-provoking, visually stunning.', 'Abstract', N'🌀', '#FF6F00', 1, 25);
+                (25, 'Surreal', 'Dali-inspired surrealism', 'Transform into a surrealist artwork inspired by Salvador Dali. Dreamlike impossible geometry and melting forms. The subject existing in a bizarre landscape with floating objects, distorted perspectives, and impossible architecture. Rich detailed oil painting technique with hyperreal textures in an unreal context. Mysterious, thought-provoking, visually stunning.', 'Abstract', N'🌀', '#FF6F00', 1, 25),
+                (26, 'Cinematic B&W Profile', 'Dramatic B&W layered side-profile portrait', 'Identify every person in the source photo. The output MUST contain the EXACT same number of people — do NOT skip or merge anyone. CRITICAL: Each person has a UNIQUE face — different age, gender, face shape, nose, jawline, forehead, hair. You MUST preserve each person''s individual facial identity exactly. Do NOT make them look alike. Render each person as a dramatic side profile facing left. Stack all profiles vertically against a pure black background, largest at top to smallest at bottom, slightly overlapping. Each face must look exactly like that specific person from the source — a viewer should be able to identify who is who. Black and white high-contrast monochrome. Dramatic rim lighting from one side. Deep blacks, bright highlights. Cinematic editorial portrait.', 'Professional', N'🎞️', '#212121', 1, 22);
                 SET IDENTITY_INSERT StylePresets OFF;
             END");
     }
@@ -205,6 +240,241 @@ using (var scope = app.Services.CreateScope())
         app.Logger.LogWarning(ex, "Regional StylePresets seeding failed (non-fatal)");
     }
 
+    // Seed trending 2025-2026 style presets (guarded individually by Name)
+    try
+    {
+        await db.Database.ExecuteSqlRawAsync(@"
+            -- ============================================================
+            -- TRENDING 2025-2026: ARTISTIC (SortOrder 48-54)
+            -- ============================================================
+            IF NOT EXISTS (SELECT 1 FROM StylePresets WHERE Name = 'Ghibli Dreamscape')
+                INSERT INTO StylePresets (Name, Description, PromptTemplate, Category, IconEmoji, AccentColor, IsActive, SortOrder) VALUES
+                ('Ghibli Dreamscape', 'Studio Ghibli-inspired dreamy anime landscape',
+                 'Transform into a breathtaking Studio Ghibli-inspired dreamscape. Soft hand-painted watercolor backgrounds with lush rolling green hills, towering cumulus clouds, and golden sunlight filtering through. Character rendered in Ghibli''s signature warm, gentle anime style — simple expressive features, soft rounded forms, natural earthy color palette. Hayao Miyazaki''s attention to wind movement in hair and clothing. Whimsical environmental details — wildflowers, butterflies, distant European-style cottages. Warm nostalgic atmosphere with the magical realism that defines Ghibli. My Neighbor Totoro and Spirited Away visual quality.',
+                 'Artistic', N'🏡', '#66BB6A', 1, 48);
+
+            IF NOT EXISTS (SELECT 1 FROM StylePresets WHERE Name = 'Dark Academia Portrait')
+                INSERT INTO StylePresets (Name, Description, PromptTemplate, Category, IconEmoji, AccentColor, IsActive, SortOrder) VALUES
+                ('Dark Academia Portrait', 'Moody intellectual dark academia aesthetic',
+                 'Transform into a dark academia portrait aesthetic. Rich mahogany and deep brown tones with warm candlelight illumination. Subject styled in classic scholarly attire — tweed blazer, wool vest, dark knit. Surrounded by leather-bound books, antique manuscripts, and classical architecture. Oil painting quality with Old Masters lighting — dramatic Rembrandt-style chiaroscuro. Gothic university library or Oxford study setting. Muted earth-tone palette: burnt umber, forest green, burgundy, aged gold. Atmospheric dust particles caught in light beams. Intellectual, mysterious, timeless scholarly elegance.',
+                 'Artistic', N'📚', '#4E342E', 1, 49);
+
+            IF NOT EXISTS (SELECT 1 FROM StylePresets WHERE Name = 'Y2K Cyber Glam')
+                INSERT INTO StylePresets (Name, Description, PromptTemplate, Category, IconEmoji, AccentColor, IsActive, SortOrder) VALUES
+                ('Y2K Cyber Glam', 'Early 2000s futuristic cyber glamour',
+                 'Transform into Y2K cyber glam aesthetic. Glossy metallic surfaces, iridescent holographic textures, and chrome reflections. Hot pink, electric blue, silver, and neon purple color palette. Futuristic early-2000s fashion — butterfly clips, tinted sunglasses, metallic fabrics. Matrix-inspired digital rain elements mixed with pop-princess sparkle. Glossy lip-gloss sheen, bedazzled rhinestone details, and space-age accessories. Studio lighting with colored gel filters creating vibrant shadows. Clean digital rendering with high-gloss finish. Nostalgic Y2K maximalism meets cyberpunk edge.',
+                 'Artistic', N'💿', '#E040FB', 1, 50);
+
+            IF NOT EXISTS (SELECT 1 FROM StylePresets WHERE Name = 'Ethereal Glow Portrait')
+                INSERT INTO StylePresets (Name, Description, PromptTemplate, Category, IconEmoji, AccentColor, IsActive, SortOrder) VALUES
+                ('Ethereal Glow Portrait', 'Soft luminous glowing portrait with dreamy light',
+                 'Transform into an ethereal glowing portrait. Soft diffused luminous light emanating from within and around the subject. Warm golden and pearl-white glow creating a heavenly halo effect. Delicate light particles and bokeh floating in the atmosphere. Skin rendered with soft inner radiance and subtle translucency. Pastel warm tones — soft gold, blush pink, lavender, cream. Hair catching backlight with individual strand detail. Dreamy soft-focus background with lens flare accents. Fantasy portrait photography quality with professional beauty lighting. Angelic, serene, otherworldly beauty.',
+                 'Artistic', N'✨', '#FFD54F', 1, 51);
+
+            IF NOT EXISTS (SELECT 1 FROM StylePresets WHERE Name = 'Cottagecore Fantasy')
+                INSERT INTO StylePresets (Name, Description, PromptTemplate, Category, IconEmoji, AccentColor, IsActive, SortOrder) VALUES
+                ('Cottagecore Fantasy', 'Idyllic pastoral cottagecore aesthetic',
+                 'Transform into a charming cottagecore fantasy aesthetic. Soft natural lighting through a country window with lace curtains. Subject surrounded by wildflowers, dried herbs, homemade bread, and vintage crockery. Warm pastoral color palette — sage green, dusty rose, cream, lavender, wheat gold. Hand-embroidered textures and linen fabrics. Quaint English countryside cottage interior or flower garden setting. Watercolor-meets-oil-painting artistic quality with soft edges. Butterflies, songbirds, and climbing roses as decorative elements. Nostalgic, peaceful, romantically rural. Beatrix Potter storybook illustration quality.',
+                 'Artistic', N'🌿', '#A5D6A7', 1, 52);
+
+            IF NOT EXISTS (SELECT 1 FROM StylePresets WHERE Name = 'Dark Fantasy Arcane')
+                INSERT INTO StylePresets (Name, Description, PromptTemplate, Category, IconEmoji, AccentColor, IsActive, SortOrder) VALUES
+                ('Dark Fantasy Arcane', 'Dark painterly fantasy with magical energy',
+                 'Transform into dark fantasy art style inspired by Arcane and League of Legends. Rich painterly digital art with visible brushstroke texture. Dramatic cinematic lighting — deep shadows with vibrant accent lights in purple, teal, and amber. Magical energy particles and glowing arcane runes floating in the scene. Steampunk-fantasy hybrid aesthetic with gritty urban-fantasy atmosphere. Subject rendered with sharp determined expression and dramatic pose. Color palette: deep indigo, burnt orange, electric violet, gunmetal gray. Atmospheric fog and volumetric lighting. Epic fantasy concept art quality by Riot Games Fortiche studio.',
+                 'Artistic', N'🗡️', '#6A1B9A', 1, 53);
+
+            IF NOT EXISTS (SELECT 1 FROM StylePresets WHERE Name = 'Retro Bollywood Saree')
+                INSERT INTO StylePresets (Name, Description, PromptTemplate, Category, IconEmoji, AccentColor, IsActive, SortOrder) VALUES
+                ('Retro Bollywood Saree', 'Vintage 1960s-70s Bollywood glamour portrait',
+                 'Transform into a vintage 1960s-70s Bollywood glamour portrait. Classic golden-era Hindi cinema aesthetic with soft-focus dreamy lens quality. Subject draped in an elegant silk saree with rich jewel-tone colors — deep red, royal blue, emerald, gold border. Traditional Indian jewelry — heavy gold necklace, jhumka earrings, maang tikka, glass bangles. Soft studio lighting with warm amber key light and gentle fill. Hand-tinted photograph quality with slight color saturation. Lush painted backdrop of a Mughal garden or palatial interior. Madhubala and Waheeda Rehman era elegance. Romantic, graceful, timelessly beautiful Indian cinema.',
+                 'Artistic', N'🥻', '#FF6F00', 1, 54);
+
+            -- ============================================================
+            -- TRENDING 2025-2026: FUN (SortOrder 55-61)
+            -- ============================================================
+            IF NOT EXISTS (SELECT 1 FROM StylePresets WHERE Name = 'Action Figure Box')
+                INSERT INTO StylePresets (Name, Description, PromptTemplate, Category, IconEmoji, AccentColor, IsActive, SortOrder) VALUES
+                ('Action Figure Box', 'Collectible action figure in branded toy packaging',
+                 'Transform into a hyper-realistic collectible action figure displayed inside branded toy packaging. The subject rendered as a detailed 3D plastic action figure with visible joint articulation points, glossy plastic skin texture, and molded hair. Packaged inside a clear plastic blister pack mounted on a vibrant cardboard backing with product branding, barcode, and age rating. Include miniature accessories relevant to the subject. Professional toy photography lighting with clean white background. Hasbro and Mattel premium collectible quality. Sharp focus on figure details and packaging design.',
+                 'Fun', N'🎁', '#FF7043', 1, 55);
+
+            IF NOT EXISTS (SELECT 1 FROM StylePresets WHERE Name = 'LEGO Minifigure')
+                INSERT INTO StylePresets (Name, Description, PromptTemplate, Category, IconEmoji, AccentColor, IsActive, SortOrder) VALUES
+                ('LEGO Minifigure', 'Classic LEGO minifigure brick character',
+                 'Transform into a classic LEGO minifigure character. Blocky cylindrical yellow head with simple printed facial features — dot eyes, curved smile line. C-shaped claw hands in yellow. Characteristic LEGO body proportions — short legs, rectangular torso with printed design details. Smooth ABS plastic texture with subtle mold lines and stud connections. Bright primary LEGO colors. Set against a LEGO baseplate environment with brick elements. Sharp macro photography lighting showing plastic material quality. Official LEGO set box-art quality rendering.',
+                 'Fun', N'🧱', '#FDD835', 1, 56);
+
+            IF NOT EXISTS (SELECT 1 FROM StylePresets WHERE Name = 'Chibi 3D Figurine')
+                INSERT INTO StylePresets (Name, Description, PromptTemplate, Category, IconEmoji, AccentColor, IsActive, SortOrder) VALUES
+                ('Chibi 3D Figurine', 'Adorable chibi vinyl collectible figure',
+                 'Transform into an adorable chibi-style 3D vinyl collectible figurine. Oversized head with 3:1 head-to-body ratio, large sparkly eyes, tiny nose, and cute expression. Small stubby body with simplified limbs. Smooth matte vinyl plastic texture with subtle factory sheen. Vibrant candy colors with clean solid paint application. Standing on a small round display base. Nendoroid and Funko Pop crossover aesthetic. Soft studio lighting with gentle shadows. Product photography quality against a clean gradient background. Kawaii Japanese figure collectible quality.',
+                 'Fun', N'🧸', '#FF80AB', 1, 57);
+
+            IF NOT EXISTS (SELECT 1 FROM StylePresets WHERE Name = 'Disney Pixar 3D')
+                INSERT INTO StylePresets (Name, Description, PromptTemplate, Category, IconEmoji, AccentColor, IsActive, SortOrder) VALUES
+                ('Disney Pixar 3D', 'Disney Pixar animated movie character style',
+                 'Transform into a Disney Pixar 3D animated movie character. Stylized proportions with large expressive eyes, smooth skin with subsurface scattering, and exaggerated but appealing facial features. Rich detailed clothing textures and materials. Pixar''s signature warm color palette with vibrant saturated hues. Professional studio lighting with rim light and soft ambient fill. Cinematic depth of field with bokeh background. Hair rendered with individual strand detail and natural movement. Emotional expressiveness in pose and facial features. Toy Story and Coco production quality. Rendered in high-quality 3D CGI.',
+                 'Fun', N'🏰', '#7E57C2', 1, 58);
+
+            IF NOT EXISTS (SELECT 1 FROM StylePresets WHERE Name = 'Trading Card Hero')
+                INSERT INTO StylePresets (Name, Description, PromptTemplate, Category, IconEmoji, AccentColor, IsActive, SortOrder) VALUES
+                ('Trading Card Hero', 'Epic fantasy trading card game artwork',
+                 'Transform into an epic fantasy trading card game artwork. Subject rendered as a legendary hero character with dramatic dynamic pose. Rich detailed digital painting with glowing magical effects — energy auras, elemental particles, rune symbols. Ornate card border frame with gold filigree and gem insets. Stats panel area at bottom. Dramatic lighting with volumetric god-rays and magical illumination. Vibrant saturated fantasy color palette. Background of an epic battlefield or enchanted temple. Magic: The Gathering and Hearthstone premium card art quality. Professional fantasy illustration.',
+                 'Fun', N'🃏', '#7C4DFF', 1, 59);
+
+            IF NOT EXISTS (SELECT 1 FROM StylePresets WHERE Name = 'Bollywood Retro Poster')
+                INSERT INTO StylePresets (Name, Description, PromptTemplate, Category, IconEmoji, AccentColor, IsActive, SortOrder) VALUES
+                ('Bollywood Retro Poster', 'Hand-painted 1970s-80s Hindi film poster',
+                 'Transform into a classic hand-painted Bollywood movie poster from the 1970s-80s golden era. Bold dramatic composition with the subject as the hero in a powerful pose. Vivid saturated hand-painted colors — deep reds, royal blues, bright yellows. Exaggerated dramatic expressions and dynamic action angles. Traditional Indian film poster layout with bold typography space. Painted texture with visible brushstrokes and slight paint drip details. Background collage of dramatic scenes — explosions, romance, action. Vintage Indian lithograph printing quality with slight color offset. Iconic Bollywood poster artist style.',
+                 'Fun', N'🎬', '#D50000', 1, 60);
+
+            IF NOT EXISTS (SELECT 1 FROM StylePresets WHERE Name = 'Indian TV Serial Drama')
+                INSERT INTO StylePresets (Name, Description, PromptTemplate, Category, IconEmoji, AccentColor, IsActive, SortOrder) VALUES
+                ('Indian TV Serial Drama', 'Over-the-top dramatic Indian TV serial freeze frame',
+                 'Transform into a dramatic Indian television serial freeze-frame moment. Extreme close-up with intense dramatic facial expression — shock, suspicion, or revelation. Heavy dramatic color grading with high saturation and contrast. Multiple angle repetition effect showing the same face 3 times from different angles in a single frame. Dramatic zoom blur radiating outward. Thunder and lightning flash effects in the background. Intense sound-wave ripple effects. Ekta Kapoor-style maximum drama aesthetic. Bold eyeliner, heavy jewelry, and elaborate traditional Indian attire. Peak soap opera melodrama quality.',
+                 'Fun', N'📺', '#FF5722', 1, 61);
+
+            -- ============================================================
+            -- TRENDING 2025-2026: PROFESSIONAL (SortOrder 62-68)
+            -- ============================================================
+            IF NOT EXISTS (SELECT 1 FROM StylePresets WHERE Name = 'Corporate Headshot')
+                INSERT INTO StylePresets (Name, Description, PromptTemplate, Category, IconEmoji, AccentColor, IsActive, SortOrder) VALUES
+                ('Corporate Headshot', 'Professional LinkedIn corporate headshot',
+                 'Transform into a polished professional corporate headshot. Clean studio photography with soft neutral gray gradient background. Professional business attire — formal suit, crisp shirt, or smart blazer. Perfect three-point lighting — key light at 45 degrees, fill light, and hair light for depth. Subtle skin retouching with natural look — even tone, reduced blemishes while maintaining texture. Sharp focus on eyes with gentle depth of field. Confident approachable expression with slight professional smile. Color-corrected with clean white balance. LinkedIn and corporate website-ready quality.',
+                 'Professional', N'💼', '#1B3A5C', 1, 62);
+
+            IF NOT EXISTS (SELECT 1 FROM StylePresets WHERE Name = 'Magazine Cover Star')
+                INSERT INTO StylePresets (Name, Description, PromptTemplate, Category, IconEmoji, AccentColor, IsActive, SortOrder) VALUES
+                ('Magazine Cover Star', 'High-fashion glossy magazine cover portrait',
+                 'Transform into a high-fashion magazine cover portrait. Vogue and GQ editorial photography quality with dramatic professional lighting. Subject posed with confident editorial body language. High-end fashion styling with designer clothing details. Beauty retouching with flawless skin, defined features, and editorial makeup. Rich cinematic color grading with magazine-quality post-processing. Space for masthead text at top and cover lines on sides. Bold saturated color palette with fashion-forward aesthetic. Studio or luxury location backdrop. Sharp focus with creamy bokeh. Cover-worthy star presence and charisma.',
+                 'Professional', N'📰', '#8B0000', 1, 63);
+
+            IF NOT EXISTS (SELECT 1 FROM StylePresets WHERE Name = 'Currency Engraving')
+                INSERT INTO StylePresets (Name, Description, PromptTemplate, Category, IconEmoji, AccentColor, IsActive, SortOrder) VALUES
+                ('Currency Engraving', 'Detailed banknote currency engraving portrait',
+                 'Transform into a detailed currency engraving portrait style. Fine parallel line hatching and cross-hatching technique used in banknote printing. Intricate intaglio engraving detail — every feature rendered through precise varying-thickness lines. Monochromatic green ink on crisp banknote paper with watermark texture. Formal dignified expression and pose. Ornate decorative border with geometric guilloche patterns and fine rosette details. Serial number and denomination elements framing the portrait. Reserve Bank banknote art quality. Distinguished, authoritative, institutional gravitas.',
+                 'Professional', N'🏦', '#2E5233', 1, 64);
+
+            IF NOT EXISTS (SELECT 1 FROM StylePresets WHERE Name = 'Double Exposure City')
+                INSERT INTO StylePresets (Name, Description, PromptTemplate, Category, IconEmoji, AccentColor, IsActive, SortOrder) VALUES
+                ('Double Exposure City', 'Cinematic double exposure with city skyline',
+                 'Transform into a cinematic double exposure artwork. The subject''s silhouette filled with a dramatic urban cityscape — glittering skyscrapers, busy streets, golden hour city lights. Seamless blend between the portrait and the metropolitan landscape within the head and shoulder outline. Second exposure layer showing detailed city architecture with iconic skyline landmarks. Moody cinematic color grading — deep teal shadows with warm amber city lights. Clean fade to white or dark background at edges. Professional photographic double exposure technique. Symbolic, aspirational, visually striking.',
+                 'Professional', N'🏙️', '#1A237E', 1, 65);
+
+            IF NOT EXISTS (SELECT 1 FROM StylePresets WHERE Name = 'Bronze Sculpture Bust')
+                INSERT INTO StylePresets (Name, Description, PromptTemplate, Category, IconEmoji, AccentColor, IsActive, SortOrder) VALUES
+                ('Bronze Sculpture Bust', 'Classical bronze sculpture bust with patina',
+                 'Transform into a classical bronze sculpture bust. Rich dark bronze metal surface with natural green verdigris patina in crevices and recesses. Detailed sculptural rendering of facial features with sharp chisel marks and smooth polished highlights. Mounted on a marble or granite pedestal base. Museum gallery lighting — dramatic single spotlight creating deep shadows and brilliant specular highlights on the metal surface. Classical Greek-Roman bust proportions with dignified noble bearing. Warm bronze tones from deep chocolate brown to golden copper highlights. Art gallery exhibition quality.',
+                 'Professional', N'🗿', '#6D4C2A', 1, 66);
+
+            IF NOT EXISTS (SELECT 1 FROM StylePresets WHERE Name = 'Passport Photo Pro')
+                INSERT INTO StylePresets (Name, Description, PromptTemplate, Category, IconEmoji, AccentColor, IsActive, SortOrder) VALUES
+                ('Passport Photo Pro', 'Perfect specification-compliant passport photograph',
+                 'Transform into a perfect passport-specification photograph. Clean pure white background. Subject facing directly forward with neutral expression — mouth closed, eyes open and clearly visible. Even flat lighting with no shadows on face or background. Head centered in frame with proper passport photo dimensions and head-size ratio. Professional color balance with natural skin tones. Sharp focus across the entire face. No glasses glare, no head covering unless religious. ICAO 9303 compliant biometric photograph quality. Immigration-ready professional passport photo.',
+                 'Professional', N'🪪', '#1976D2', 1, 67);
+
+            IF NOT EXISTS (SELECT 1 FROM StylePresets WHERE Name = 'Blueprint Portrait')
+                INSERT INTO StylePresets (Name, Description, PromptTemplate, Category, IconEmoji, AccentColor, IsActive, SortOrder) VALUES
+                ('Blueprint Portrait', 'Technical architectural blueprint schematic',
+                 'Transform into a technical architectural blueprint schematic portrait. White precise line drawing on deep Prussian blue cyanotype background. Subject rendered as a detailed technical drawing with dimension lines, measurement annotations, and engineering callouts. Cross-section views showing facial structure like architectural plans. Grid lines, compass roses, and scale bars as decorative elements. Handwritten technical notes in architect''s lettering. Fold-crease lines across the blueprint paper. Professional drafting quality with precise geometric construction lines. Engineering elegance meets artistic portraiture.',
+                 'Professional', N'📐', '#0D47A1', 1, 68);
+
+            -- ============================================================
+            -- TRENDING 2025-2026: ABSTRACT (SortOrder 69-75)
+            -- ============================================================
+            IF NOT EXISTS (SELECT 1 FROM StylePresets WHERE Name = 'Ink in Water')
+                INSERT INTO StylePresets (Name, Description, PromptTemplate, Category, IconEmoji, AccentColor, IsActive, SortOrder) VALUES
+                ('Ink in Water', 'Hypnotic flowing ink dissolving in water',
+                 'Transform into a mesmerizing ink-in-water artwork. The subject''s form composed of flowing colored ink tendrils dissolving and diffusing through crystal-clear water. Rich saturated ink colors — deep indigo, crimson, and gold — swirling and mixing with fluid dynamics. Delicate wispy ink filaments trailing from features and hair. High-speed photography aesthetic capturing the precise moment of ink dispersion. Pure white or deep black background to maximize contrast. Ethereal, hypnotic, ASMR-satisfying visual quality. Macro photography detail showing individual ink particles and micro-currents.',
+                 'Abstract', N'🫧', '#1A237E', 1, 69);
+
+            IF NOT EXISTS (SELECT 1 FROM StylePresets WHERE Name = 'Glitch Art')
+                INSERT INTO StylePresets (Name, Description, PromptTemplate, Category, IconEmoji, AccentColor, IsActive, SortOrder) VALUES
+                ('Glitch Art', 'Digital corruption glitch art aesthetic',
+                 'Transform into a striking glitch art digital corruption aesthetic. The subject fragmented with horizontal scan-line displacement, RGB channel splitting, and pixel sorting artifacts. Vibrant neon colors — electric cyan, hot magenta, acid green — bleeding through data corruption. VHS tracking error bands and digital noise grain. Parts of the image stretched, duplicated, and offset creating a broken-data visual. Chromatic aberration and moshing effects on edges. Dark background with bright glitch artifacts. Modern digital art blending human form with technological decay. Cyberpunk visual quality.',
+                 'Abstract', N'📟', '#00BFA5', 1, 70);
+
+            IF NOT EXISTS (SELECT 1 FROM StylePresets WHERE Name = 'Vaporwave')
+                INSERT INTO StylePresets (Name, Description, PromptTemplate, Category, IconEmoji, AccentColor, IsActive, SortOrder) VALUES
+                ('Vaporwave', 'Retro-futuristic vaporwave aesthetic',
+                 'Transform into a vaporwave retro-futuristic aesthetic. Neon pink and cyan color palette with purple gradients. 1980s-90s retrofuturism — chrome elements, marble bust references, Japanese text overlays. Sunset gradient background with palm tree silhouettes and wireframe grid landscape receding to horizon. VHS scan lines and CRT monitor glow effects. Pastel neon color scheme — hot pink, baby blue, lavender, mint green. Roman column and classical sculpture elements mixed with early internet graphics. Lo-fi dreamy atmosphere with nostalgic digital artifacts. Full vaporwave aesthetic quality.',
+                 'Abstract', N'🌴', '#E040FB', 1, 71);
+
+            IF NOT EXISTS (SELECT 1 FROM StylePresets WHERE Name = 'Kaleidoscope')
+                INSERT INTO StylePresets (Name, Description, PromptTemplate, Category, IconEmoji, AccentColor, IsActive, SortOrder) VALUES
+                ('Kaleidoscope', 'Sacred geometry kaleidoscope mandala pattern',
+                 'Transform into a kaleidoscopic sacred geometry artwork. The subject''s features multiplied and mirrored in perfect radial symmetry — 8-fold or 12-fold kaleidoscope pattern. Rich jewel-tone colors — deep ruby, sapphire blue, emerald green, amethyst purple. Intricate mandala-like geometric patterns radiating from the center. Indian rangoli and yantra sacred geometry influence. Crystalline faceted quality like viewing through a cut gem. Repeating fractal-like patterns becoming finer toward edges. Gold accent lines between segments. Meditative, hypnotic, spiritually resonant. Temple ceiling art quality.',
+                 'Abstract', N'🔮', '#AA00FF', 1, 72);
+
+            IF NOT EXISTS (SELECT 1 FROM StylePresets WHERE Name = 'Fractal Bloom')
+                INSERT INTO StylePresets (Name, Description, PromptTemplate, Category, IconEmoji, AccentColor, IsActive, SortOrder) VALUES
+                ('Fractal Bloom', 'Mathematical fractal art with organic blooming patterns',
+                 'Transform into a stunning fractal bloom artwork. The subject''s form integrated into infinitely recursive mathematical fractal patterns — Mandelbrot spirals, Julia set tendrils, and Fibonacci arrangements. Organic fractal branching structures mimicking neurons, coral, and fern fronds growing from the portrait. Deep space-like dark background with luminous fractal structures in electric blue, violet, gold, and white. Smooth gradient coloring based on iteration depth. Self-similar patterns visible at every scale. Digital mathematical art meets human portraiture. Ultra-detailed high-resolution fractal rendering quality.',
+                 'Abstract', N'🧬', '#304FFE', 1, 73);
+
+            IF NOT EXISTS (SELECT 1 FROM StylePresets WHERE Name = 'Aurora Portrait')
+                INSERT INTO StylePresets (Name, Description, PromptTemplate, Category, IconEmoji, AccentColor, IsActive, SortOrder) VALUES
+                ('Aurora Portrait', 'Northern lights aurora borealis portrait',
+                 'Transform into a celestial aurora borealis portrait. The subject illuminated by and partially composed of flowing northern lights ribbons — shimmering green, violet, pink, and blue aurora curtains dancing across a star-filled night sky. Ethereal light waves flowing through and around the subject''s form. Deep dark navy sky background filled with bright stars and the Milky Way. Aurora light reflecting off the subject creating magical iridescent skin tones. Distant snowy mountain silhouettes on the horizon. Dreamy, celestial, awe-inspiring. National Geographic astrophotography meets fantasy art quality.',
+                 'Abstract', N'🌌', '#00C853', 1, 74);
+
+            IF NOT EXISTS (SELECT 1 FROM StylePresets WHERE Name = 'Holographic Prism')
+                INSERT INTO StylePresets (Name, Description, PromptTemplate, Category, IconEmoji, AccentColor, IsActive, SortOrder) VALUES
+                ('Holographic Prism', 'Iridescent holographic rainbow light refraction',
+                 'Transform into an iridescent holographic prism artwork. The subject rendered with rainbow light refraction effects — prismatic color splitting creating spectral rainbows across all surfaces. Holographic foil-like iridescent skin and hair with shifting colors. Crystal prism elements refracting white light into vivid spectral bands. Clean bright studio lighting creating maximum holographic shimmer. Chrome and mirror-like reflective surfaces. Opalescent color palette — shifting pink, blue, purple, green seamlessly blending. Futuristic, mesmerizing, social-media-ready holographic quality.',
+                 'Abstract', N'💠', '#00E5FF', 1, 75);
+
+            -- ============================================================
+            -- TRENDING 2025-2026: REGIONAL (SortOrder 76-82)
+            -- ============================================================
+            IF NOT EXISTS (SELECT 1 FROM StylePresets WHERE Name = 'Madhubani Mithila')
+                INSERT INTO StylePresets (Name, Description, PromptTemplate, Category, IconEmoji, AccentColor, IsActive, SortOrder) VALUES
+                ('Madhubani Mithila', 'Bihar Madhubani folk painting with natural dyes',
+                 'CRITICAL: Preserve EVERY person in the image — do NOT remove, merge, or skip anyone. Transform into traditional Madhubani (Mithila) folk painting style from Bihar. Bold black ink outlines filled with vibrant natural dye colors — vermillion red, turmeric yellow, indigo blue, lamp-black. Distinctive double-line border technique with geometric and floral fill patterns. Large expressive fish-shaped eyes and elongated features. Signature motifs — fish, peacocks, lotus, sun, moon, and wedding scenes. Every empty space filled with intricate pattern work. Floral borders framing the composition. Hand-painted quality on handmade paper texture. UNESCO Intangible Heritage art quality.',
+                 'Regional', N'🪷', '#C62828', 1, 76);
+
+            IF NOT EXISTS (SELECT 1 FROM StylePresets WHERE Name = 'Warli Tribal')
+                INSERT INTO StylePresets (Name, Description, PromptTemplate, Category, IconEmoji, AccentColor, IsActive, SortOrder) VALUES
+                ('Warli Tribal', 'Maharashtra Warli tribal art with geometric figures',
+                 'CRITICAL: Preserve EVERY person in the image — do NOT remove, merge, or skip anyone. Transform into Warli tribal art style from Maharashtra. Simple geometric figures made from basic shapes — circles for heads, triangles for bodies, lines for limbs. White rice paste paint on dark red-brown mud wall background. Characteristic Warli circular tarpa dance formation patterns. Scenes of daily village life — farming, hunting, dancing, festivals. Trees as triangular forms, animals as simple geometric shapes. Minimalist yet deeply expressive folk art. White on earth-brown only. Rustic, primal, rhythmic visual energy. Ancient tribal painting quality.',
+                 'Regional', N'🏠', '#5D4037', 1, 77);
+
+            IF NOT EXISTS (SELECT 1 FROM StylePresets WHERE Name = 'Pattachitra Odisha')
+                INSERT INTO StylePresets (Name, Description, PromptTemplate, Category, IconEmoji, AccentColor, IsActive, SortOrder) VALUES
+                ('Pattachitra Odisha', 'Odisha Pattachitra cloth scroll painting',
+                 'CRITICAL: Preserve EVERY person in the image — do NOT remove, merge, or skip anyone. Transform into Pattachitra scroll painting style from Odisha. Rich vibrant colors on treated cloth — deep red, yellow ochre, green, white, and black from natural sources. Bold precise black outlines with intricate detailing. Ornate decorative borders with floral scroll patterns. Figures with characteristic large lotus-shaped eyes, sharp nose, ornate headdress. Lord Jagannath temple art influence. Dense composition with no empty space. Traditional chitrakara artisan quality with mythological narrative storytelling.',
+                 'Regional', N'🎭', '#E65100', 1, 78);
+
+            IF NOT EXISTS (SELECT 1 FROM StylePresets WHERE Name = 'Gond Tribal')
+                INSERT INTO StylePresets (Name, Description, PromptTemplate, Category, IconEmoji, AccentColor, IsActive, SortOrder) VALUES
+                ('Gond Tribal', 'Madhya Pradesh Gond tribal dot-and-line art',
+                 'CRITICAL: Preserve EVERY person in the image — do NOT remove, merge, or skip anyone. Transform into Gond tribal art style from Madhya Pradesh. Distinctive dot-and-dash fill technique creating intricate patterns within bold outlines. Vibrant earthy colors — cobalt blue, bright red, forest green, warm yellow on white or cream background. Organic flowing forms depicting humans, animals, and nature spirits. Signature Gond motifs — peacocks, deer, trees of life filled with microscopic dot patterns. Each area contains unique repetitive patterns. Jangarh Singh Shyam contemporary Gond art influence. Museum exhibition quality.',
+                 'Regional', N'🦚', '#1565C0', 1, 79);
+
+            IF NOT EXISTS (SELECT 1 FROM StylePresets WHERE Name = 'Kerala Mural')
+                INSERT INTO StylePresets (Name, Description, PromptTemplate, Category, IconEmoji, AccentColor, IsActive, SortOrder) VALUES
+                ('Kerala Mural', 'Kerala temple mural painting tradition',
+                 'CRITICAL: Preserve EVERY person in the image — do NOT remove, merge, or skip anyone. Transform into Kerala temple mural painting style. Rich warm palette based on Panchavarna — yellow ochre, red ochre, green, blue-black, and white. Bold precise black outlines with graduated shading. Figures with characteristic large elongated eyes, ornate gold crowns and jewelry, divine expressions. Decorative floral and geometric border patterns. Temple wall fresco texture with subtle aging. Traditional Malayalam aesthetic with mythological grandeur. Padmanabhapuram palace and Mattancherry temple art quality. Sacred, luminous, divinely graceful.',
+                 'Regional', N'🪔', '#2E7D32', 1, 80);
+
+            IF NOT EXISTS (SELECT 1 FROM StylePresets WHERE Name = 'Phulkari Punjab')
+                INSERT INTO StylePresets (Name, Description, PromptTemplate, Category, IconEmoji, AccentColor, IsActive, SortOrder) VALUES
+                ('Phulkari Punjab', 'Punjab Phulkari embroidery textile art',
+                 'CRITICAL: Preserve EVERY person in the image — do NOT remove, merge, or skip anyone. Transform into Phulkari embroidery art style from Punjab. Dense geometric floral patterns created with long satin-stitch embroidery on handspun cotton. Vibrant silk thread colors — golden yellow, bright orange, hot pink, parrot green, royal blue on rustic brown khaddar base. Characteristic Phulkari motifs — flowers, wheat sheaves, peacocks, geometric diamonds. Visible thread texture with directional stitch patterns catching light. Dense surface coverage where fabric barely shows. Wedding dupatta and bagh embroidery quality. Celebratory, vivid, textile art masterpiece.',
+                 'Regional', N'🌸', '#FF6F00', 1, 81);
+
+            IF NOT EXISTS (SELECT 1 FROM StylePresets WHERE Name = 'Rajput Miniature')
+                INSERT INTO StylePresets (Name, Description, PromptTemplate, Category, IconEmoji, AccentColor, IsActive, SortOrder) VALUES
+                ('Rajput Miniature', 'Rajasthan Rajput court miniature painting',
+                 'CRITICAL: Preserve EVERY person in the image — do NOT remove, merge, or skip anyone. Transform into Rajput miniature painting style from Rajasthan. Exquisite fine-detail court painting with vibrant opaque watercolors and gold leaf accents. Rich jewel-tone palette — deep blue, vermillion red, emerald green, pure gold. Figures with characteristic large almond eyes, sharp profiles, elaborate turbans or ornate jewelry. Decorative architectural elements — jharokha windows, palace courtyards, lotus pools. Flat perspective with intricate borders and floral margins. Mewar, Bundi, and Kishangarh school influences. Miniature painting masterpiece with microscopic detail.',
+                 'Regional', N'👑', '#7B1FA2', 1, 82);
+        ");
+    }
+    catch (Exception ex)
+    {
+        app.Logger.LogWarning(ex, "Trending 2025-2026 StylePresets seeding failed (non-fatal)");
+    }
+
     // Add ThumbnailPath column to StylePresets if missing
     try
     {
@@ -224,6 +494,29 @@ if (!app.Environment.IsDevelopment())
     app.UseExceptionHandler("/Error", createScopeForErrors: true);
 }
 
+app.UseHttpsRedirection();
+
+// Security headers
+app.Use(async (context, next) =>
+{
+    var headers = context.Response.Headers;
+    headers["X-Content-Type-Options"] = "nosniff";
+    headers["X-Frame-Options"] = "DENY";
+    headers["Referrer-Policy"] = "strict-origin-when-cross-origin";
+    headers["Permissions-Policy"] = "camera=(), microphone=(), geolocation=()";
+    if (!app.Environment.IsDevelopment())
+        headers["Strict-Transport-Security"] = "max-age=31536000; includeSubDomains";
+    headers["Content-Security-Policy"] =
+        "default-src 'self'; " +
+        "script-src 'self' 'unsafe-inline' 'unsafe-eval' https://cdn.jsdelivr.net; " +
+        "style-src 'self' 'unsafe-inline'; " +
+        "img-src 'self' data: blob:; " +
+        "connect-src 'self' ws: wss:; " +
+        "frame-ancestors 'none'";
+    await next();
+});
+
+app.UseRateLimiter();
 app.UseStaticFiles();
 app.UseAntiforgery();
 

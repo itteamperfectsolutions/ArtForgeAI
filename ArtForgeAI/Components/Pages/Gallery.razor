@@ -1,6 +1,7 @@
 @page "/gallery"
 @rendermode InteractiveServer
 @inject IGenerationHistoryService HistoryService
+@inject ILogger<Gallery> Logger
 
 <PageTitle>ArtForge AI - Gallery</PageTitle>
 
@@ -58,26 +59,50 @@ else
 
     protected override async Task OnInitializedAsync()
     {
-        await LoadGenerations();
+        try
+        {
+            await LoadGenerations();
+        }
+        catch (Exception ex)
+        {
+            Logger.LogError(ex, "Failed to initialize gallery");
+        }
     }
 
     private async Task LoadGenerations()
     {
         _loading = true;
         _page = 1;
-        _generations = await HistoryService.GetHistoryAsync(page: _page, pageSize: PageSize);
-        var total = await HistoryService.GetTotalCountAsync();
-        _hasMore = total > _generations.Count;
-        _loading = false;
+        try
+        {
+            _generations = await HistoryService.GetHistoryAsync(page: _page, pageSize: PageSize);
+            var total = await HistoryService.GetTotalCountAsync();
+            _hasMore = total > _generations.Count;
+        }
+        catch (Exception ex)
+        {
+            Logger.LogError(ex, "Failed to load generations");
+        }
+        finally
+        {
+            _loading = false;
+        }
     }
 
     private async Task LoadMore()
     {
-        _page++;
-        var more = await HistoryService.GetHistoryAsync(page: _page, pageSize: PageSize);
-        _generations.AddRange(more);
-        var total = await HistoryService.GetTotalCountAsync();
-        _hasMore = total > _generations.Count;
+        try
+        {
+            var more = await HistoryService.GetHistoryAsync(page: _page + 1, pageSize: PageSize);
+            _generations.AddRange(more);
+            _page++;
+            var total = await HistoryService.GetTotalCountAsync();
+            _hasMore = total > _generations.Count;
+        }
+        catch (Exception ex)
+        {
+            Logger.LogError(ex, "Failed to load more generations");
+        }
     }
 
     private void OpenPreview(ImageGeneration gen)
@@ -92,13 +117,20 @@ else
 
     private async Task DeleteGeneration(int id)
     {
-        var success = await HistoryService.DeleteGenerationAsync(id);
-        if (success)
+        try
         {
-            _generations.RemoveAll(g => g.Id == id);
-            _selectedGeneration = null;
-            if (_toast is not null)
-                _ = _toast.ShowAsync("Image deleted");
+            var success = await HistoryService.DeleteGenerationAsync(id);
+            if (success)
+            {
+                _generations.RemoveAll(g => g.Id == id);
+                _selectedGeneration = null;
+                if (_toast is not null)
+                    _ = _toast.ShowAsync("Image deleted");
+            }
+        }
+        catch (Exception ex)
+        {
+            Logger.LogError(ex, "Failed to delete generation {GenerationId}", id);
         }
     }
 }

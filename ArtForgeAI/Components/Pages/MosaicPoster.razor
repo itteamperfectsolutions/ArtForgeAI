@@ -2,6 +2,7 @@
 @rendermode InteractiveServer
 @inject IImageStorageService ImageStorage
 @inject IJSRuntime JS
+@inject ILogger<MosaicPoster> Logger
 @implements IDisposable
 
 <PageTitle>ArtForge AI - Mosaic Poster</PageTitle>
@@ -18,8 +19,8 @@
             <div class="card-body" style="padding: 1rem 1.5rem;">
 
                 @* Hidden plain HTML file inputs — no Blazor InputFile *@
-                <input type="file" id="mosaicMainInput" accept="image/*" style="display:none;" />
-                <input type="file" id="mosaicBgInput" accept="image/*" multiple style="display:none;" />
+                <input type="file" id="mosaicMainInput" accept=".jpg,.jpeg,.png,.webp,.gif" style="display:none;" />
+                <input type="file" id="mosaicBgInput" accept=".jpg,.jpeg,.png,.webp,.gif" multiple style="display:none;" />
 
                 @* Main Image Upload *@
                 <div class="mb-3">
@@ -338,7 +339,8 @@
         }
         catch (Exception ex)
         {
-            _errorMessage = $"Upload failed: {ex.Message}";
+            Logger.LogError(ex, "Main image upload failed");
+            _errorMessage = "Upload failed. Please try again.";
         }
         StateHasChanged();
     }
@@ -365,7 +367,8 @@
         }
         catch (Exception ex)
         {
-            _errorMessage = $"Upload failed: {ex.Message}";
+            Logger.LogError(ex, "Background images upload failed");
+            _errorMessage = "Upload failed. Please try again.";
         }
         StateHasChanged();
     }
@@ -507,7 +510,8 @@
         }
         catch (Exception ex)
         {
-            _errorMessage = $"Canvas initialization failed: {ex.Message}";
+            Logger.LogError(ex, "Canvas initialization failed");
+            _errorMessage = "Canvas initialization failed. Please try again.";
             _isCanvasReady = false;
         }
         finally
@@ -530,7 +534,8 @@
         }
         catch (Exception ex)
         {
-            _errorMessage = $"Update failed: {ex.Message}";
+            Logger.LogError(ex, "Canvas update failed");
+            _errorMessage = "Update failed. Please try again.";
         }
     }
 
@@ -543,7 +548,8 @@
         }
         catch (Exception ex)
         {
-            _errorMessage = $"Layout update failed: {ex.Message}";
+            Logger.LogError(ex, "Layout update failed");
+            _errorMessage = "Layout update failed. Please try again.";
         }
     }
 
@@ -587,7 +593,8 @@
         }
         catch (Exception ex)
         {
-            _errorMessage = $"Preset failed: {ex.Message}";
+            Logger.LogError(ex, "Preset application failed for {PresetName}", presetName);
+            _errorMessage = "Preset failed. Please try again.";
         }
     }
 
@@ -613,7 +620,8 @@
         }
         catch (Exception ex)
         {
-            _errorMessage = $"Export failed: {ex.Message}";
+            Logger.LogError(ex, "PNG export failed");
+            _errorMessage = "Export failed. Please try again.";
         }
         finally
         {
@@ -642,7 +650,8 @@
         }
         catch (Exception ex)
         {
-            _errorMessage = $"Export failed: {ex.Message}";
+            Logger.LogError(ex, "ZIP export failed");
+            _errorMessage = "Export failed. Please try again.";
         }
         finally
         {
@@ -672,7 +681,8 @@
         }
         catch (Exception ex)
         {
-            _errorMessage = $"Export failed: {ex.Message}";
+            Logger.LogError(ex, "Metadata export failed");
+            _errorMessage = "Export failed. Please try again.";
         }
         finally
         {

@@ -210,7 +210,12 @@ public sealed class OnnxBackgroundRemovalService : IBackgroundRemovalService, ID
 
     private string ResolveFullPath(string webRelativePath)
     {
-        return Path.Combine(_webRootPath, webRelativePath.Replace("/", Path.DirectorySeparatorChar.ToString()));
+        var normalized = webRelativePath.Replace("/", Path.DirectorySeparatorChar.ToString());
+        var fullPath = Path.GetFullPath(Path.Combine(_webRootPath, normalized));
+        var webRoot = Path.GetFullPath(_webRootPath);
+        if (!fullPath.StartsWith(webRoot, StringComparison.OrdinalIgnoreCase))
+            throw new UnauthorizedAccessException("Access to the specified path is denied.");
+        return fullPath;
     }
 
     private BackgroundRemovalResult ProcessImage(string sourceImagePath, string backgroundColor)

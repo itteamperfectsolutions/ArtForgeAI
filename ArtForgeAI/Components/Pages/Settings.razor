@@ -6,6 +6,7 @@
 @inject IImageGenerationService ImageGenService
 @inject IImageStorageService ImageStorage
 @inject IJSRuntime JS
+@inject ILogger<Settings> Logger
 
 <PageTitle>ArtForge AI - Settings</PageTitle>
 
@@ -326,7 +327,7 @@
                                     <label class="btn-primary-gradient btn-sm admin-upload-label" title="Upload a test image to preview this style"
                                            style="@(_testingStyleId is not null ? "opacity:0.5;pointer-events:none;" : "")">
                                         &#10024; Test Style
-                                        <InputFile OnChange="(e) => TestStyle(e, preset)" accept="image/*" style="display:none" />
+                                        <InputFile OnChange="(e) => TestStyle(e, preset)" accept=".jpg,.jpeg,.png,.webp,.gif" style="display:none" />
                                     </label>
                                     <button class="btn-secondary btn-sm" @onclick="() => GenerateThumbnail(preset)"
                                             disabled="@(_generatingThumbnailId is not null)"
@@ -335,7 +336,7 @@
                                     </button>
                                     <label class="btn-secondary btn-sm admin-upload-label" title="Upload custom thumbnail">
                                         &#128247; Upload
-                                        <InputFile OnChange="(e) => UploadThumbnail(e, preset.Id)" accept="image/*" style="display:none" />
+                                        <InputFile OnChange="(e) => UploadThumbnail(e, preset.Id)" accept=".jpg,.jpeg,.png,.webp,.gif" style="display:none" />
                                     </label>
                                     <button class="btn-secondary btn-sm" @onclick="() => StartStyleEdit(preset)">Edit</button>
                                     <button class="btn-danger btn-sm" style="padding: 0.25rem 0.5rem; font-size: 0.72rem;" @onclick="() => DeleteStyle(preset.Id)">Delete</button>
@@ -404,13 +405,13 @@
                                         <div class="admin-completed-actions">
                                             <label class="btn-primary-gradient btn-sm admin-upload-label admin-compact-btn" title="Test style">
                                                 &#10024;
-                                                <InputFile OnChange="(e) => TestStyle(e, preset)" accept="image/*" style="display:none" />
+                                                <InputFile OnChange="(e) => TestStyle(e, preset)" accept=".jpg,.jpeg,.png,.webp,.gif" style="display:none" />
                                             </label>
                                             <button class="btn-secondary btn-sm admin-compact-btn" @onclick="() => GenerateThumbnail(preset)"
                                                     disabled="@(_generatingThumbnailId is not null)" title="Regenerate">&#127912;</button>
                                             <label class="btn-secondary btn-sm admin-upload-label admin-compact-btn" title="Upload thumbnail">
                                                 &#128247;
-                                                <InputFile OnChange="(e) => UploadThumbnail(e, preset.Id)" accept="image/*" style="display:none" />
+                                                <InputFile OnChange="(e) => UploadThumbnail(e, preset.Id)" accept=".jpg,.jpeg,.png,.webp,.gif" style="display:none" />
                                             </label>
                                             <button class="btn-secondary btn-sm admin-compact-btn" @onclick="() => StartStyleEdit(preset)" title="Edit">&#9998;</button>
                                             <button class="btn-danger btn-sm admin-compact-btn" @onclick="() => DeleteStyle(preset.Id)" title="Delete">&#128465;</button>
@@ -494,7 +495,7 @@
                            title="Upload a test image to preview this style"
                            style="@(string.IsNullOrWhiteSpace(_newStylePrompt) || _newStyleTestProcessing ? "opacity:0.5;pointer-events:none;" : "")">
                         &#10024; Test Prompt
-                        <InputFile OnChange="TestNewStyle" accept="image/*" style="display:none" />
+                        <InputFile OnChange="TestNewStyle" accept=".jpg,.jpeg,.png,.webp,.gif" style="display:none" />
                     </label>
 
                     @if (!_newStyleTestProcessing && !string.IsNullOrEmpty(_newStyleTestResultPath))
@@ -707,11 +708,13 @@
         }
         catch (Exception ex)
         {
-            _message = $"Failed to save: {ex.Message}";
+            Logger.LogError(ex, "Failed to save settings");
+            _message = "Failed to save settings. Please try again.";
         }
         finally
         {
             _saving = false;
+            StateHasChanged();
         }
     }
 
@@ -919,7 +922,7 @@
             // Run style transfer with the prompt template
             var request = new GenerationRequest
             {
-                Prompt = _newStylePrompt,
+                Prompt = _newStylePrompt + StylePreset.FacialIdentitySuffix,
                 Width = 512,
                 Height = 512,
                 SizeName = "Square",
@@ -941,7 +944,8 @@
         }
         catch (Exception ex)
         {
-            _newStyleTestError = ex.Message;
+            Logger.LogError(ex, "New style test failed");
+            _newStyleTestError = "An unexpected error occurred. Please try again.";
         }
         finally
         {
@@ -1036,7 +1040,8 @@
         }
         catch (Exception ex)
         {
-            _thumbnailMessage = $"Upload failed: {ex.Message}";
+            Logger.LogError(ex, "Thumbnail upload failed for preset {PresetId}", presetId);
+            _thumbnailMessage = "Upload failed. Please try again.";
         }
 
         StateHasChanged();
@@ -1064,7 +1069,7 @@
             // Run style transfer with the preset's prompt
             var request = new GenerationRequest
             {
-                Prompt = preset.PromptTemplate,
+                Prompt = preset.EffectivePrompt,
                 Width = 512,
                 Height = 512,
                 SizeName = "Square",
@@ -1086,7 +1091,8 @@
         }
         catch (Exception ex)
         {
-            _testError = ex.Message;
+            Logger.LogError(ex, "Style test failed for {StyleName}", preset.Name);
+            _testError = "An unexpected error occurred. Please try again.";
         }
         finally
         {
@@ -1158,12 +1164,13 @@
             }
             else
             {
-                _thumbnailMessage = $"Failed: {result.ErrorMessage}";
+                _thumbnailMessage = "Thumbnail generation failed. Please try again.";
             }
         }
         catch (Exception ex)
         {
-            _thumbnailMessage = $"Error: {ex.Message}";
+            Logger.LogError(ex, "Thumbnail generation failed for {StyleName}", preset.Name);
+            _thumbnailMessage = "An error occurred. Please try again.";
         }
         finally
         {

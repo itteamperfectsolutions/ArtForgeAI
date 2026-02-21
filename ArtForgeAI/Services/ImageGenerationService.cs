@@ -56,8 +56,7 @@ public class ImageGenerationService : IImageGenerationService
                 _logger.LogInformation("Pure background removal detected — using local ONNX processing");
 
                 var bgColor = BackgroundColorParser.ExtractBackgroundColor(request.Prompt);
-                var refFullPath = Path.Combine(_env.WebRootPath,
-                    request.ReferenceImagePath!.Replace("/", Path.DirectorySeparatorChar.ToString()));
+                var refFullPath = SafeResolvePath(request.ReferenceImagePath!);
 
                 // Enhance prompt locally (template-based, zero AI cost)
                 string? localEnhanced = null;
@@ -135,7 +134,14 @@ public class ImageGenerationService : IImageGenerationService
                 IsSuccess = true
             };
 
-            await _historyService.SaveGenerationAsync(generation);
+            try
+            {
+                await _historyService.SaveGenerationAsync(generation);
+            }
+            catch (Exception historyEx)
+            {
+                _logger.LogError(historyEx, "Failed to save generation history (image was generated successfully)");
+            }
 
             return new GenerationResult
             {
@@ -152,20 +158,27 @@ public class ImageGenerationService : IImageGenerationService
 
             var errorMsg = $"[{request.Provider}] {ex.Message}";
 
-            var errRefPaths = request.ReferenceImagePaths.Count > 0
-                ? string.Join(";", request.ReferenceImagePaths)
-                : null;
-
-            var generation = new ImageGeneration
+            try
             {
-                OriginalPrompt = Truncate(request.Prompt, 2000)!,
-                EnhancedPrompt = Truncate(enhancedPrompt, 4000),
-                ReferenceImagePath = Truncate(errRefPaths, 500),
-                ImageSize = request.SizeName,
-                IsSuccess = false,
-                ErrorMessage = Truncate(errorMsg, 1000)
-            };
-            await _historyService.SaveGenerationAsync(generation);
+                var errRefPaths = request.ReferenceImagePaths.Count > 0
+                    ? string.Join(";", request.ReferenceImagePaths)
+                    : null;
+
+                var generation = new ImageGeneration
+                {
+                    OriginalPrompt = Truncate(request.Prompt, 2000)!,
+                    EnhancedPrompt = Truncate(enhancedPrompt, 4000),
+                    ReferenceImagePath = Truncate(errRefPaths, 500),
+                    ImageSize = request.SizeName,
+                    IsSuccess = false,
+                    ErrorMessage = Truncate(errorMsg, 1000)
+                };
+                await _historyService.SaveGenerationAsync(generation);
+            }
+            catch (Exception historyEx)
+            {
+                _logger.LogError(historyEx, "Failed to save error history for provider {Provider}", request.Provider);
+            }
 
             return new GenerationResult
             {
@@ -212,11 +225,10 @@ public class ImageGenerationService : IImageGenerationService
             images = new List<(byte[] data, string mimeType)>();
             foreach (var refPath in request.ReferenceImagePaths)
             {
-                var fullPath = Path.Combine(_env.WebRootPath,
-                    refPath.Replace("/", Path.DirectorySeparatorChar.ToString()));
+                var fullPath = SafeResolvePath(refPath);
 
                 if (!File.Exists(fullPath))
-                    throw new FileNotFoundException("Reference image not found.", fullPath);
+                    throw new FileNotFoundException("Reference image not found.");
 
                 var refBytes = await File.ReadAllBytesAsync(fullPath);
                 var ext = Path.GetExtension(fullPath).ToLowerInvariant();
@@ -297,11 +309,10 @@ public class ImageGenerationService : IImageGenerationService
         // Replicate Kontext only supports a single input image — use the first reference
         if (request.HasReferenceImages)
         {
-            var fullPath = Path.Combine(_env.WebRootPath,
-                request.ReferenceImagePath!.Replace("/", Path.DirectorySeparatorChar.ToString()));
+            var fullPath = SafeResolvePath(request.ReferenceImagePath!);
 
             if (!File.Exists(fullPath))
-                throw new FileNotFoundException("Reference image not found.", fullPath);
+                throw new FileNotFoundException("Reference image not found.");
 
             var refBytes = await File.ReadAllBytesAsync(fullPath);
             var ext = Path.GetExtension(fullPath).ToLowerInvariant();
@@ -443,11 +454,10 @@ public class ImageGenerationService : IImageGenerationService
     /// </summary>
     private async Task<string> GenerateWithEditAsync(string prompt, string referenceImagePath, int width, int height)
     {
-        var fullPath = Path.Combine(_env.WebRootPath,
-            referenceImagePath.Replace("/", Path.DirectorySeparatorChar.ToString()));
+        var fullPath = SafeResolvePath(referenceImagePath);
 
         if (!File.Exists(fullPath))
-            throw new FileNotFoundException("Reference image not found.", fullPath);
+            throw new FileNotFoundException("Reference image not found.");
 
 #pragma warning disable OPENAI001
         var imageSize = MapToEditSize(width, height);
@@ -515,5 +525,15 @@ public class ImageGenerationService : IImageGenerationService
         if (ratio < 0.8) return GeneratedImageSize.W1024xH1536;   // portrait
 #pragma warning restore OPENAI001
         return GeneratedImageSize.W1024xH1024;                     // square
+    }
+
+    private string SafeResolvePath(string localPath)
+    {
+        var normalized = localPath.Replace("/", Path.DirectorySeparatorChar.ToString());
+        var fullPath = Path.GetFullPath(Path.Combine(_env.WebRootPath, normalized));
+        var webRoot = Path.GetFullPath(_env.WebRootPath);
+        if (!fullPath.StartsWith(webRoot, StringComparison.OrdinalIgnoreCase))
+            throw new UnauthorizedAccessException("Access to the specified path is denied.");
+        return fullPath;
     }
 }
