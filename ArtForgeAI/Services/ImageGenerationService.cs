@@ -244,18 +244,19 @@ public class ImageGenerationService : IImageGenerationService
         }
 
         byte[] imageBytes;
+        string? geminiText;
 
         try
         {
             if (images is not null)
             {
                 _logger.LogInformation("Sending image-to-image request to Gemini with {Count} reference images", images.Count);
-                (_, imageBytes) = await _geminiImageService.EditImageAsync(finalPrompt, images, request.Width, request.Height);
+                (geminiText, imageBytes) = await _geminiImageService.EditImageAsync(finalPrompt, images, request.Width, request.Height);
             }
             else
             {
                 _logger.LogInformation("Sending text-to-image request to Gemini");
-                (_, imageBytes) = await _geminiImageService.GenerateImageAsync(finalPrompt, request.Width, request.Height);
+                (geminiText, imageBytes) = await _geminiImageService.GenerateImageAsync(finalPrompt, request.Width, request.Height);
             }
         }
         catch (InvalidOperationException ex) when (request.EnhancePrompt && finalPrompt != request.Prompt)
@@ -265,15 +266,19 @@ public class ImageGenerationService : IImageGenerationService
 
             if (images is not null)
             {
-                (_, imageBytes) = await _geminiImageService.EditImageAsync(request.Prompt, images, request.Width, request.Height);
+                (geminiText, imageBytes) = await _geminiImageService.EditImageAsync(request.Prompt, images, request.Width, request.Height);
             }
             else
             {
-                (_, imageBytes) = await _geminiImageService.GenerateImageAsync(request.Prompt, request.Width, request.Height);
+                (geminiText, imageBytes) = await _geminiImageService.GenerateImageAsync(request.Prompt, request.Width, request.Height);
             }
 
             enhancedPrompt = $"[Retry with original] {request.Prompt}";
         }
+
+        // geminiText contains the model name prefix e.g. "[gemini-3-pro-image-preview] ..."
+        if (!string.IsNullOrEmpty(geminiText))
+            enhancedPrompt = geminiText;
 
         var fileName = $"{Guid.NewGuid():N}.png";
         var localPath = await _imageStorage.SaveImageFromBytesAsync(BinaryData.FromBytes(imageBytes), fileName);

@@ -54,6 +54,10 @@ public class StylePresetService : IStylePresetService
         preset.SortOrder = maxSort + 1;
         db.StylePresets.Add(preset);
         await db.SaveChangesAsync();
+
+        // If the user re-creates a style they previously deleted, un-track it
+        await db.Database.ExecuteSqlRawAsync(
+            "DELETE FROM DeletedStyleSeeds WHERE Name = {0}", preset.Name);
     }
 
     public async Task UpdateAsync(StylePreset preset)
@@ -69,6 +73,11 @@ public class StylePresetService : IStylePresetService
         var preset = await db.StylePresets.FindAsync(id);
         if (preset is not null)
         {
+            // Record the name so seed logic won't re-insert it on restart
+            await db.Database.ExecuteSqlRawAsync(
+                "IF NOT EXISTS (SELECT 1 FROM DeletedStyleSeeds WHERE Name = {0}) INSERT INTO DeletedStyleSeeds (Name) VALUES ({0})",
+                preset.Name);
+
             db.StylePresets.Remove(preset);
             await db.SaveChangesAsync();
         }

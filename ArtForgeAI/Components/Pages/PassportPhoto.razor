@@ -1,0 +1,412 @@
+@page "/passport-photo"
+@rendermode InteractiveServer
+@inject IImageStorageService ImageStorage
+@inject IJSRuntime JS
+@inject IWebHostEnvironment Env
+@inject ILogger<PassportPhoto> Logger
+@implements IDisposable
+
+<PageTitle>ArtForge AI - Passport Photo</PageTitle>
+
+<div class="page-header" style="margin-bottom: 0.5rem;">
+    <h2 style="font-size:1.3rem;">Passport Photo</h2>
+    <p style="font-size:0.82rem;">Upload a photo to instantly generate a print-ready passport sheet</p>
+</div>
+
+<div class="create-layout">
+    @* ── Left column ── *@
+    <div class="create-left">
+        <div class="card">
+            <div class="card-body" style="padding: 1rem 1.5rem;">
+
+                @* Upload / Crop area *@
+                <div class="mb-3">
+                    <label class="form-label">Upload Your Photo</label>
+                    @if (!string.IsNullOrEmpty(_uploadedPath))
+                    {
+                        <div style="position: relative;">
+                            <button class="ref-thumb-remove" @onclick="RemovePhoto" disabled="@_isProcessing"
+                                    style="position:absolute;top:4px;right:4px;z-index:20;">&#10005;</button>
+                            <div id="ppCropArea" class="pp-crop-inline"></div>
+                        </div>
+                        <p style="font-size: 0.72rem; color: var(--text-muted); margin: 0.35rem 0 0 0;">
+                            Drag to move, resize from corners. Aspect ratio locked 35×45mm.
+                        </p>
+                    }
+                    else
+                    {
+                        <label class="upload-area upload-area-compact @(_isUploading ? "disabled" : "")">
+                            <span class="upload-icon">&#128247;</span>
+                            <span>Upload a portrait photo</span>
+                            <span style="font-size: 0.7rem; color: var(--text-muted); margin-left: 0.5rem;">JPG, PNG up to 10MB</span>
+                            <InputFile OnChange="HandleFileUpload" accept=".jpg,.jpeg,.png,.webp" style="display:none" disabled="@(_isProcessing || _isUploading)" />
+                        </label>
+                    }
+                    @if (_isUploading)
+                    {
+                        <div class="upload-progress-bar" style="margin-top: 0.35rem;">
+                            <div class="upload-progress-fill" style="width: 50%"></div>
+                            <span class="upload-progress-text">Uploading...</span>
+                        </div>
+                    }
+                </div>
+
+                @* Settings — always visible once photo uploaded *@
+                @if (!string.IsNullOrEmpty(_uploadedPath))
+                {
+                    <hr style="margin: 0.5rem 0; border-color: var(--border-color);" />
+
+                    @* Paper size dropdown *@
+                    <div class="mb-3">
+                        <label class="form-label">Paper Size</label>
+                        <select class="form-select" @bind="_selectedPaper" @bind:after="OnPaperChanged" disabled="@_isProcessing">
+                            @foreach (var p in ArtForgeAI.Models.PassportPhotoConfig.PaperSizes)
+                            {
+                                <option value="@p.Name">@p.Name (@(p.WidthMm)×@(p.HeightMm)mm)</option>
+                            }
+                            <option value="Custom">Custom Size</option>
+                        </select>
+                    </div>
+
+                    @if (_selectedPaper == "Custom")
+                    {
+                        <div style="display:flex;gap:0.5rem;margin-bottom:0.75rem;">
+                            <div style="flex:1;">
+                                <label class="form-label" style="font-size:0.75rem;">Width (mm)</label>
+                                <input type="number" class="form-input" min="50" max="1000" step="1"
+                                       @bind="_customWidthMm" @bind:event="oninput" @onchange="OnPaperChanged"
+                                       style="width:100%;padding:0.35rem 0.5rem;font-size:0.85rem;" />
+                            </div>
+                            <div style="flex:1;">
+                                <label class="form-label" style="font-size:0.75rem;">Height (mm)</label>
+                                <input type="number" class="form-input" min="50" max="1000" step="1"
+                                       @bind="_customHeightMm" @bind:event="oninput" @onchange="OnPaperChanged"
+                                       style="width:100%;padding:0.35rem 0.5rem;font-size:0.85rem;" />
+                            </div>
+                        </div>
+                    }
+
+                    <div class="pp-orientation-row">
+                        <button class="pp-orient-btn @(!_landscape ? "selected" : "")"
+                                @onclick="() => SetOrientation(false)" disabled="@_isProcessing">
+                            <span style="font-size: 1.1rem;">&#9645;</span> Portrait
+                        </button>
+                        <button class="pp-orient-btn @(_landscape ? "selected" : "")"
+                                @onclick="() => SetOrientation(true)" disabled="@_isProcessing">
+                            <span style="font-size: 1.1rem;">&#9644;</span> Landscape
+                        </button>
+                    </div>
+
+                    <div class="pp-grid-info">
+                        @_gridTotal photos (@(_gridCols)×@(_gridRows))
+                    </div>
+
+                    <div class="pp-slider-row">
+                        <label>Spacing</label>
+                        <input type="range" min="0" max="10" step="0.5" @bind="_spacingMm" @bind:event="oninput"
+                               @onchange="OnSettingsChanged" disabled="@_isProcessing" />
+                        <span>@(_spacingMm)mm</span>
+                    </div>
+
+                    <div class="pp-slider-row">
+                        <label>Margin</label>
+                        <input type="range" min="0" max="15" step="0.5" @bind="_marginMm" @bind:event="oninput"
+                               @onchange="OnSettingsChanged" disabled="@_isProcessing" />
+                        <span>@(_marginMm)mm</span>
+                    </div>
+
+                    <div class="pp-toggle-row">
+                        <label class="pp-toggle">
+                            <input type="checkbox" @bind="_cutMarks" @bind:after="OnSettingsChanged" disabled="@_isProcessing" />
+                            <span class="pp-toggle-slider"></span>
+                        </label>
+                        <span class="pp-toggle-label">Outline</span>
+                    </div>
+
+                    <div class="pp-toggle-row">
+                        <label class="pp-toggle">
+                            <input type="checkbox" @bind="_cropMarks" @bind:after="OnSettingsChanged" disabled="@_isProcessing" />
+                            <span class="pp-toggle-slider"></span>
+                        </label>
+                        <span class="pp-toggle-label">Crop marks</span>
+                    </div>
+                }
+            </div>
+        </div>
+
+        @if (!string.IsNullOrEmpty(_errorMessage))
+        {
+            <div class="card" style="margin-top: 0.75rem; border-left: 3px solid var(--danger);">
+                <div class="card-body" style="padding: 0.75rem 1rem; color: var(--danger); font-size: 0.85rem;">
+                    <strong>Error:</strong> @_errorMessage
+                </div>
+            </div>
+        }
+    </div>
+
+    @* ── Right column: print sheet only ── *@
+    <div class="create-right">
+        @if (_sheetReady)
+        {
+            <div class="right-panel-card">
+                <div class="right-panel-label">Print Sheet (@GetPaperLabel() — @_gridTotal photos)</div>
+                <div class="pp-sheet-container">
+                    <canvas id="ppSheetCanvas"></canvas>
+                </div>
+                <div class="pp-download-bar">
+                    <button class="btn-primary-gradient" style="font-size: 0.8rem; padding: 0.35rem 0.75rem;" @onclick="DownloadPrintSheet">
+                        &#128424; Download Print Sheet (PNG)
+                    </button>
+                    <button class="btn-secondary" style="font-size: 0.8rem; padding: 0.35rem 0.75rem;" @onclick="DownloadPassportPng">
+                        Download Photo PNG
+                    </button>
+                    <button class="btn-secondary" style="font-size: 0.8rem; padding: 0.35rem 0.75rem;" @onclick="DownloadPassportJpg">
+                        Download Photo JPG
+                    </button>
+                </div>
+            </div>
+        }
+    </div>
+</div>
+
+@* ── Processing modal overlay ── *@
+@if (_isProcessing)
+{
+    <div class="pp-processing-overlay">
+        <div class="pp-processing-modal">
+            <div class="processing-spinner" style="width:36px;height:36px;margin:0 auto 1rem;"></div>
+            <p style="margin:0;font-size:0.95rem;color:var(--text-primary);">@_processingStatus</p>
+        </div>
+    </div>
+}
+
+@code {
+    // ── State ──
+    private string? _uploadedPath;
+    private bool _isUploading;
+    private bool _isProcessing;
+    private string _processingStatus = "";
+    private string? _errorMessage;
+
+    // Print sheet settings
+    private string _selectedPaper = "4\u00d76\"";
+    private int _customWidthMm = 200;
+    private int _customHeightMm = 300;
+    private double _spacingMm = 2.0;
+    private double _marginMm = 3.0;
+    private bool _cutMarks = true;
+    private bool _cropMarks;
+    private bool _landscape = true;
+    private int _gridCols;
+    private int _gridRows;
+    private int _gridTotal;
+
+    // True once a sheet has been rendered (enables download buttons)
+    private bool _sheetReady;
+
+    // ── Lifecycle ──
+
+    protected override void OnInitialized()
+    {
+        RecalcGrid();
+    }
+
+    public void Dispose()
+    {
+        try { JS.InvokeVoidAsync("passportPhoto.dispose"); } catch { }
+    }
+
+    // ── Upload → show crop tool + auto generate sheet ──
+
+    private async Task HandleFileUpload(InputFileChangeEventArgs e)
+    {
+        _isUploading = true;
+        _errorMessage = null;
+        StateHasChanged();
+
+        try
+        {
+            var file = e.File;
+            if (file.Size > 10 * 1024 * 1024)
+            {
+                _errorMessage = "File size must be under 10MB.";
+                return;
+            }
+
+            using var stream = file.OpenReadStream(10 * 1024 * 1024);
+            _uploadedPath = await ImageStorage.SaveUploadedFileAsync(stream, file.Name);
+            _sheetReady = false;
+        }
+        catch (Exception ex)
+        {
+            Logger.LogError(ex, "Upload failed");
+            _errorMessage = "Upload failed. Please try again.";
+            return;
+        }
+        finally
+        {
+            _isUploading = false;
+            StateHasChanged();
+        }
+
+        // Init crop tool on the uploaded image
+        if (!string.IsNullOrEmpty(_uploadedPath))
+        {
+            await Task.Delay(150);
+            try
+            {
+                var fullPath = ResolveFullPath(_uploadedPath);
+                var imageBytes = await File.ReadAllBytesAsync(fullPath);
+                var ext = _uploadedPath.EndsWith(".png", StringComparison.OrdinalIgnoreCase) ? "png" : "jpeg";
+                var dataUrl = $"data:image/{ext};base64," + Convert.ToBase64String(imageBytes);
+                await JS.InvokeVoidAsync("passportPhoto.initCropTool", "ppCropArea", dataUrl);
+                // Enable auto-regenerate on crop changes
+                await JS.InvokeVoidAsync("passportPhoto.setCropChangedCallback", true);
+            }
+            catch (Exception jsEx)
+            {
+                Logger.LogWarning(jsEx, "Crop tool init failed");
+            }
+
+            // Initial render: crop + sheet entirely client-side
+            await ClientSideRender();
+        }
+    }
+
+    /// <summary>Render crop + sheet entirely in the browser (no server call).</summary>
+    private async Task ClientSideRender()
+    {
+        try
+        {
+            await SyncJsSettings();
+            await JS.InvokeVoidAsync("passportPhoto.cropAndRenderSheet", "ppSheetCanvas");
+            _sheetReady = true;
+            RecalcGrid();
+            StateHasChanged();
+        }
+        catch (Exception ex)
+        {
+            Logger.LogWarning(ex, "Client-side render failed");
+        }
+    }
+
+    // ── Remove photo ──
+
+    private async Task RemovePhoto()
+    {
+        try { await JS.InvokeVoidAsync("passportPhoto.disposeCropTool"); } catch { }
+        try { await JS.InvokeVoidAsync("passportPhoto.dispose"); } catch { }
+
+        if (!string.IsNullOrEmpty(_uploadedPath))
+            await ImageStorage.DeleteImageAsync(_uploadedPath);
+
+        _uploadedPath = null;
+        _sheetReady = false;
+        _errorMessage = null;
+    }
+
+    // ── Render helpers ──
+
+    private async Task SyncJsSettings()
+    {
+        var paper = GetCurrentPaperSize();
+        if (_selectedPaper == "Custom")
+            await JS.InvokeVoidAsync("passportPhoto.setCustomPaperSize", paper.WidthPx, paper.HeightPx);
+        else
+            await JS.InvokeVoidAsync("passportPhoto.setPaperSize", _selectedPaper);
+        await JS.InvokeVoidAsync("passportPhoto.setLandscape", _landscape);
+        await JS.InvokeVoidAsync("passportPhoto.setSpacing", _spacingMm);
+        await JS.InvokeVoidAsync("passportPhoto.setMargin", _marginMm);
+        await JS.InvokeVoidAsync("passportPhoto.setCutMarks", _cutMarks);
+        await JS.InvokeVoidAsync("passportPhoto.setCropMarks", _cropMarks);
+    }
+
+    // ── Settings ──
+
+    private async Task OnPaperChanged()
+    {
+        RecalcGrid();
+        if (_sheetReady)
+            await ClientSideRender();
+    }
+
+    private async Task SetOrientation(bool landscape)
+    {
+        _landscape = landscape;
+        RecalcGrid();
+        if (_sheetReady)
+            await ClientSideRender();
+    }
+
+    private async Task OnSettingsChanged()
+    {
+        RecalcGrid();
+        if (_sheetReady)
+            await ClientSideRender();
+    }
+
+    private ArtForgeAI.Models.PaperSize GetCurrentPaperSize()
+    {
+        if (_selectedPaper == "Custom")
+            return ArtForgeAI.Models.PassportPhotoConfig.CreateCustom(_customWidthMm, _customHeightMm);
+
+        return ArtForgeAI.Models.PassportPhotoConfig.PaperSizes
+            .FirstOrDefault(p => p.Name == _selectedPaper)
+            ?? ArtForgeAI.Models.PassportPhotoConfig.PaperSizes[0];
+    }
+
+    private void RecalcGrid()
+    {
+        var paper = GetCurrentPaperSize();
+        var grid = ArtForgeAI.Models.PassportPhotoConfig.CalculateGrid(paper, _spacingMm, _marginMm, _landscape);
+        _gridCols = grid.Cols;
+        _gridRows = grid.Rows;
+        _gridTotal = grid.Total;
+    }
+
+    private string GetPaperLabel()
+    {
+        if (_selectedPaper == "Custom")
+            return $"Custom {_customWidthMm}×{_customHeightMm}mm";
+        return _selectedPaper;
+    }
+
+    // ── Helpers ──
+
+    private string ResolveFullPath(string webRelativePath) =>
+        System.IO.Path.Combine(Env.WebRootPath, webRelativePath.Replace("/", System.IO.Path.DirectorySeparatorChar.ToString()));
+
+    // ── Downloads (client-side via JS canvas export) ──
+
+    private async Task DownloadPassportPng()
+    {
+        try
+        {
+            await JS.InvokeVoidAsync("passportPhoto.downloadPassportPhoto", "png", "passport_photo_35x45mm.png");
+        }
+        catch (Exception ex) { Logger.LogError(ex, "Download failed"); _errorMessage = "Download failed."; }
+    }
+
+    private async Task DownloadPassportJpg()
+    {
+        try
+        {
+            await JS.InvokeVoidAsync("passportPhoto.downloadPassportPhoto", "jpg", "passport_photo_35x45mm.jpg");
+        }
+        catch (Exception ex) { Logger.LogError(ex, "Download failed"); _errorMessage = "Download failed."; }
+    }
+
+    private async Task DownloadPrintSheet()
+    {
+        if (!_sheetReady) return;
+        try
+        {
+            var safeName = _selectedPaper == "Custom"
+                ? $"custom_{_customWidthMm}x{_customHeightMm}mm"
+                : _selectedPaper.Replace("\"", "in").Replace("\u00d7", "x");
+            var fileName = "passport_print_sheet_" + safeName + ".png";
+            await JS.InvokeVoidAsync("passportPhoto.downloadSheetPng", fileName);
+        }
+        catch (Exception ex) { Logger.LogError(ex, "Download failed"); _errorMessage = "Download failed."; }
+    }
+}

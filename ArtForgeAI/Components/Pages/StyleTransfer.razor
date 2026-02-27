@@ -275,12 +275,35 @@
                 }
             </div>
 
-            @if (!string.IsNullOrEmpty(_result.EnhancedPrompt))
-            {
-                <div class="result-prompt" style="margin-top: 0.75rem;">
-                    <strong>Prompt used:</strong> @_result.EnhancedPrompt
+            @* Fine-tune & Regenerate section *@
+            <div class="finetune-section" style="margin-top: 0.75rem;">
+                @if (!string.IsNullOrEmpty(_result.EnhancedPrompt))
+                {
+                    <div class="result-prompt">
+                        <strong>Prompt used:</strong> @_result.EnhancedPrompt
+                    </div>
+                }
+                <div class="finetune-input-area">
+                    <label class="finetune-label">Fine-tune your result</label>
+                    <textarea class="form-input finetune-textarea"
+                              rows="2"
+                              placeholder="e.g. make the background brighter, add more contrast, change lighting to warm tones..."
+                              @bind="_finetunePrompt"
+                              disabled="@_isGenerating"></textarea>
+                    <button class="btn-regenerate"
+                            @onclick="RegenerateWithFinetune"
+                            disabled="@(_isGenerating || string.IsNullOrWhiteSpace(_finetunePrompt))">
+                        @if (_isGenerating)
+                        {
+                            <span>Regenerating...</span>
+                        }
+                        else
+                        {
+                            <span>&#128260; Regenerate</span>
+                        }
+                    </button>
                 </div>
-            }
+            </div>
         }
         else if (_referenceImagePaths.Count == 0)
         {
@@ -292,6 +315,43 @@
     </div>
 </div>
 
+@* ── Placeholder text-input modal (greeting cards etc.) ── *@
+@if (_stPendingPlaceholders && _selectedStyle is not null)
+{
+    <div class="qs-modal-overlay">
+        <div class="qs-modal qs-placeholder-modal">
+            <div class="qs-modal-header">
+                <span>@_selectedStyle.IconEmoji Personalise Your @_selectedStyle.Name</span>
+                <button class="qs-modal-close" @onclick="CancelStPlaceholders">&times;</button>
+            </div>
+            <div class="qs-placeholder-body">
+                @if (_selectedStyle.PromptTemplate.Contains("{{OCCASION}}"))
+                {
+                    <div class="qs-field">
+                        <label>Occasion / Heading <span class="qs-required">*</span></label>
+                        <input type="text" @bind="_stOccasionText" placeholder="e.g. Happy Birthday, Happy Anniversary, Congratulations..." maxlength="60" />
+                    </div>
+                }
+                @if (_selectedStyle.PromptTemplate.Contains("{{MESSAGE}}"))
+                {
+                    <div class="qs-field">
+                        <label>Personal Message <span class="qs-optional">(optional — auto-generated if blank)</span></label>
+                        <textarea @bind="_stMessageText" rows="3" placeholder="e.g. Happy Birthday, Olivia! Celebrate and enjoy!" maxlength="200"></textarea>
+                    </div>
+                }
+                @if (!string.IsNullOrEmpty(_stPlaceholderError))
+                {
+                    <div class="qs-field-error">@_stPlaceholderError</div>
+                }
+            </div>
+            <div class="qs-modal-footer">
+                <button class="btn-primary-gradient" @onclick="SubmitStPlaceholders">Generate</button>
+                <button class="btn-secondary" @onclick="CancelStPlaceholders">&times; Cancel</button>
+            </div>
+        </div>
+    </div>
+}
+
 <LoadingOverlay IsVisible="_isGenerating" CurrentStep="_loadingStep" Provider="_selectedProvider" />
 <Toast @ref="_toast" />
 
@@ -301,6 +361,12 @@
     private StylePreset? _selectedStyle;
     private string _customInstructions = string.Empty;
     private bool _showCustomInstructions;
+
+    // Placeholder text-input state (greeting cards etc.)
+    private bool _stPendingPlaceholders;
+    private string _stOccasionText = string.Empty;
+    private string _stMessageText = string.Empty;
+    private string? _stPlaceholderError;
     private List<string> _referenceImagePaths = [];
     private ImageSizeMaster? _selectedSize;
     private ImageProvider _selectedProvider = ImageProvider.Gemini;
@@ -318,6 +384,9 @@
     private bool _isEnhancing;
     private int _enhanceProgress;
     private bool _isColorEnhancing;
+
+    // Fine-tune state
+    private string _finetunePrompt = string.Empty;
 
     // Background options state
     private byte[]? _transparentImageBytes;
@@ -352,6 +421,16 @@
     private void OnStyleChanged(StylePreset style)
     {
         _selectedStyle = style;
+
+        // Auto-select 20x30 portrait size for collage styles
+        if (style.Name.Contains("Collage", StringComparison.OrdinalIgnoreCase))
+        {
+            var portraitSize = _activeSizes.FirstOrDefault(s => s.Name == "20x30");
+            if (portraitSize is not null)
+            {
+                _selectedSize = portraitSize;
+            }
+        }
     }
 
     private void OnSizeChanged(ImageSizeMaster size)
@@ -400,10 +479,63 @@
         _referenceImagePaths = _referenceImagePaths.Where(p => p != path).ToList();
     }
 
+    private bool HasPlaceholders(StylePreset style)
+        => style.PromptTemplate.Contains("{{OCCASION}}") || style.PromptTemplate.Contains("{{MESSAGE}}");
+
+    private string ReplacePlaceholders(string prompt, string occasion, string message)
+    {
+        var result = prompt.Replace("{{OCCASION}}", occasion.Trim());
+        if (!string.IsNullOrWhiteSpace(message))
+            result = result.Replace("{{MESSAGE}}", message.Trim());
+        else
+            result = result.Replace("{{MESSAGE}}",
+                $"Generate a short warm heartfelt message (2-3 lines) appropriate for the occasion: {occasion.Trim()}");
+        return result;
+    }
+
+    private async Task SubmitStPlaceholders()
+    {
+        if (_selectedStyle is null || _referenceImagePaths.Count == 0) return;
+
+        if (_selectedStyle.PromptTemplate.Contains("{{OCCASION}}") && string.IsNullOrWhiteSpace(_stOccasionText))
+        {
+            _stPlaceholderError = "Please enter the occasion (e.g. Happy Birthday, Happy Anniversary).";
+            return;
+        }
+
+        _stPlaceholderError = null;
+        _stPendingPlaceholders = false;
+        await RunStyleTransfer(ReplacePlaceholders(_selectedStyle.EffectivePrompt, _stOccasionText, _stMessageText));
+    }
+
+    private void CancelStPlaceholders()
+    {
+        _stPendingPlaceholders = false;
+        _stPlaceholderError = null;
+        _stOccasionText = string.Empty;
+        _stMessageText = string.Empty;
+    }
+
     private async Task GenerateStyleTransfer()
     {
         if (_selectedStyle is null || _referenceImagePaths.Count == 0) return;
 
+        // If the style has placeholders, show text input modal first
+        if (HasPlaceholders(_selectedStyle))
+        {
+            _stOccasionText = string.Empty;
+            _stMessageText = string.Empty;
+            _stPlaceholderError = null;
+            _stPendingPlaceholders = true;
+            StateHasChanged();
+            return;
+        }
+
+        await RunStyleTransfer(_selectedStyle.EffectivePrompt);
+    }
+
+    private async Task RunStyleTransfer(string basePrompt)
+    {
         _isGenerating = true;
         _errorMessage = null;
         _result = null;
@@ -415,8 +547,8 @@
 
         try
         {
-            // Build the prompt from the style template + optional custom instructions
-            var prompt = _selectedStyle.EffectivePrompt;
+            // Build the prompt from the base prompt + optional custom instructions
+            var prompt = basePrompt;
             if (_showCustomInstructions && !string.IsNullOrWhiteSpace(_customInstructions))
             {
                 prompt = $"{prompt}. Additional instructions: {_customInstructions.Trim()}";
@@ -426,7 +558,7 @@
             StateHasChanged();
 
             // Multi-face cinematic pipeline: only for single-image uploads
-            if (_referenceImagePaths.Count == 1 && CinematicProfile.IsMultiFaceStyle(_selectedStyle.Name))
+            if (_selectedStyle is not null && _referenceImagePaths.Count == 1 && CinematicProfile.IsMultiFaceStyle(_selectedStyle.Name))
             {
                 var cinResult = await CinematicProfile.ProcessAsync(
                     _referenceImagePaths[0], prompt,
@@ -505,6 +637,85 @@
         _selectedBgColor = "#FFFFFF";
         _customHexColor = string.Empty;
         _recolorError = null;
+        _finetunePrompt = string.Empty;
+    }
+
+    private async Task RegenerateWithFinetune()
+    {
+        if (_selectedStyle is null || _referenceImagePaths.Count == 0 || string.IsNullOrWhiteSpace(_finetunePrompt)) return;
+
+        _isGenerating = true;
+        _errorMessage = null;
+        _result = null;
+        _loadingStep = 1;
+        _showBgOptions = false;
+        _transparentImageBytes = null;
+        _recolorError = null;
+        StateHasChanged();
+
+        try
+        {
+            // Build prompt from style + placeholder replacement + custom instructions + fine-tune
+            var prompt = _selectedStyle.EffectivePrompt;
+            if (HasPlaceholders(_selectedStyle))
+            {
+                prompt = ReplacePlaceholders(prompt, _stOccasionText, _stMessageText);
+            }
+            if (_showCustomInstructions && !string.IsNullOrWhiteSpace(_customInstructions))
+            {
+                prompt = $"{prompt}. Additional instructions: {_customInstructions.Trim()}";
+            }
+            prompt = $"{prompt}. Fine-tune adjustments: {_finetunePrompt.Trim()}";
+
+            _loadingStep = 2;
+            StateHasChanged();
+
+            var request = new GenerationRequest
+            {
+                Prompt = prompt,
+                Width = _selectedSize?.Width ?? 1024,
+                Height = _selectedSize?.Height ?? 1024,
+                SizeName = _selectedSize?.Name ?? "Square",
+                EnhancePrompt = false,
+                ReferenceImagePaths = _referenceImagePaths,
+                Provider = _selectedProvider
+            };
+
+            _result = await ImageGenService.GenerateImageAsync(request);
+
+            _loadingStep = 3;
+            StateHasChanged();
+            await Task.Delay(300);
+
+            if (!_result.Success)
+            {
+                _errorMessage = _result.ErrorMessage;
+            }
+            else
+            {
+                if (_result.TransparentImagePath is not null)
+                {
+                    _transparentImageBytes = _result.TransparentPngBytes;
+                    _showBgOptions = true;
+                    _selectedBgColor = "#FFFFFF";
+                }
+
+                if (_toast is not null)
+                {
+                    _ = _toast.ShowAsync("Regeneration complete!");
+                }
+            }
+        }
+        catch (Exception ex)
+        {
+            Logger.LogError(ex, "Fine-tune regeneration failed");
+            _errorMessage = "An unexpected error occurred. Please try again.";
+        }
+        finally
+        {
+            _isGenerating = false;
+            StateHasChanged();
+        }
     }
 
     // ── Download helpers ──

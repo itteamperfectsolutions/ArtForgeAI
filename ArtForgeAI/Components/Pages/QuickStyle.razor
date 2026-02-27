@@ -46,6 +46,43 @@
     <div style="margin-top:0.75rem;color:var(--danger);font-size:0.85rem;">@_error</div>
 }
 
+@* ── Placeholder text-input modal (greeting cards etc.) ── *@
+@if (_pendingPlaceholders)
+{
+    <div class="qs-modal-overlay">
+        <div class="qs-modal qs-placeholder-modal">
+            <div class="qs-modal-header">
+                <span>@_selectedStyle?.IconEmoji Personalise Your @_selectedStyle?.Name</span>
+                <button class="qs-modal-close" @onclick="CancelPlaceholders">&times;</button>
+            </div>
+            <div class="qs-placeholder-body">
+                @if (_selectedStyle?.PromptTemplate.Contains("{{OCCASION}}") == true)
+                {
+                    <div class="qs-field">
+                        <label>Occasion / Heading <span class="qs-required">*</span></label>
+                        <input type="text" @bind="_occasionText" placeholder="e.g. Happy Birthday, Happy Anniversary, Congratulations..." maxlength="60" />
+                    </div>
+                }
+                @if (_selectedStyle?.PromptTemplate.Contains("{{MESSAGE}}") == true)
+                {
+                    <div class="qs-field">
+                        <label>Personal Message <span class="qs-optional">(optional — auto-generated if blank)</span></label>
+                        <textarea @bind="_messageText" rows="3" placeholder="e.g. Happy Birthday, Olivia! Celebrate and enjoy!" maxlength="200"></textarea>
+                    </div>
+                }
+                @if (!string.IsNullOrEmpty(_placeholderError))
+                {
+                    <div class="qs-field-error">@_placeholderError</div>
+                }
+            </div>
+            <div class="qs-modal-footer">
+                <button class="btn-primary-gradient" @onclick="ProcessWithPlaceholders">Generate</button>
+                <button class="btn-secondary" @onclick="CancelPlaceholders">&times; Cancel</button>
+            </div>
+        </div>
+    </div>
+}
+
 @* ── Processing overlay ── *@
 @if (_isProcessing)
 {
@@ -95,7 +132,13 @@
     private bool _isProcessing;
     private string? _error;
 
-    private static readonly string[] _categoryOrder = ["Artistic", "Fun", "Professional", "Abstract", "Regional"];
+    // Placeholder text-input state
+    private bool _pendingPlaceholders;
+    private string _occasionText = string.Empty;
+    private string _messageText = string.Empty;
+    private string? _placeholderError;
+
+    private static readonly string[] _categoryOrder = ["Artistic", "Fun", "Professional", "Abstract", "Mythological", "Regional", "PhotoCollage"];
 
     protected override async Task OnInitializedAsync()
     {
@@ -106,26 +149,102 @@
             .ToArray();
     }
 
+    private bool HasPlaceholders(StylePreset style)
+        => style.PromptTemplate.Contains("{{OCCASION}}") || style.PromptTemplate.Contains("{{MESSAGE}}");
+
+    private string ReplacePlaceholders(string prompt)
+    {
+        var result = prompt;
+        var occasion = _occasionText.Trim();
+
+        result = result.Replace("{{OCCASION}}", occasion);
+
+        if (!string.IsNullOrWhiteSpace(_messageText))
+        {
+            result = result.Replace("{{MESSAGE}}", _messageText.Trim());
+        }
+        else
+        {
+            // Instruct the AI to auto-generate a fitting message for this occasion
+            result = result.Replace("{{MESSAGE}}",
+                $"Generate a short warm heartfelt message (2-3 lines) appropriate for the occasion: {occasion}");
+        }
+
+        return result;
+    }
+
     private async Task HandleTileClick(InputFileChangeEventArgs e, StylePreset style)
     {
         var file = e.File;
         if (file is null || file.Size > 10 * 1024 * 1024 || _isProcessing) return;
 
         _selectedStyle = style;
-        _isProcessing = true;
         _error = null;
         _result = null;
-        StateHasChanged();
+        _placeholderError = null;
 
         try
         {
             using var stream = file.OpenReadStream(10 * 1024 * 1024);
             _sourcePath = await ImageStorage.SaveUploadedFileAsync(stream, file.Name);
 
-            // Multi-face cinematic pipeline: detect multiple faces, transform individually, composite
-            if (CinematicProfile.IsMultiFaceStyle(style.Name))
+            // If the style has text placeholders, show input modal first
+            if (HasPlaceholders(style))
             {
-                var cinResult = await CinematicProfile.ProcessAsync(_sourcePath, style.EffectivePrompt, 1440, 2160);
+                _occasionText = string.Empty;
+                _messageText = string.Empty;
+                _pendingPlaceholders = true;
+                StateHasChanged();
+                return;
+            }
+
+            // Otherwise proceed immediately
+            await RunGeneration(style.EffectivePrompt);
+        }
+        catch (Exception ex)
+        {
+            Logger.LogError(ex, "Quick style processing failed for style {StyleName}", style.Name);
+            _error = "An unexpected error occurred. Please try again.";
+            StateHasChanged();
+        }
+    }
+
+    private async Task ProcessWithPlaceholders()
+    {
+        if (_selectedStyle is null || _sourcePath is null) return;
+
+        // Validate: Occasion is required
+        if (_selectedStyle.PromptTemplate.Contains("{{OCCASION}}") && string.IsNullOrWhiteSpace(_occasionText))
+        {
+            _placeholderError = "Please enter the occasion (e.g. Happy Birthday, Happy Anniversary).";
+            return;
+        }
+
+        _placeholderError = null;
+        _pendingPlaceholders = false;
+        var prompt = ReplacePlaceholders(_selectedStyle.EffectivePrompt);
+        await RunGeneration(prompt);
+    }
+
+    private void CancelPlaceholders()
+    {
+        _pendingPlaceholders = false;
+        _placeholderError = null;
+        _selectedStyle = null;
+        _sourcePath = null;
+    }
+
+    private async Task RunGeneration(string prompt)
+    {
+        _isProcessing = true;
+        StateHasChanged();
+
+        try
+        {
+            // Multi-face cinematic pipeline: detect multiple faces, transform individually, composite
+            if (_selectedStyle is not null && CinematicProfile.IsMultiFaceStyle(_selectedStyle.Name))
+            {
+                var cinResult = await CinematicProfile.ProcessAsync(_sourcePath!, prompt, 1440, 2160);
                 if (cinResult is not null)
                 {
                     _result = cinResult;
@@ -138,12 +257,12 @@
 
             var request = new GenerationRequest
             {
-                Prompt = style.EffectivePrompt,
+                Prompt = prompt,
                 Width = 1440,
                 Height = 2160,
                 SizeName = "20x30",
                 EnhancePrompt = false,
-                ReferenceImagePaths = [_sourcePath],
+                ReferenceImagePaths = [_sourcePath!],
                 Provider = ImageProvider.Gemini
             };
 
@@ -156,7 +275,7 @@
         }
         catch (Exception ex)
         {
-            Logger.LogError(ex, "Quick style processing failed for style {StyleName}", style.Name);
+            Logger.LogError(ex, "Quick style processing failed for style {StyleName}", _selectedStyle?.Name);
             _error = "An unexpected error occurred. Please try again.";
         }
         finally

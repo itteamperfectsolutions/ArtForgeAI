@@ -890,6 +890,66 @@ textarea.form-input {
     color: var(--text-primary);
 }
 
+/* ===== Fine-tune & Regenerate ===== */
+.finetune-section {
+    background: var(--bg-card);
+    border-radius: var(--radius-sm);
+    border: 1px solid var(--border-color);
+    overflow: hidden;
+}
+
+.finetune-section .result-prompt {
+    border-radius: 0;
+    border-bottom: 1px solid var(--border-color);
+}
+
+.finetune-input-area {
+    padding: 0.75rem 1rem;
+    display: flex;
+    flex-direction: column;
+    gap: 0.5rem;
+}
+
+.finetune-label {
+    font-size: 0.82rem;
+    font-weight: 600;
+    color: var(--text-secondary);
+    text-transform: uppercase;
+    letter-spacing: 0.03em;
+}
+
+.finetune-textarea {
+    resize: vertical;
+    min-height: 44px;
+    font-size: 0.88rem;
+}
+
+.btn-regenerate {
+    align-self: flex-end;
+    display: inline-flex;
+    align-items: center;
+    gap: 0.35rem;
+    padding: 0.45rem 1.1rem;
+    border: none;
+    border-radius: var(--radius-sm);
+    font-size: 0.85rem;
+    font-weight: 600;
+    cursor: pointer;
+    background: linear-gradient(135deg, #6366f1, #8b5cf6);
+    color: #fff;
+    transition: opacity 0.15s, transform 0.1s;
+}
+
+.btn-regenerate:hover:not(:disabled) {
+    opacity: 0.9;
+    transform: translateY(-1px);
+}
+
+.btn-regenerate:disabled {
+    opacity: 0.45;
+    cursor: not-allowed;
+}
+
 /* ===== Responsive: tablet intermediate (769px-900px) ===== */
 @media (min-width: 769px) and (max-width: 900px) {
     .create-left {
@@ -2249,6 +2309,64 @@ select.form-input {
         linear-gradient(135deg, #FF6F00 0%, #FFA726 30%, #7B1FA2 60%, #1A237E 100%);
 }
 
+/* ── Mythological style thumbnails ── */
+
+/* Vishnu Divine: celestial blue with golden radiance */
+.sp-vishnu {
+    background:
+        radial-gradient(circle at 50% 40%, rgba(255,215,0,0.4) 0%, transparent 50%),
+        linear-gradient(135deg, #0D47A1 0%, #1565C0 35%, #1976D2 60%, #FFD54F 100%);
+}
+
+/* Shiva Nataraja: cosmic purple-blue with fire ring */
+.sp-shiva {
+    background:
+        radial-gradient(circle at 50% 50%, rgba(255,152,0,0.4) 0%, transparent 45%),
+        linear-gradient(135deg, #1A237E 0%, #4527A0 40%, #6A1B9A 70%, #FF6F00 100%);
+}
+
+/* Durga Shakti: fierce red-gold warrior */
+.sp-durga {
+    background:
+        radial-gradient(circle at 50% 30%, rgba(255,215,0,0.35) 0%, transparent 50%),
+        linear-gradient(135deg, #B71C1C 0%, #C62828 35%, #D32F2F 60%, #FFB300 100%);
+}
+
+/* Krishna Murali: divine dark blue with moonlit Vrindavan */
+.sp-krishna {
+    background:
+        radial-gradient(circle at 60% 30%, rgba(255,245,157,0.3) 0%, transparent 50%),
+        linear-gradient(135deg, #0D47A1 0%, #1565C0 40%, #1B5E20 70%, #FDD835 100%);
+}
+
+/* Rama Maryada: forest green with golden royal tones */
+.sp-rama {
+    background:
+        radial-gradient(circle at 40% 40%, rgba(255,215,0,0.3) 0%, transparent 45%),
+        linear-gradient(135deg, #1B5E20 0%, #2E7D32 35%, #388E3C 65%, #FFD54F 100%);
+}
+
+/* Ganesha Vighnaharta: vermillion-red with saffron gold */
+.sp-ganesha {
+    background:
+        radial-gradient(circle at 50% 50%, rgba(255,183,77,0.4) 0%, transparent 50%),
+        linear-gradient(135deg, #BF360C 0%, #E65100 35%, #FF6F00 65%, #FFD54F 100%);
+}
+
+/* Hanuman Bajrang: fierce saffron-orange with crimson */
+.sp-hanuman {
+    background:
+        radial-gradient(circle at 50% 60%, rgba(255,87,34,0.3) 0%, transparent 50%),
+        linear-gradient(135deg, #E65100 0%, #FF6F00 35%, #FF8F00 65%, #D32F2F 100%);
+}
+
+/* Saraswati Vidya: serene white-gold with pale blue */
+.sp-saraswati {
+    background:
+        radial-gradient(circle at 50% 40%, rgba(255,255,255,0.5) 0%, transparent 50%),
+        linear-gradient(135deg, #E8EAF6 0%, #C5CAE9 35%, #B3E5FC 65%, #FFD54F 100%);
+}
+
 /* Default fallback */
 .sp-default {
     background: linear-gradient(135deg, var(--card-accent, var(--accent-primary)) 0%, var(--bg-tertiary) 100%);
@@ -2513,6 +2631,226 @@ select.form-input {
     font-size: 0.68rem !important;
     line-height: 1 !important;
     min-width: 0 !important;
+}
+
+/* ===== Style Pill Tabs (Active / Inactive) ===== */
+.style-pill-tabs {
+    display: inline-flex;
+    gap: 0.35rem;
+    margin-bottom: 0.85rem;
+    padding: 4px;
+    background: var(--bg-tertiary);
+    border-radius: 12px;
+    border: 1px solid var(--border-color);
+}
+
+.style-pill {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.4rem;
+    padding: 0.45rem 1rem;
+    border: 1px solid transparent;
+    border-radius: 10px;
+    background: transparent;
+    font-size: 0.82rem;
+    font-weight: 600;
+    color: var(--text-muted);
+    cursor: pointer;
+    transition: all 0.25s cubic-bezier(0.4, 0, 0.2, 1);
+    position: relative;
+}
+
+.style-pill:hover {
+    color: var(--text-primary);
+    background: rgba(255, 255, 255, 0.05);
+}
+
+/* Active state — green glow for Active pill */
+.style-pill.active:first-child {
+    background: linear-gradient(135deg, rgba(16, 185, 129, 0.15), rgba(5, 150, 105, 0.1));
+    border-color: rgba(16, 185, 129, 0.4);
+    color: #10b981;
+    box-shadow: 0 0 12px rgba(16, 185, 129, 0.15), inset 0 1px 0 rgba(255, 255, 255, 0.05);
+}
+
+/* Active state — amber glow for Inactive pill */
+.style-pill.active:last-child {
+    background: linear-gradient(135deg, rgba(245, 158, 11, 0.15), rgba(217, 119, 6, 0.1));
+    border-color: rgba(245, 158, 11, 0.4);
+    color: #f59e0b;
+    box-shadow: 0 0 12px rgba(245, 158, 11, 0.15), inset 0 1px 0 rgba(255, 255, 255, 0.05);
+}
+
+/* Status dot — pulsing indicator */
+.style-pill-dot {
+    width: 8px;
+    height: 8px;
+    border-radius: 50%;
+    flex-shrink: 0;
+}
+
+.style-pill-dot.active-dot {
+    background: #10b981;
+    box-shadow: 0 0 6px rgba(16, 185, 129, 0.5);
+}
+
+.style-pill.active .style-pill-dot.active-dot {
+    animation: dotPulse 2s ease-in-out infinite;
+}
+
+.style-pill-dot.inactive-dot {
+    background: #f59e0b;
+    box-shadow: 0 0 6px rgba(245, 158, 11, 0.4);
+}
+
+.style-pill.active .style-pill-dot.inactive-dot {
+    animation: dotPulse 2s ease-in-out infinite;
+}
+
+@keyframes dotPulse {
+    0%, 100% { opacity: 1; transform: scale(1); }
+    50% { opacity: 0.5; transform: scale(0.8); }
+}
+
+/* Count badge */
+.style-pill-count {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    min-width: 22px;
+    height: 20px;
+    padding: 0 6px;
+    border-radius: 10px;
+    font-size: 0.68rem;
+    font-weight: 800;
+    letter-spacing: 0.02em;
+    background: rgba(255, 255, 255, 0.08);
+    color: inherit;
+    transition: all 0.25s;
+}
+
+.style-pill.active:first-child .style-pill-count {
+    background: rgba(16, 185, 129, 0.2);
+    color: #10b981;
+}
+
+.style-pill.active:last-child .style-pill-count {
+    background: rgba(245, 158, 11, 0.2);
+    color: #f59e0b;
+}
+
+/* Light mode adjustments */
+[data-theme="light"] .style-pill.active:first-child {
+    background: linear-gradient(135deg, rgba(16, 185, 129, 0.1), rgba(5, 150, 105, 0.06));
+    color: #059669;
+}
+
+[data-theme="light"] .style-pill.active:last-child {
+    background: linear-gradient(135deg, rgba(245, 158, 11, 0.1), rgba(217, 119, 6, 0.06));
+    color: #d97706;
+}
+
+[data-theme="light"] .style-pill:hover {
+    background: rgba(0, 0, 0, 0.04);
+}
+
+/* ===== Inactive Styles Grid ===== */
+.admin-inactive-category-header {
+    font-size: 0.82rem;
+    font-weight: 700;
+    color: var(--text-secondary);
+    text-transform: uppercase;
+    letter-spacing: 0.04em;
+    margin: 0.75rem 0 0.4rem;
+    padding-left: 0.25rem;
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+}
+
+.admin-inactive-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(280px, 1fr));
+    gap: 0.5rem;
+}
+
+.admin-inactive-card {
+    display: flex;
+    align-items: center;
+    gap: 0.65rem;
+    background: var(--bg-card);
+    border: 1px solid var(--border-color);
+    border-radius: var(--radius-sm);
+    padding: 0.5rem 0.65rem;
+    opacity: 0.7;
+    transition: all var(--transition-fast);
+}
+
+.admin-inactive-card:hover {
+    opacity: 1;
+    box-shadow: var(--shadow-sm);
+}
+
+.admin-inactive-thumb {
+    width: 48px;
+    height: 48px;
+    flex-shrink: 0;
+    border-radius: var(--radius-sm);
+    overflow: hidden;
+    background: var(--bg-tertiary);
+}
+
+.admin-inactive-thumb img {
+    width: 100%;
+    height: 100%;
+    object-fit: cover;
+}
+
+.admin-inactive-info {
+    flex: 1;
+    min-width: 0;
+}
+
+.admin-inactive-name {
+    font-size: 0.82rem;
+    font-weight: 600;
+    color: var(--text-primary);
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+
+.admin-inactive-desc {
+    font-size: 0.72rem;
+    color: var(--text-muted);
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+
+.admin-inactive-actions {
+    display: flex;
+    gap: 0.3rem;
+    flex-shrink: 0;
+}
+
+.btn-activate {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.25rem;
+    padding: 0.3rem 0.6rem;
+    border: none;
+    border-radius: var(--radius-sm);
+    font-size: 0.72rem;
+    font-weight: 600;
+    cursor: pointer;
+    background: linear-gradient(135deg, #10b981, #059669);
+    color: #fff;
+    transition: opacity 0.15s;
+}
+
+.btn-activate:hover {
+    opacity: 0.85;
 }
 
 /* ===== Style Test Preview Modal ===== */
@@ -2891,6 +3229,75 @@ select.form-input {
     border-top: 1px solid var(--border-color);
     flex-wrap: wrap;
     flex-shrink: 0;
+}
+
+/* ── Placeholder text-input modal ── */
+.qs-placeholder-modal {
+    max-width: 440px;
+    width: 95vw;
+}
+
+.qs-placeholder-body {
+    padding: 1.2rem 1rem;
+    display: flex;
+    flex-direction: column;
+    gap: 1rem;
+}
+
+.qs-field label {
+    display: block;
+    font-size: 0.8rem;
+    font-weight: 600;
+    color: var(--text-secondary);
+    margin-bottom: 0.3rem;
+    text-transform: uppercase;
+    letter-spacing: 0.04em;
+}
+
+.qs-field input,
+.qs-field textarea {
+    width: 100%;
+    padding: 0.55rem 0.7rem;
+    background: var(--bg-tertiary);
+    border: 1px solid var(--border-color);
+    border-radius: var(--radius-sm);
+    color: var(--text-primary);
+    font-size: 0.9rem;
+    font-family: inherit;
+    transition: border-color var(--transition-fast);
+    resize: vertical;
+}
+
+.qs-field input:focus,
+.qs-field textarea:focus {
+    outline: none;
+    border-color: var(--accent);
+    box-shadow: 0 0 0 2px rgba(99, 102, 241, 0.15);
+}
+
+.qs-field input::placeholder,
+.qs-field textarea::placeholder {
+    color: var(--text-muted);
+    font-style: italic;
+}
+
+.qs-required {
+    color: #ef4444;
+    font-weight: 700;
+}
+
+.qs-optional {
+    font-weight: 400;
+    font-size: 0.7rem;
+    color: var(--text-muted);
+    text-transform: none;
+    letter-spacing: normal;
+}
+
+.qs-field-error {
+    color: #ef4444;
+    font-size: 0.8rem;
+    padding: 0.3rem 0;
 }
 
 @media (max-width: 1200px) {
@@ -3583,6 +3990,315 @@ select.form-input {
 @media (max-width: 360px) {
     .style-thumb-grid {
         grid-template-columns: repeat(2, 1fr);
+    }
+}
+
+/* ===== Passport Photo ===== */
+
+.pp-upload-thumb {
+    position: relative;
+    display: inline-block;
+    border-radius: 8px;
+    overflow: hidden;
+    border: 2px solid var(--border-color);
+    max-width: 180px;
+}
+
+.pp-upload-thumb img {
+    display: block;
+    width: 100%;
+    height: auto;
+    border-radius: 6px;
+}
+
+.pp-toggle-row {
+    display: flex;
+    align-items: center;
+    gap: 0.6rem;
+    margin-bottom: 0.5rem;
+}
+
+.pp-toggle {
+    position: relative;
+    display: inline-block;
+    width: 40px;
+    height: 22px;
+    flex-shrink: 0;
+}
+
+.pp-toggle input {
+    opacity: 0;
+    width: 0;
+    height: 0;
+}
+
+.pp-toggle-slider {
+    position: absolute;
+    cursor: pointer;
+    inset: 0;
+    background: var(--bg-tertiary);
+    border-radius: 22px;
+    transition: background 0.2s;
+}
+
+.pp-toggle-slider::before {
+    content: "";
+    position: absolute;
+    width: 16px;
+    height: 16px;
+    left: 3px;
+    top: 3px;
+    background: white;
+    border-radius: 50%;
+    transition: transform 0.2s;
+}
+
+.pp-toggle input:checked + .pp-toggle-slider {
+    background: var(--accent-primary, #6366f1);
+}
+
+.pp-toggle input:checked + .pp-toggle-slider::before {
+    transform: translateX(18px);
+}
+
+.pp-toggle-label {
+    font-size: 0.82rem;
+    color: var(--text-secondary);
+}
+
+.pp-color-swatches {
+    display: flex;
+    gap: 0.5rem;
+    flex-wrap: wrap;
+}
+
+.pp-swatch {
+    width: 36px;
+    height: 36px;
+    border-radius: 50%;
+    border: 2px solid var(--border-color);
+    cursor: pointer;
+    transition: transform 0.15s, box-shadow 0.15s;
+    padding: 0;
+}
+
+.pp-swatch:hover {
+    transform: scale(1.1);
+}
+
+.pp-swatch.selected {
+    border-color: var(--accent-primary, #6366f1);
+    box-shadow: 0 0 0 3px rgba(99, 102, 241, 0.3);
+    transform: scale(1.1);
+}
+
+.pp-orientation-row {
+    display: flex;
+    gap: 0.4rem;
+    margin-bottom: 0.5rem;
+}
+
+.pp-orient-btn {
+    flex: 1;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 0.35rem;
+    padding: 0.4rem 0.5rem;
+    border: 1.5px solid var(--border-color);
+    border-radius: 8px;
+    background: var(--bg-secondary);
+    color: var(--text-secondary);
+    font-size: 0.8rem;
+    cursor: pointer;
+    transition: border-color 0.15s, background 0.15s;
+}
+
+.pp-orient-btn:hover {
+    border-color: var(--text-muted);
+}
+
+.pp-orient-btn.selected {
+    border-color: var(--accent-primary, #6366f1);
+    background: rgba(99, 102, 241, 0.08);
+    color: var(--text-primary);
+}
+
+.pp-paper-grid {
+    display: grid;
+    grid-template-columns: repeat(3, 1fr);
+    gap: 0.4rem;
+}
+
+.pp-paper-option {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    padding: 0.5rem 0.25rem;
+    border: 1.5px solid var(--border-color);
+    border-radius: 8px;
+    background: var(--bg-secondary);
+    cursor: pointer;
+    transition: border-color 0.15s, background 0.15s;
+    gap: 0.15rem;
+}
+
+.pp-paper-option:hover {
+    border-color: var(--text-muted);
+    background: var(--bg-tertiary);
+}
+
+.pp-paper-option.selected {
+    border-color: var(--accent-primary, #6366f1);
+    background: rgba(99, 102, 241, 0.08);
+}
+
+.pp-paper-name {
+    font-size: 0.82rem;
+    font-weight: 600;
+    color: var(--text-primary);
+}
+
+.pp-paper-dim {
+    font-size: 0.68rem;
+    color: var(--text-muted);
+}
+
+.pp-grid-info {
+    text-align: center;
+    font-size: 0.85rem;
+    color: var(--text-secondary);
+    padding: 0.4rem;
+    margin-bottom: 0.5rem;
+    background: var(--bg-tertiary);
+    border-radius: 6px;
+}
+
+.pp-slider-row {
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+    margin-bottom: 0.5rem;
+    font-size: 0.82rem;
+    color: var(--text-secondary);
+}
+
+.pp-slider-row label {
+    min-width: 52px;
+    flex-shrink: 0;
+}
+
+.pp-slider-row input[type="range"] {
+    flex: 1;
+    accent-color: var(--accent-primary, #6366f1);
+    height: 4px;
+}
+
+.pp-slider-row span {
+    min-width: 42px;
+    text-align: right;
+    font-size: 0.78rem;
+    color: var(--text-muted);
+}
+
+.pp-crop-container {
+    display: flex;
+    justify-content: center;
+    align-items: center;
+    background: var(--bg-tertiary);
+    border-radius: 8px;
+    padding: 0.5rem;
+    min-height: 300px;
+    overflow: hidden;
+}
+
+.pp-crop-inline {
+    display: flex;
+    justify-content: center;
+    align-items: center;
+    background: var(--bg-tertiary);
+    border-radius: 6px;
+    overflow: hidden;
+    width: 100%;
+}
+
+.pp-processing-overlay {
+    position: fixed;
+    inset: 0;
+    z-index: 9999;
+    background: rgba(0, 0, 0, 0.6);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    backdrop-filter: blur(3px);
+}
+
+.pp-processing-modal {
+    background: var(--bg-secondary);
+    border: 1px solid var(--border-color);
+    border-radius: 12px;
+    padding: 2rem 2.5rem;
+    text-align: center;
+    box-shadow: 0 8px 32px rgba(0, 0, 0, 0.4);
+    min-width: 240px;
+}
+
+.pp-preview-container,
+.pp-sheet-container {
+    display: flex;
+    justify-content: center;
+    align-items: center;
+    background: var(--bg-tertiary);
+    border-radius: 8px;
+    padding: 0.75rem;
+    min-height: 200px;
+    overflow: hidden;
+}
+
+.pp-preview-container canvas,
+.pp-sheet-container canvas {
+    max-width: 100%;
+    height: auto !important;
+}
+
+.pp-download-bar {
+    display: flex;
+    gap: 0.5rem;
+    justify-content: center;
+    padding: 0.5rem 0;
+    flex-wrap: wrap;
+}
+
+.processing-spinner {
+    width: 32px;
+    height: 32px;
+    border: 3px solid var(--border-color);
+    border-top-color: var(--accent-primary, #6366f1);
+    border-radius: 50%;
+    animation: pp-spin 0.8s linear infinite;
+    margin: 0 auto;
+}
+
+@keyframes pp-spin {
+    to { transform: rotate(360deg); }
+}
+
+/* ── Passport Photo Responsive ── */
+
+@media (max-width: 900px) {
+    .pp-paper-grid {
+        grid-template-columns: repeat(3, 1fr);
+    }
+}
+
+@media (max-width: 480px) {
+    .pp-paper-grid {
+        grid-template-columns: repeat(2, 1fr);
+    }
+
+    .pp-slider-row label {
+        min-width: 40px;
     }
 }
 

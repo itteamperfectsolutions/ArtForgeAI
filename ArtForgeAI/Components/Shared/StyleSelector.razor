@@ -73,7 +73,7 @@
     private StylePreset? _selectedStyle;
     private string _selectedCategory = "All";
 
-    private static readonly string[] _categories = ["All", "Artistic", "Fun", "Professional", "Abstract"];
+    private string[] _categories = ["All"];
 
     protected override void OnParametersSet()
     {
@@ -81,6 +81,11 @@
         {
             _allStyles = Styles;
             _filteredStyles = _allStyles;
+
+            // Build category tabs dynamically from data
+            _categories = new[] { "All" }
+                .Concat(_allStyles.Select(s => s.Category).Distinct().OrderBy(c => c))
+                .ToArray();
 
             if (SelectedStyleId > 0)
             {
@@ -134,6 +139,14 @@
         "Low Poly" => "sp-lowpoly",
         "Clouds/Dreamy" => "sp-clouds",
         "Surreal" => "sp-surreal",
+        "Vishnu Divine" => "sp-vishnu",
+        "Shiva Nataraja" => "sp-shiva",
+        "Durga Shakti" => "sp-durga",
+        "Krishna Murali" => "sp-krishna",
+        "Rama Maryada" => "sp-rama",
+        "Ganesha Vighnaharta" => "sp-ganesha",
+        "Hanuman Bajrang" => "sp-hanuman",
+        "Saraswati Vidya" => "sp-saraswati",
         _ => "sp-default"
     };
 }
