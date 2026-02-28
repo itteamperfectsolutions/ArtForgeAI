@@ -45,8 +45,17 @@ builder.Services.Configure<ReplicateOptions>(
 // HTTP client for downloading images
 builder.Services.AddHttpClient();
 
-// Local ONNX background removal (singleton — model loaded once)
-builder.Services.AddSingleton<IBackgroundRemovalService, OnnxBackgroundRemovalService>();
+// Background removal — no-op stub for interface (Home/StyleTransfer guards)
+builder.Services.AddSingleton<IBackgroundRemovalService, NoOpBackgroundRemovalService>();
+
+// Background removal via Gemini AI (uses GeminiOptions already configured above)
+builder.Services.AddHttpClient<RemoveBgService>(client =>
+{
+    client.Timeout = TimeSpan.FromSeconds(120);
+});
+
+// Local ONNX background removal — U-2-Net (singleton — model loaded once, auto-downloads)
+builder.Services.AddSingleton<OnnxBgRemovalService>();
 
 // Local ONNX image enhancement — Real-ESRGAN 4x upscale (singleton — model loaded once)
 builder.Services.AddSingleton<IImageEnhancerService, OnnxImageEnhancerService>();
@@ -1175,6 +1184,34 @@ using (var scope = app.Services.CreateScope())
         app.Logger.LogWarning(ex, "K-Culture StylePresets seeding failed (non-fatal)");
     }
 
+    // ── PhotoArts StylePresets ──
+    try
+    {
+        await db.Database.ExecuteSqlRawAsync(@"
+            IF NOT EXISTS (SELECT 1 FROM StylePresets WHERE Name = 'Portrait Oil Painting')
+                INSERT INTO StylePresets (Name, Description, PromptTemplate, Category, IconEmoji, AccentColor, IsActive, SortOrder) VALUES
+                (N'Portrait Oil Painting', N'Expressive oil painting portrait on canvas',
+                 N'A professional portrait of [subject] rendered as an expressive oil painting on canvas. High contrast, thick impasto brushwork in the background, and fine-detail blending on the face. Rich, warm color palette. The lighting should be dramatic, highlighting the contours of the face like a studio portrait. Artistic, painterly, textured, and sophisticated.',
+                 N'PhotoArts', N'🖼️', '#8D6E63', 1, 156);
+
+            IF NOT EXISTS (SELECT 1 FROM StylePresets WHERE Name = 'Smudge Oil Portrait')
+                INSERT INTO StylePresets (Name, Description, PromptTemplate, Category, IconEmoji, AccentColor, IsActive, SortOrder) VALUES
+                (N'Smudge Oil Portrait', N'Ultra-smooth digital smudge painting with cinematic glow',
+                 N'A high-quality digital oil painting of [subject]. The style is ""smudge painting"" with ultra-smooth skin textures, vibrant saturation, and visible but soft brushstrokes. The background is a soft-focus abstract bokeh with warm, moody lighting. Professional digital art, sharp facial features, deep shadows, and an artistic glow on the skin. 8k resolution, cinematic lighting.',
+                 N'PhotoArts', N'🎨', '#E65100', 1, 157);
+
+            IF NOT EXISTS (SELECT 1 FROM StylePresets WHERE Name = 'Vexel Art Portrait')
+                INSERT INTO StylePresets (Name, Description, PromptTemplate, Category, IconEmoji, AccentColor, IsActive, SortOrder) VALUES
+                (N'Vexel Art Portrait', N'Clean vexel illustration with detailed hair and vibrant colors',
+                 N'A stylized digital illustration of [subject]. Clean lines, smooth color gradients, and a ""vexel art"" aesthetic. The hair is highly detailed with individual light-catching strands. Simple, elegant, blurred background to make the subject pop. High-end retouching style, vibrant colors, and sharp, soulful eyes.',
+                 N'PhotoArts', N'✨', '#7C4DFF', 1, 158);
+        ");
+    }
+    catch (Exception ex)
+    {
+        app.Logger.LogWarning(ex, "PhotoArts StylePresets seeding failed (non-fatal)");
+    }
+
     // Add ThumbnailPath column to StylePresets if missing
     try
     {
@@ -1221,9 +1258,11 @@ app.Use(async (context, next) =>
     headers["Content-Security-Policy"] =
         "default-src 'self'; " +
         "script-src 'self' 'unsafe-inline' 'unsafe-eval' https://cdn.jsdelivr.net; " +
-        "style-src 'self' 'unsafe-inline'; " +
+        "style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; " +
+        "font-src 'self' https://fonts.gstatic.com; " +
         "img-src 'self' data: blob:; " +
-        "connect-src 'self' ws: wss:; " +
+        "connect-src 'self' ws: wss: https://cdn.jsdelivr.net" +
+            (app.Environment.IsDevelopment() ? " http://localhost:*" : "") + "; " +
         "frame-ancestors 'none'";
     await next();
 });

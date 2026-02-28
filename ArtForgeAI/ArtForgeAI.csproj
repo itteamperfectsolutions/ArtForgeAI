@@ -24,12 +24,6 @@
   </ItemGroup>
 
   <ItemGroup>
-    <None Update="Models\rmbg-2.0.onnx">
-      <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
-    </None>
-    <None Update="Models\rmbg-1.4.onnx">
-      <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
-    </None>
     <None Update="Models\realesrgan-x4plus.onnx">
       <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
     </None>

@@ -6,6 +6,7 @@ window.passportPhoto = (function () {
     let sheetCanvas = null;
     let photoDataUrl = null;
     let resizeObserver = null;
+    let sheetResizeObserver = null;
 
     // Paper sizes in px at 300 DPI
     const paperSizes = {
@@ -68,7 +69,8 @@ window.passportPhoto = (function () {
         wrapper.style.cssText = "position:relative;display:inline-block;user-select:none;line-height:0;";
 
         var img = document.createElement("img");
-        img.style.cssText = "display:block;max-height:400px;max-width:100%;pointer-events:none;";
+        var maxH = window.innerWidth <= 480 ? 250 : (window.innerWidth <= 900 ? 300 : 400);
+        img.style.cssText = "display:block;max-height:" + maxH + "px;max-width:100%;pointer-events:none;";
         img.crossOrigin = "anonymous";
 
         img.onload = function () {
@@ -336,6 +338,39 @@ window.passportPhoto = (function () {
         };
     }
 
+    function setCropBoxFromFaceDetection(faceTop, faceBottom, faceLeft, faceRight, eyeLineY) {
+        if (!cropImg || !cropDisplayW || !cropDisplayH) return;
+
+        // Face dimensions in display pixels
+        var fTopPx = faceTop * cropDisplayH;
+        var fBottomPx = faceBottom * cropDisplayH;
+        var fLeftPx = faceLeft * cropDisplayW;
+        var fRightPx = faceRight * cropDisplayW;
+        var eyePx = eyeLineY * cropDisplayH;
+        var faceH = fBottomPx - fTopPx;
+        var faceCX = (fLeftPx + fRightPx) / 2;
+
+        // Passport proportions: face ~55% of photo height, eyes at ~40% from top
+        var cropH = faceH / 0.55;
+        var cropW = cropH * PASSPORT_ASPECT;
+
+        // Position: eyes at 40% from top of crop box
+        var cropY = eyePx - cropH * 0.40;
+        var cropX = faceCX - cropW / 2;
+
+        // Clamp to image bounds
+        if (cropW > cropDisplayW) { cropW = cropDisplayW; cropH = cropW / PASSPORT_ASPECT; }
+        if (cropH > cropDisplayH) { cropH = cropDisplayH; cropW = cropH * PASSPORT_ASPECT; }
+        cropX = Math.max(0, Math.min(cropX, cropDisplayW - cropW));
+        cropY = Math.max(0, Math.min(cropY, cropDisplayH - cropH));
+
+        cropState.x = cropX;
+        cropState.y = cropY;
+        cropState.w = cropW;
+        cropState.h = cropH;
+        updateCropUI();
+    }
+
     function setCropChangedCallback(enabled) {
         if (enabled) {
             cropChangedCallback = function () {
@@ -345,6 +380,35 @@ window.passportPhoto = (function () {
         } else {
             cropChangedCallback = null;
         }
+    }
+
+    // Swap the crop tool image (e.g., after background removal) while preserving crop box position
+    function swapCropImage(dataUrl) {
+        if (!cropImg || !cropWrapper) return Promise.resolve();
+        return new Promise(function (resolve) {
+            // Store current crop state (relative fractions)
+            var relX = cropState.x / cropDisplayW;
+            var relY = cropState.y / cropDisplayH;
+            var relW = cropState.w / cropDisplayW;
+            var relH = cropState.h / cropDisplayH;
+
+            cropImg.onload = function () {
+                cropNaturalW = cropImg.naturalWidth;
+                cropNaturalH = cropImg.naturalHeight;
+                cropDisplayW = cropImg.clientWidth;
+                cropDisplayH = cropImg.clientHeight;
+
+                // Restore crop box at same relative position
+                cropState.x = relX * cropDisplayW;
+                cropState.y = relY * cropDisplayH;
+                cropState.w = relW * cropDisplayW;
+                cropState.h = relH * cropDisplayH;
+                updateCropUI();
+                resolve();
+            };
+            cropImg.onerror = function () { resolve(); };
+            cropImg.src = dataUrl;
+        });
     }
 
     function disposeCropTool() {
@@ -390,13 +454,14 @@ window.passportPhoto = (function () {
         if (resizeObserver) {
             resizeObserver.disconnect();
         }
+        var observeTarget = el.closest(".pp-preview-container, .pp-sheet-container") || el.parentElement;
         resizeObserver = new ResizeObserver(function () {
             if (previewCanvas) {
                 var canvasEl = document.getElementById(canvasId);
                 if (canvasEl) fitCanvasToContainer(previewCanvas, canvasEl);
             }
         });
-        if (el.parentElement) resizeObserver.observe(el.parentElement);
+        if (observeTarget) resizeObserver.observe(observeTarget);
     }
 
     function renderInputPreview(canvasId, dataUrl) {
@@ -493,15 +558,31 @@ window.passportPhoto = (function () {
             try { sheetCanvas.dispose(); } catch (e) { }
             sheetCanvas = null;
         }
+        if (sheetResizeObserver) {
+            sheetResizeObserver.disconnect();
+            sheetResizeObserver = null;
+        }
         var el = document.getElementById(canvasId);
         if (!el) return;
-        var paper = (currentPaper === 'Custom' && customPaperSize) ? customPaperSize : (paperSizes[currentPaper] || paperSizes['4\u00d76"']);
+
+        // Create at 1×1 to avoid layout push — renderSheet sets proper dimensions
         sheetCanvas = new fabric.Canvas(canvasId, {
-            width: paper.w, height: paper.h,
+            width: 1, height: 1,
             backgroundColor: "#ffffff",
             selection: false, renderOnAddRemove: false,
         });
-        fitCanvasToContainer(sheetCanvas, el);
+
+        // Re-fit on container resize
+        var observeTarget = el.closest(".pp-sheet-container") || el.parentElement;
+        if (observeTarget) {
+            sheetResizeObserver = new ResizeObserver(function () {
+                if (sheetCanvas) {
+                    var canvasEl = document.getElementById(canvasId);
+                    if (canvasEl) fitCanvasToContainer(sheetCanvas, canvasEl);
+                }
+            });
+            sheetResizeObserver.observe(observeTarget);
+        }
     }
 
     function setPhoto(dataUrl) { photoDataUrl = dataUrl; }
@@ -546,14 +627,16 @@ window.passportPhoto = (function () {
         var pw = landscapeOn ? paper.h : paper.w;
         var ph = landscapeOn ? paper.w : paper.h;
 
-        sheetCanvas.setDimensions({ width: pw, height: ph });
+        // Set internal buffer to full paper dimensions (no CSS change — prevents layout push)
+        sheetCanvas.setDimensions({ width: pw, height: ph }, { backstoreOnly: true });
+        // Scale CSS to fit the container
+        var sheetEl = document.getElementById(canvasId);
+        if (sheetEl) fitCanvasToContainer(sheetCanvas, sheetEl);
         sheetCanvas.clear();
         sheetCanvas.backgroundColor = "#ffffff";
 
         if (!photoDataUrl) {
             sheetCanvas.renderAll();
-            var sheetEl = document.getElementById(canvasId);
-            if (sheetEl) fitCanvasToContainer(sheetCanvas, sheetEl);
             return Promise.resolve(0);
         }
 
@@ -606,8 +689,6 @@ window.passportPhoto = (function () {
                     }
                 }
                 sheetCanvas.renderAll();
-                var sheetEl = document.getElementById(canvasId);
-                if (sheetEl) fitCanvasToContainer(sheetCanvas, sheetEl);
                 resolve(cols * rows);
             };
             imgEl.onerror = function () { resolve(0); };
@@ -701,17 +782,30 @@ window.passportPhoto = (function () {
         if (previewCanvas) { try { previewCanvas.dispose(); } catch (e) { } previewCanvas = null; }
         if (sheetCanvas) { try { sheetCanvas.dispose(); } catch (e) { } sheetCanvas = null; }
         if (resizeObserver) { resizeObserver.disconnect(); resizeObserver = null; }
+        if (sheetResizeObserver) { sheetResizeObserver.disconnect(); sheetResizeObserver = null; }
         photoDataUrl = null;
     }
 
     function fitCanvasToContainer(canvas, el) {
-        if (!canvas || !el || !el.parentElement) return;
-        var container = el.parentElement;
-        var containerW = container.clientWidth;
+        if (!canvas || !el) return;
+        // Navigate past Fabric.js canvas-container wrapper to the actual layout container
+        var container = el.closest(".pp-sheet-container, .pp-preview-container");
+        if (!container) container = el.parentElement;
+        if (!container) return;
+        var style = getComputedStyle(container);
+        var containerW = container.clientWidth
+            - (parseFloat(style.paddingLeft) || 0)
+            - (parseFloat(style.paddingRight) || 0);
+        var containerH = container.clientHeight
+            - (parseFloat(style.paddingTop) || 0)
+            - (parseFloat(style.paddingBottom) || 0);
         if (containerW <= 0) return;
         var cw = canvas.getWidth();
         var ch = canvas.getHeight();
-        var scale = containerW / cw;
+        // Fit to the more constrained dimension
+        var scaleW = containerW / cw;
+        var scaleH = containerH > 0 ? containerH / ch : scaleW;
+        var scale = Math.min(scaleW, scaleH);
         if (canvas === previewCanvas && scale > 1) scale = 1;
         canvas.setDimensions({ width: cw * scale, height: ch * scale }, { cssOnly: true });
     }
@@ -722,7 +816,9 @@ window.passportPhoto = (function () {
         renderInputPreview: renderInputPreview,
         initCropTool: initCropTool,
         getCropRect: getCropRect,
+        setCropBoxFromFaceDetection: setCropBoxFromFaceDetection,
         setCropChangedCallback: setCropChangedCallback,
+        swapCropImage: swapCropImage,
         disposeCropTool: disposeCropTool,
         initSheet: initSheet,
         setPhoto: setPhoto,

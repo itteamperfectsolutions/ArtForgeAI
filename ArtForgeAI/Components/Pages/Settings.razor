@@ -481,9 +481,9 @@
                     <div class="style-test-body" style="margin-top: 0.75rem;">
                         @* Left: source image *@
                         <div class="style-test-panel">
-                            <div class="style-test-panel-label">Source</div>
+                            <div class="style-test-panel-label">SOURCE</div>
                             <div class="style-test-image-wrap">
-                                <img src="/@_newStyleTestSourcePath" alt="Source" />
+                                <img src="@($"{ImageStorage.GetWebPath(_newStyleTestSourcePath!)}?v={_testVersion}")" alt="Source" />
                             </div>
                         </div>
 
@@ -500,7 +500,7 @@
                                 }
                                 else if (!string.IsNullOrEmpty(_newStyleTestResultPath))
                                 {
-                                    <img src="@(ImageStorage.GetWebPath(_newStyleTestResultPath))" alt="Result" />
+                                    <img src="@($"{ImageStorage.GetWebPath(_newStyleTestResultPath)}?v={_testVersion}")" alt="Result" />
                                 }
                                 else
                                 {
@@ -796,18 +796,18 @@
             <div class="style-test-body">
                 @* Left: source image *@
                 <div class="style-test-panel">
-                    <div class="style-test-panel-label">Source</div>
+                    <div class="style-test-panel-label">SOURCE</div>
                     <div class="style-test-image-wrap">
                         @if (!string.IsNullOrEmpty(_testSourcePath))
                         {
-                            <img src="/@_testSourcePath" alt="Source" />
+                            <img src="@($"{ImageStorage.GetWebPath(_testSourcePath)}?v={_testVersion}")" alt="Source" />
                         }
                     </div>
                 </div>
 
                 @* Right: result *@
                 <div class="style-test-panel">
-                    <div class="style-test-panel-label">Result</div>
+                    <div class="style-test-panel-label">RESULT</div>
                     <div class="style-test-image-wrap">
                         @if (_testProcessing)
                         {
@@ -826,7 +826,7 @@
                         }
                         else if (!string.IsNullOrEmpty(_testResultPath))
                         {
-                            <img src="@(ImageStorage.GetWebPath(_testResultPath))" alt="Result" />
+                            <img src="@($"{ImageStorage.GetWebPath(_testResultPath)}?v={_testVersion}")" alt="Result" />
                             @if (!string.IsNullOrEmpty(_testModelInfo))
                             {
                                 // Extract model name from the [model-name] prefix
@@ -899,6 +899,7 @@
     private bool _testProcessing;
     private string? _testError;
     private string? _testModelInfo;
+    private long _testVersion; // cache-bust counter for img src
 
     // Placeholder text-input state (for greeting card styles etc.)
     private bool _testPendingPlaceholders;
@@ -1197,6 +1198,7 @@
             // Save uploaded test image
             using var stream = file.OpenReadStream(10 * 1024 * 1024);
             _newStyleTestSourcePath = await ImageStorage.SaveUploadedFileAsync(stream, file.Name);
+            _testVersion = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds();
             StateHasChanged();
 
             // Run style transfer with the prompt template
@@ -1216,6 +1218,7 @@
             if (result.Success && !string.IsNullOrEmpty(result.LocalImagePath))
             {
                 _newStyleTestResultPath = result.LocalImagePath;
+                _testVersion = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds();
             }
             else
             {
@@ -1397,6 +1400,7 @@
         _testError = null;
         _testModelInfo = null;
         _testProcessing = true;
+        _testVersion = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds();
         StateHasChanged();
 
         try
@@ -1435,7 +1439,8 @@
                 if (result.Success && !string.IsNullOrEmpty(result.LocalImagePath))
                 {
                     _testResultPath = result.LocalImagePath;
-                    _testModelInfo = result.EnhancedPrompt; // Contains model name from Gemini service
+                    _testModelInfo = result.EnhancedPrompt;
+                    _testVersion = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds();
                 }
                 else
                 {

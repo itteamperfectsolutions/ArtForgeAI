@@ -315,6 +315,13 @@ window.mosaicPoster = (function () {
             case "masonry": return _layoutMasonry(n);
             case "polaroid": return _layoutPolaroid(n);
             case "hex": return _layoutHex(n);
+            case "centerCircle": return _layoutCenterCircle(n);
+            case "editorialMix": return _layoutEditorialMix(n);
+            case "featureLeft": return _layoutFeatureLeft(n);
+            case "featureTop": return _layoutFeatureTop(n);
+            case "triptych": return _layoutTriptych(n);
+            case "storyboard": return _layoutStoryboard(n);
+            case "panoramicStrip": return _layoutPanoramicStrip(n);
             default: return _layoutGrid(n);
         }
     }
@@ -439,6 +446,124 @@ window.mosaicPoster = (function () {
         return positions;
     }
 
+    // ── Collage Layout Algorithms ──
+
+    function _layoutCenterCircle(n) {
+        var g = settings.tileGutter;
+        var halfW = (canvasW - g) / 2;
+        var halfH = (canvasH - g) / 2;
+        var radius = Math.min(canvasW, canvasH) * 0.22;
+
+        return [
+            { left: 0, top: 0, width: halfW, height: halfH, angle: 0 },
+            { left: halfW + g, top: 0, width: halfW, height: halfH, angle: 0 },
+            { left: 0, top: halfH + g, width: halfW, height: halfH, angle: 0 },
+            { left: halfW + g, top: halfH + g, width: halfW, height: halfH, angle: 0 },
+            {
+                left: canvasW / 2 - radius, top: canvasH / 2 - radius,
+                width: radius * 2, height: radius * 2, angle: 0, shape: "circle"
+            }
+        ];
+    }
+
+    function _layoutEditorialMix(n) {
+        var g = settings.tileGutter;
+        var r1H = canvasH * 0.38;
+        var r2H = canvasH * 0.28;
+        var r3H = canvasH - r1H - r2H - g * 2;
+
+        return [
+            // Row 1: 2 photos (slightly asymmetric widths)
+            { left: 0, top: 0, width: canvasW * 0.52 - g / 2, height: r1H, angle: 0 },
+            { left: canvasW * 0.52 + g / 2, top: 0, width: canvasW * 0.48 - g / 2, height: r1H, angle: 0 },
+            // Row 2: 3 photos
+            { left: 0, top: r1H + g, width: canvasW * 0.30 - g, height: r2H, angle: 0 },
+            { left: canvasW * 0.30, top: r1H + g, width: canvasW * 0.35, height: r2H, angle: 0 },
+            { left: canvasW * 0.65 + g, top: r1H + g, width: canvasW * 0.35 - g, height: r2H, angle: 0 },
+            // Row 3: 2 photos
+            { left: 0, top: r1H + r2H + g * 2, width: canvasW * 0.58 - g / 2, height: r3H, angle: 0 },
+            { left: canvasW * 0.58 + g / 2, top: r1H + r2H + g * 2, width: canvasW * 0.42 - g / 2, height: r3H, angle: 0 }
+        ];
+    }
+
+    function _layoutFeatureLeft(n) {
+        var g = settings.tileGutter;
+        var leftW = canvasW * 0.6 - g / 2;
+        var rightW = canvasW * 0.4 - g / 2;
+        var rightH = (canvasH - g * 2) / 3;
+
+        return [
+            { left: 0, top: 0, width: leftW, height: canvasH, angle: 0 },
+            { left: leftW + g, top: 0, width: rightW, height: rightH, angle: 0 },
+            { left: leftW + g, top: rightH + g, width: rightW, height: rightH, angle: 0 },
+            { left: leftW + g, top: (rightH + g) * 2, width: rightW, height: rightH, angle: 0 }
+        ];
+    }
+
+    function _layoutFeatureTop(n) {
+        var g = settings.tileGutter;
+        var topH = canvasH * 0.6 - g / 2;
+        var botH = canvasH * 0.4 - g / 2;
+        var colW = (canvasW - g * 2) / 3;
+
+        return [
+            { left: 0, top: 0, width: canvasW, height: topH, angle: 0 },
+            { left: 0, top: topH + g, width: colW, height: botH, angle: 0 },
+            { left: colW + g, top: topH + g, width: colW, height: botH, angle: 0 },
+            { left: (colW + g) * 2, top: topH + g, width: colW, height: botH, angle: 0 }
+        ];
+    }
+
+    function _layoutTriptych(n) {
+        var g = settings.tileGutter;
+        var colW = (canvasW - g * 2) / 3;
+
+        return [
+            { left: 0, top: 0, width: colW, height: canvasH, angle: 0 },
+            { left: colW + g, top: 0, width: colW, height: canvasH, angle: 0 },
+            { left: (colW + g) * 2, top: 0, width: colW, height: canvasH, angle: 0 }
+        ];
+    }
+
+    function _layoutStoryboard(n) {
+        var g = settings.tileGutter;
+        var topH = canvasH * 0.55;
+        var botH = canvasH - topH - g;
+        var rightTopH1 = topH * 0.55 - g / 2;
+        var rightTopH2 = topH - rightTopH1 - g;
+
+        return [
+            // Hero (top-left)
+            { left: 0, top: 0, width: canvasW * 0.6 - g / 2, height: topH, angle: 0 },
+            // Top-right upper
+            { left: canvasW * 0.6 + g / 2, top: 0, width: canvasW * 0.4 - g / 2, height: rightTopH1, angle: 0 },
+            // Top-right lower
+            { left: canvasW * 0.6 + g / 2, top: rightTopH1 + g, width: canvasW * 0.4 - g / 2, height: rightTopH2, angle: 0 },
+            // Bottom-left
+            { left: 0, top: topH + g, width: canvasW * 0.4 - g / 2, height: botH, angle: 0 },
+            // Bottom-right
+            { left: canvasW * 0.4 + g / 2, top: topH + g, width: canvasW * 0.6 - g / 2, height: botH, angle: 0 }
+        ];
+    }
+
+    function _layoutPanoramicStrip(n) {
+        var g = settings.tileGutter;
+        var cols = Math.min(Math.max(n, 3), 8);
+        var colW = (canvasW - g * (cols - 1)) / cols;
+        var positions = [];
+
+        for (var i = 0; i < cols; i++) {
+            positions.push({
+                left: i * (colW + g),
+                top: 0,
+                width: colW,
+                height: canvasH,
+                angle: 0
+            });
+        }
+        return positions;
+    }
+
     // ── Tile Placement ──
 
     function _placeBgTiles(positions) {
@@ -470,14 +595,35 @@ window.mosaicPoster = (function () {
                 angle: pos.angle || 0
             });
 
-            // Clip to tile rect
-            fabricImg.clipPath = new fabric.Rect({
-                width: pos.width,
-                height: pos.height,
-                originX: "center",
-                originY: "center",
-                absolutePositioned: false
-            });
+            // Clip to tile shape
+            if (pos.shape === "circle") {
+                var circleR = Math.min(pos.width, pos.height) / 2;
+                // White border ring behind circle
+                canvas.add(new fabric.Circle({
+                    radius: circleR + settings.tileGutter + 2,
+                    left: pos.left + pos.width / 2,
+                    top: pos.top + pos.height / 2,
+                    originX: "center",
+                    originY: "center",
+                    fill: "#ffffff",
+                    selectable: false,
+                    evented: false
+                }));
+                fabricImg.clipPath = new fabric.Circle({
+                    radius: circleR,
+                    originX: "center",
+                    originY: "center",
+                    absolutePositioned: false
+                });
+            } else {
+                fabricImg.clipPath = new fabric.Rect({
+                    width: pos.width,
+                    height: pos.height,
+                    originX: "center",
+                    originY: "center",
+                    absolutePositioned: false
+                });
+            }
 
             // Apply filters
             _applyBgFilters(fabricImg);
@@ -528,7 +674,7 @@ window.mosaicPoster = (function () {
     // ── Foreground Placement ──
 
     function _placeForeground() {
-        if (!mainImage) return;
+        if (!mainImage || settings.foregroundScale <= 0) return;
 
         const imgEl = new Image();
         imgEl.crossOrigin = "anonymous";
@@ -658,6 +804,111 @@ window.mosaicPoster = (function () {
                 cornerRadius: 8,
                 shadowBlur: 30,
                 shadowOffsetY: 6
+            },
+            natureCircle: {
+                layout: "centerCircle",
+                tileGutter: 8,
+                bgOpacity: 1,
+                bgBlurPx: 0,
+                bgSaturation: 0.1,
+                bgBrightness: 0,
+                bgTintColor: "",
+                bgTintOpacity: 0,
+                foregroundScale: 0,
+                borderWidth: 0,
+                cornerRadius: 0,
+                shadowBlur: 0,
+                shadowOffsetY: 0
+            },
+            editorialSpread: {
+                layout: "editorialMix",
+                tileGutter: 6,
+                bgOpacity: 1,
+                bgBlurPx: 0,
+                bgSaturation: 0,
+                bgBrightness: 0,
+                bgTintColor: "",
+                bgTintOpacity: 0,
+                foregroundScale: 0,
+                borderWidth: 0,
+                cornerRadius: 0,
+                shadowBlur: 0,
+                shadowOffsetY: 0
+            },
+            cleanFeature: {
+                layout: "featureLeft",
+                tileGutter: 4,
+                bgOpacity: 1,
+                bgBlurPx: 0,
+                bgSaturation: 0,
+                bgBrightness: 0,
+                bgTintColor: "",
+                bgTintOpacity: 0,
+                foregroundScale: 0,
+                borderWidth: 0,
+                cornerRadius: 0,
+                shadowBlur: 0,
+                shadowOffsetY: 0
+            },
+            warmStoryboard: {
+                layout: "storyboard",
+                tileGutter: 5,
+                bgOpacity: 1,
+                bgBlurPx: 0,
+                bgSaturation: 0.15,
+                bgBrightness: 0.03,
+                bgTintColor: "#f5e6d3",
+                bgTintOpacity: 0.08,
+                foregroundScale: 0,
+                borderWidth: 0,
+                cornerRadius: 0,
+                shadowBlur: 0,
+                shadowOffsetY: 0
+            },
+            elegantTriptych: {
+                layout: "triptych",
+                tileGutter: 10,
+                bgOpacity: 1,
+                bgBlurPx: 0,
+                bgSaturation: -0.2,
+                bgBrightness: 0,
+                bgTintColor: "",
+                bgTintOpacity: 0,
+                foregroundScale: 0,
+                borderWidth: 0,
+                cornerRadius: 0,
+                shadowBlur: 0,
+                shadowOffsetY: 0
+            },
+            boldPanoramic: {
+                layout: "panoramicStrip",
+                tileGutter: 3,
+                bgOpacity: 1,
+                bgBlurPx: 0,
+                bgSaturation: 0.1,
+                bgBrightness: 0.02,
+                bgTintColor: "",
+                bgTintOpacity: 0,
+                foregroundScale: 0,
+                borderWidth: 0,
+                cornerRadius: 0,
+                shadowBlur: 0,
+                shadowOffsetY: 0
+            },
+            spotlightTop: {
+                layout: "featureTop",
+                tileGutter: 5,
+                bgOpacity: 1,
+                bgBlurPx: 0,
+                bgSaturation: 0,
+                bgBrightness: 0,
+                bgTintColor: "",
+                bgTintOpacity: 0,
+                foregroundScale: 0,
+                borderWidth: 0,
+                cornerRadius: 0,
+                shadowBlur: 0,
+                shadowOffsetY: 0
             }
         };
     }

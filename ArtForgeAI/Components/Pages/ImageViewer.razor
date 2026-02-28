@@ -1,0 +1,464 @@
+@page "/image-viewer"
+@rendermode InteractiveServer
+@using ArtForgeAI.Services
+@inject IJSRuntime JS
+@inject RemoveBgService RemoveBg
+@inject ILogger<ImageViewer> Logger
+@implements IDisposable
+
+<PageTitle>Image Viewer - ArtForge AI</PageTitle>
+
+<div class="page-header">
+    <h2>Image Viewer</h2>
+    <p class="page-subtitle">Upload an image and AI will detect the subject outline for print &amp; cut</p>
+</div>
+
+<div class="create-layout">
+    <div class="create-left">
+        <!-- Upload -->
+        <div class="card">
+            <h3 class="card-title">Upload Image</h3>
+
+            <label class="upload-area" for="ivImageInput">
+                <div class="upload-icon">&#128444;</div>
+                <p class="upload-text">Click to select an image</p>
+                <p class="upload-hint">JPG, PNG, GIF, BMP, WEBP &bull; Max 10 MB</p>
+                <InputFile id="ivImageInput" OnChange="OnFileSelected" accept="image/*"
+                           style="display:none" />
+            </label>
+
+            @if (!string.IsNullOrEmpty(_fileName))
+            {
+                <div style="margin-top:1rem">
+                    <p class="form-label">File</p>
+                    <p style="color:var(--text-primary);word-break:break-all">@_fileName</p>
+                    <p class="form-label" style="margin-top:.5rem">Size</p>
+                    <p style="color:var(--text-secondary)">@FormatSize(_fileSize)</p>
+                </div>
+            }
+        </div>
+
+        @if (_imageLoaded)
+        {
+            <!-- Step 1: Detect Subject -->
+            <div class="card" style="margin-top:1rem">
+                <h3 class="card-title">Step 1 &mdash; Detect Subject</h3>
+
+                @if (!RemoveBg.IsAvailable)
+                {
+                    <p class="upload-hint" style="color:var(--text-muted)">
+                        Gemini API key not configured &mdash; add it in Settings or appsettings.json
+                    </p>
+                }
+                else if (_detected)
+                {
+                    <p class="upload-hint" style="color:#00c8ff;margin-bottom:.5rem">
+                        Subject detected &mdash; outline shown on canvas
+                    </p>
+                }
+
+                <button class="btn-secondary" style="width:100%"
+                        disabled="@(_isDetecting || !RemoveBg.IsAvailable)"
+                        @onclick="DetectSubject">
+                    @(_isDetecting ? "Detecting subject..." : "Re-detect")
+                </button>
+
+                <p class="upload-hint" style="margin-top:.5rem">
+                    Gemini AI &mdash; subject detection &amp; background removal
+                </p>
+            </div>
+
+            <!-- Step 2: Margin & Generate -->
+            @if (_detected)
+            {
+                <div class="card" style="margin-top:1rem">
+                    <h3 class="card-title">Step 2 &mdash; Margin &amp; Generate</h3>
+
+                    <div style="display:flex;gap:.75rem;align-items:flex-end">
+                        <div style="flex:1">
+                            <p class="form-label">Margin (mm)</p>
+                            <input type="number" class="form-input" min="0" max="50" step="0.5"
+                                   value="@_marginMm.ToString("F1")"
+                                   @onchange="OnMarginMmChanged" />
+                        </div>
+                        <div style="flex:1">
+                            <p class="form-label">DPI</p>
+                            <input type="number" class="form-input" min="72" max="1200" step="1"
+                                   value="@_dpi"
+                                   @onchange="OnDpiChanged" />
+                        </div>
+                    </div>
+
+                    <input type="range" class="iv-margin-slider" min="0" max="50" step="0.5"
+                           value="@_marginMm" style="margin-top:.5rem"
+                           @oninput="OnMarginSliderChanged" />
+                    <p class="upload-hint">@MarginPx px at @_dpi DPI</p>
+
+                    <button class="btn-primary" style="width:100%;margin-top:1rem"
+                            disabled="@_isCropping" @onclick="GenerateFiles">
+                        @(_isCropping ? "Generating files..." : "Generate Print & Cut Files")
+                    </button>
+
+                    @if (_showingCropped)
+                    {
+                        <button class="btn-secondary" style="width:100%;margin-top:.5rem" @onclick="BackToDetection">
+                            Back to Detection
+                        </button>
+                    }
+                </div>
+            }
+
+            <!-- Downloads + Reset -->
+            <div class="card" style="margin-top:1rem">
+                @if (_printDataUrl is not null)
+                {
+                    <p class="form-label" style="margin-bottom:.5rem">Downloads</p>
+
+                    <button class="btn-primary" style="width:100%;margin-bottom:.5rem" @onclick="DownloadPrint">
+                        Download Print File
+                    </button>
+                    <p class="upload-hint" style="margin-bottom:.75rem">
+                        Original image cropped with margin &mdash; send to printer
+                    </p>
+
+                    <button class="btn-primary" style="width:100%;margin-bottom:.5rem" @onclick="DownloadCutLine">
+                        Download Cut Line
+                    </button>
+                    <p class="upload-hint" style="margin-bottom:.75rem">
+                        Black outline on white &mdash; import into cutting software
+                    </p>
+
+                    @if (_showingCropped)
+                    {
+                        <div style="display:flex;gap:.5rem;margin-top:.5rem">
+                            <button class="@(_previewMode == PreviewMode.Print ? "btn-primary" : "btn-secondary")"
+                                    style="flex:1;font-size:.8rem;padding:.4rem .5rem"
+                                    @onclick="@(() => SwitchPreview(PreviewMode.Print))">
+                                Preview Print
+                            </button>
+                            <button class="@(_previewMode == PreviewMode.CutLine ? "btn-primary" : "btn-secondary")"
+                                    style="flex:1;font-size:.8rem;padding:.4rem .5rem"
+                                    @onclick="@(() => SwitchPreview(PreviewMode.CutLine))">
+                                Preview Cut Line
+                            </button>
+                        </div>
+                    }
+                }
+
+                <button class="btn-secondary" style="width:100%;margin-top:.75rem" @onclick="Reset">
+                    Reset All
+                </button>
+            </div>
+        }
+    </div>
+
+    <div class="create-right">
+        @if (!string.IsNullOrEmpty(_dataUrl))
+        {
+            <div class="iv-canvas-wrapper @(_detected && !_showingCropped ? "iv-outline-active" : "")">
+                <canvas id="ivCanvas"></canvas>
+
+                <button class="iv-fullscreen-btn" title="Fullscreen" @onclick="ToggleFullscreen">
+                    &#x26F6;
+                </button>
+
+                @if (_isDetecting)
+                {
+                    <div class="iv-loading-overlay">
+                        <div class="spinner"></div>
+                        <p style="color:#fff;margin-top:.75rem;font-size:.85rem">Detecting subject...</p>
+                    </div>
+                }
+            </div>
+        }
+        else
+        {
+            <div class="empty-state">
+                <div class="empty-state-icon">&#128247;</div>
+                <p>No image selected</p>
+                <p class="upload-hint">Upload an image to get started</p>
+            </div>
+        }
+    </div>
+</div>
+
+@code {
+    private enum PreviewMode { Print, CutLine }
+
+    // File state
+    private string? _dataUrl;
+    private string? _fileName;
+    private long _fileSize;
+    private byte[]? _imageBytes;
+    private bool _imageLoaded;
+
+    // Detection state
+    private bool _isDetecting;
+    private bool _detected;
+    private SmartSelectResult? _selectResult;
+
+    // Margin — mm-based for cutting machines
+    private double _marginMm = 3.0;
+    private int _dpi = 300;
+
+    // Generated outputs
+    private bool _isCropping;
+    private bool _showingCropped;
+    private PreviewMode _previewMode = PreviewMode.Print;
+
+    private string? _printDataUrl;
+    private byte[]? _printBytes;
+
+    private string? _cutLineDataUrl;
+    private byte[]? _cutLineBytes;
+
+    private bool _canvasInitialized;
+
+    private int MarginPx => (int)Math.Round(_marginMm * _dpi / 25.4);
+
+    private async Task OnFileSelected(InputFileChangeEventArgs e)
+    {
+        var file = e.File;
+        if (file is null) return;
+
+        const long maxSize = 10 * 1024 * 1024;
+        if (file.Size > maxSize) return;
+
+        _fileName = file.Name;
+        _fileSize = file.Size;
+
+        using var stream = file.OpenReadStream(maxSize);
+        using var ms = new MemoryStream();
+        await stream.CopyToAsync(ms);
+        _imageBytes = ms.ToArray();
+
+        var base64 = Convert.ToBase64String(_imageBytes);
+        _dataUrl = $"data:{file.ContentType};base64,{base64}";
+
+        ResetState();
+        StateHasChanged();
+
+        await Task.Delay(50);
+        await InitCanvas();
+        await JS.InvokeVoidAsync("imageViewer.loadImage", _dataUrl);
+        _imageLoaded = true;
+        StateHasChanged();
+
+        // Auto-detect subject immediately after upload
+        if (RemoveBg.IsAvailable)
+            await DetectSubject();
+    }
+
+    private async Task InitCanvas()
+    {
+        if (!_canvasInitialized)
+        {
+            await JS.InvokeVoidAsync("imageViewer.init", "ivCanvas");
+            _canvasInitialized = true;
+        }
+    }
+
+    private async Task ToggleFullscreen()
+    {
+        var isFs = await JS.InvokeAsync<bool>("imageViewer.isFullscreen");
+        if (isFs)
+            await JS.InvokeVoidAsync("imageViewer.exitFullscreen");
+        else
+            await JS.InvokeVoidAsync("imageViewer.enterFullscreen");
+    }
+
+    // ── Step 1: AI Detection (auto-runs on upload) ──
+
+    private async Task DetectSubject()
+    {
+        if (_imageBytes is null || _isDetecting || !RemoveBg.IsAvailable) return;
+
+        _isDetecting = true;
+        _printDataUrl = null;
+        _cutLineDataUrl = null;
+        _showingCropped = false;
+        StateHasChanged();
+
+        try
+        {
+            _selectResult = await RemoveBg.DetectSubjectAsync(_imageBytes);
+            _detected = true;
+
+            await JS.InvokeVoidAsync("imageViewer.showDetection",
+                _selectResult.OutlineImagePath,
+                _selectResult.BboxX, _selectResult.BboxY,
+                _selectResult.BboxWidth, _selectResult.BboxHeight);
+
+            await JS.InvokeVoidAsync("imageViewer.updateMargin", MarginPx);
+        }
+        catch (Exception ex)
+        {
+            Logger.LogError(ex, "Subject detection failed");
+            _detected = false;
+        }
+        finally
+        {
+            _isDetecting = false;
+            StateHasChanged();
+        }
+    }
+
+    // ── Step 2: Margin & Generate ──
+
+    private async Task OnMarginMmChanged(ChangeEventArgs e)
+    {
+        if (double.TryParse(e.Value?.ToString(), out var val))
+        {
+            _marginMm = Math.Clamp(val, 0, 50);
+            if (_detected)
+                await JS.InvokeVoidAsync("imageViewer.updateMargin", MarginPx);
+        }
+    }
+
+    private async Task OnMarginSliderChanged(ChangeEventArgs e)
+    {
+        if (double.TryParse(e.Value?.ToString(), out var val))
+        {
+            _marginMm = val;
+            if (_detected)
+                await JS.InvokeVoidAsync("imageViewer.updateMargin", MarginPx);
+        }
+    }
+
+    private async Task OnDpiChanged(ChangeEventArgs e)
+    {
+        if (int.TryParse(e.Value?.ToString(), out var val))
+        {
+            _dpi = Math.Clamp(val, 72, 1200);
+            if (_detected)
+                await JS.InvokeVoidAsync("imageViewer.updateMargin", MarginPx);
+        }
+    }
+
+    private async Task GenerateFiles()
+    {
+        if (_selectResult is null || _isCropping || _imageBytes is null) return;
+
+        _isCropping = true;
+        StateHasChanged();
+
+        try
+        {
+            int mpx = MarginPx;
+            int x = Math.Max(0, _selectResult.BboxX - mpx);
+            int y = Math.Max(0, _selectResult.BboxY - mpx);
+            int x2 = Math.Min(_selectResult.OriginalWidth,
+                _selectResult.BboxX + _selectResult.BboxWidth + mpx);
+            int y2 = Math.Min(_selectResult.OriginalHeight,
+                _selectResult.BboxY + _selectResult.BboxHeight + mpx);
+            int w = x2 - x;
+            int h = y2 - y;
+
+            // Compute registration mark sizing based on actual margins in cropped image
+            int marginLeft = _selectResult.BboxX - x;
+            int marginTop = _selectResult.BboxY - y;
+            int marginRight = x2 - (_selectResult.BboxX + _selectResult.BboxWidth);
+            int marginBottom = y2 - (_selectResult.BboxY + _selectResult.BboxHeight);
+            int minMargin = Math.Min(Math.Min(marginLeft, marginRight), Math.Min(marginTop, marginBottom));
+
+            int idealMarkSize = (int)Math.Round(5.0 * _dpi / 25.4); // 5mm at current DPI
+            int markSize = Math.Min(idealMarkSize, Math.Max(0, minMargin - 4));
+            int markInset = minMargin / 2;
+
+            // Skip marks if margin is too small
+            if (markSize < 10 || markInset < 6) { markSize = 0; markInset = 0; }
+
+            // 1. Print file: crop from ORIGINAL image with registration marks
+            _printBytes = await RemoveBg.GeneratePrintFileAsync(_imageBytes, x, y, w, h, markInset, markSize);
+            _printDataUrl = $"data:image/png;base64,{Convert.ToBase64String(_printBytes)}";
+
+            // 2. Crop transparent version, then generate cut line with matching marks
+            var transparentCropped = await RemoveBg.CropWithMarginAsync(
+                _selectResult.TransparentPngBytes, x, y, w, h);
+            _cutLineBytes = await RemoveBg.GenerateCutLineAsync(transparentCropped, markInset, markSize);
+            _cutLineDataUrl = $"data:image/png;base64,{Convert.ToBase64String(_cutLineBytes)}";
+
+            // Show print file in canvas
+            _previewMode = PreviewMode.Print;
+            await JS.InvokeVoidAsync("imageViewer.showCroppedResult", _printDataUrl);
+            _showingCropped = true;
+        }
+        catch (Exception ex)
+        {
+            Logger.LogError(ex, "Generate print & cut files failed");
+        }
+        finally
+        {
+            _isCropping = false;
+            StateHasChanged();
+        }
+    }
+
+    private async Task SwitchPreview(PreviewMode mode)
+    {
+        _previewMode = mode;
+        var url = mode == PreviewMode.Print ? _printDataUrl : _cutLineDataUrl;
+        if (url is not null)
+            await JS.InvokeVoidAsync("imageViewer.showCroppedResult", url);
+        StateHasChanged();
+    }
+
+    private async Task DownloadPrint()
+    {
+        if (_printDataUrl is null) return;
+        var name = Path.GetFileNameWithoutExtension(_fileName ?? "image") + "_print.png";
+        await JS.InvokeVoidAsync("imageViewer.triggerDownload", _printDataUrl, name);
+    }
+
+    private async Task DownloadCutLine()
+    {
+        if (_cutLineDataUrl is null) return;
+        var name = Path.GetFileNameWithoutExtension(_fileName ?? "image") + "_cutline.png";
+        await JS.InvokeVoidAsync("imageViewer.triggerDownload", _cutLineDataUrl, name);
+    }
+
+    private async Task BackToDetection()
+    {
+        if (_selectResult is null || !_canvasInitialized) return;
+        await JS.InvokeVoidAsync("imageViewer.restoreDetectionView");
+        _showingCropped = false;
+        StateHasChanged();
+    }
+
+    private async Task Reset()
+    {
+        ResetState();
+        if (_canvasInitialized && _dataUrl is not null)
+        {
+            await JS.InvokeVoidAsync("imageViewer.clearAll");
+            await JS.InvokeVoidAsync("imageViewer.loadImage", _dataUrl);
+        }
+        StateHasChanged();
+    }
+
+    private void ResetState()
+    {
+        _detected = false;
+        _selectResult = null;
+        _printDataUrl = null;
+        _printBytes = null;
+        _cutLineDataUrl = null;
+        _cutLineBytes = null;
+        _showingCropped = false;
+        _previewMode = PreviewMode.Print;
+        _marginMm = 3.0;
+    }
+
+    private static string FormatSize(long bytes)
+    {
+        if (bytes < 1024) return $"{bytes} B";
+        if (bytes < 1024 * 1024) return $"{bytes / 1024.0:F1} KB";
+        return $"{bytes / (1024.0 * 1024.0):F1} MB";
+    }
+
+    public void Dispose()
+    {
+        try { _ = JS.InvokeVoidAsync("imageViewer.dispose"); }
+        catch { }
+    }
+}

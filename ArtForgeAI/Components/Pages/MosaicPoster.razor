@@ -162,7 +162,7 @@
 
                     <div class="mosaic-slider-row">
                         <span>Scale</span>
-                        <input type="range" min="0.2" max="0.8" step="0.05"
+                        <input type="range" min="0" max="0.8" step="0.05"
                                value="@_settings.ForegroundScale.ToString(System.Globalization.CultureInfo.InvariantCulture)"
                                @onchange="OnScaleChanged"
                                disabled="@(!_isCanvasReady)" />
@@ -188,9 +188,9 @@
                     </div>
                 </div>
 
-                @* Quick Presets *@
+                @* Quick Presets — Mosaic *@
                 <div class="mb-3">
-                    <label class="form-label">Quick Presets</label>
+                    <label class="form-label">Mosaic Presets</label>
                     <div class="mosaic-presets">
                         <button class="btn-secondary" @onclick='() => ApplyPreset("classicGrid")' disabled="@(!_isCanvasReady)">
                             &#9632; Classic Grid
@@ -200,6 +200,34 @@
                         </button>
                         <button class="btn-secondary" @onclick='() => ApplyPreset("festivePolaroid")' disabled="@(!_isCanvasReady)">
                             &#127881; Festive Polaroid
+                        </button>
+                    </div>
+                </div>
+
+                @* Quick Presets — Collage *@
+                <div class="mb-3">
+                    <label class="form-label">Collage Presets</label>
+                    <div class="mosaic-presets">
+                        <button class="btn-secondary" @onclick='() => ApplyPreset("natureCircle")' disabled="@(!_isCanvasReady)">
+                            &#9673; Nature Circle
+                        </button>
+                        <button class="btn-secondary" @onclick='() => ApplyPreset("editorialSpread")' disabled="@(!_isCanvasReady)">
+                            &#9641; Editorial Spread
+                        </button>
+                        <button class="btn-secondary" @onclick='() => ApplyPreset("cleanFeature")' disabled="@(!_isCanvasReady)">
+                            &#9703; Clean Feature
+                        </button>
+                        <button class="btn-secondary" @onclick='() => ApplyPreset("warmStoryboard")' disabled="@(!_isCanvasReady)">
+                            &#9635; Warm Storyboard
+                        </button>
+                        <button class="btn-secondary" @onclick='() => ApplyPreset("elegantTriptych")' disabled="@(!_isCanvasReady)">
+                            &#9776; Elegant Triptych
+                        </button>
+                        <button class="btn-secondary" @onclick='() => ApplyPreset("boldPanoramic")' disabled="@(!_isCanvasReady)">
+                            &#9644; Bold Panoramic
+                        </button>
+                        <button class="btn-secondary" @onclick='() => ApplyPreset("spotlightTop")' disabled="@(!_isCanvasReady)">
+                            &#9700; Spotlight Top
                         </button>
                     </div>
                 </div>
@@ -308,7 +336,14 @@
         ["grid"] = ("Grid", "&#9632;"),
         ["masonry"] = ("Masonry", "&#9638;"),
         ["polaroid"] = ("Polaroid", "&#128247;"),
-        ["hex"] = ("Hex", "&#11042;")
+        ["hex"] = ("Hex", "&#11042;"),
+        ["centerCircle"] = ("Center \u25CB", "&#9673;"),
+        ["editorialMix"] = ("Editorial", "&#9641;"),
+        ["featureLeft"] = ("Feature L", "&#9703;"),
+        ["featureTop"] = ("Feature T", "&#9700;"),
+        ["triptych"] = ("Triptych", "&#9776;"),
+        ["storyboard"] = ("Story", "&#9635;"),
+        ["panoramicStrip"] = ("Panoramic", "&#9644;")
     };
 
     private async Task ClickMainInput()
@@ -586,6 +621,63 @@
                     {
                         TileGutter = 0, BgOpacity = 1, BgBlurPx = 0, BgSaturation = 0.2, BgBrightness = 0.05,
                         ForegroundScale = 0.4, BorderWidth = 20, CornerRadius = 8
+                    };
+                    break;
+                case "natureCircle":
+                    _selectedLayout = "centerCircle";
+                    _settings = new MosaicSettings
+                    {
+                        TileGutter = 8, BgOpacity = 1, BgBlurPx = 0, BgSaturation = 0.1, BgBrightness = 0,
+                        ForegroundScale = 0, BorderWidth = 0, CornerRadius = 0
+                    };
+                    break;
+                case "editorialSpread":
+                    _selectedLayout = "editorialMix";
+                    _settings = new MosaicSettings
+                    {
+                        TileGutter = 6, BgOpacity = 1, BgBlurPx = 0, BgSaturation = 0, BgBrightness = 0,
+                        ForegroundScale = 0, BorderWidth = 0, CornerRadius = 0
+                    };
+                    break;
+                case "cleanFeature":
+                    _selectedLayout = "featureLeft";
+                    _settings = new MosaicSettings
+                    {
+                        TileGutter = 4, BgOpacity = 1, BgBlurPx = 0, BgSaturation = 0, BgBrightness = 0,
+                        ForegroundScale = 0, BorderWidth = 0, CornerRadius = 0
+                    };
+                    break;
+                case "warmStoryboard":
+                    _selectedLayout = "storyboard";
+                    _settings = new MosaicSettings
+                    {
+                        TileGutter = 5, BgOpacity = 1, BgBlurPx = 0, BgSaturation = 0.15, BgBrightness = 0.03,
+                        BgTintColor = "#f5e6d3", BgTintOpacity = 0.08,
+                        ForegroundScale = 0, BorderWidth = 0, CornerRadius = 0
+                    };
+                    break;
+                case "elegantTriptych":
+                    _selectedLayout = "triptych";
+                    _settings = new MosaicSettings
+                    {
+                        TileGutter = 10, BgOpacity = 1, BgBlurPx = 0, BgSaturation = -0.2, BgBrightness = 0,
+                        ForegroundScale = 0, BorderWidth = 0, CornerRadius = 0
+                    };
+                    break;
+                case "boldPanoramic":
+                    _selectedLayout = "panoramicStrip";
+                    _settings = new MosaicSettings
+                    {
+                        TileGutter = 3, BgOpacity = 1, BgBlurPx = 0, BgSaturation = 0.1, BgBrightness = 0.02,
+                        ForegroundScale = 0, BorderWidth = 0, CornerRadius = 0
+                    };
+                    break;
+                case "spotlightTop":
+                    _selectedLayout = "featureTop";
+                    _settings = new MosaicSettings
+                    {
+                        TileGutter = 5, BgOpacity = 1, BgBlurPx = 0, BgSaturation = 0, BgBrightness = 0,
+                        ForegroundScale = 0, BorderWidth = 0, CornerRadius = 0
                     };
                     break;
             }
