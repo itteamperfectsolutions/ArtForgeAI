@@ -1,10 +1,15 @@
 @page "/settings"
 @rendermode InteractiveServer
+@using SixLabors.ImageSharp
+@using SixLabors.ImageSharp.PixelFormats
+@using SixLabors.ImageSharp.Processing
+@using System.Text
 @inject IGenerationHistoryService HistoryService
 @inject IImageSizeMasterService SizeService
 @inject IStylePresetService StyleService
 @inject IImageGenerationService ImageGenService
 @inject IImageStorageService ImageStorage
+@inject IWebHostEnvironment Env
 @inject IJSRuntime JS
 @inject ILogger<Settings> Logger
 
@@ -263,6 +268,107 @@
                 </div>
             }
 
+            @* Add new style form *@
+            <div style="margin-bottom: 0.75rem; padding: 0.75rem; border: 1px solid var(--border-color); border-radius: 8px; background: var(--bg-tertiary);">
+                <div style="font-weight: 600; font-size: 0.85rem; margin-bottom: 0.5rem;">Add New Style</div>
+                <div style="display: flex; gap: 0.5rem; align-items: flex-start; flex-wrap: wrap;">
+                    <input class="form-input" style="width: 100px;" @bind="_newStyleName" placeholder="Name" />
+                    <input class="form-input" style="width: 120px;" @bind="_newStyleDesc" placeholder="Description" />
+                    <select class="form-input" style="width: 110px; padding: 0.35rem 0.4rem; font-size: 0.78rem;" @bind="_newStyleCategory">
+                        <option value="Artistic">Artistic</option>
+                        <option value="Fun">Fun</option>
+                        <option value="Professional">Professional</option>
+                        <option value="Abstract">Abstract</option>
+                        <option value="Mythological">Mythological</option>
+                        <option value="Regional">Regional</option>
+                        <option value="PhotoCollage">PhotoCollage</option>
+                        <option value="PhotoArts">PhotoArts</option>
+                        <option value="Cartoon Characters">Cartoon Characters</option>
+                        <option value="Super Heroes">Super Heroes</option>
+                        <option value="Anime &amp; Gaming">Anime &amp; Gaming</option>
+                        <option value="K-Culture">K-Culture</option>
+                    </select>
+                    <input class="form-input" style="width: 50px;" @bind="_newStyleEmoji" placeholder="Emoji" />
+                    <input class="form-input" style="width: 80px;" @bind="_newStyleAccent" placeholder="#hex" />
+                    <textarea class="form-input" style="width: 100%; min-height: 50px; font-size: 0.78rem;" @bind="_newStylePrompt" placeholder="Prompt Template"></textarea>
+                </div>
+
+                @* Inline test preview area *@
+                @if (!string.IsNullOrEmpty(_newStyleTestSourcePath))
+                {
+                    <div class="style-test-body" style="margin-top: 0.75rem;">
+                        <div class="style-test-panel">
+                            <div class="style-test-panel-label">SOURCE</div>
+                            <div class="style-test-image-wrap">
+                                <img src="@($"{ImageStorage.GetWebPath(_newStyleTestSourcePath!)}?v={_testVersion}")" alt="Source" />
+                            </div>
+                        </div>
+                        <div class="style-test-panel">
+                            <div class="style-test-panel-label">Result</div>
+                            <div class="style-test-image-wrap">
+                                @if (_newStyleTestProcessing)
+                                {
+                                    <div style="display:flex;flex-direction:column;align-items:center;gap:0.75rem;padding:2rem;">
+                                        <div class="loading-spinner" style="width:36px;height:36px;margin:0;"></div>
+                                        <span style="font-size:0.85rem;color:var(--text-muted);">Applying style...</span>
+                                    </div>
+                                }
+                                else if (!string.IsNullOrEmpty(_newStyleTestResultPath))
+                                {
+                                    <img src="@($"{ImageStorage.GetWebPath(_newStyleTestResultPath)}?v={_testVersion}")" alt="Result" />
+                                }
+                                else
+                                {
+                                    <span style="color:var(--text-muted);font-size:0.85rem;">Waiting...</span>
+                                }
+                            </div>
+                        </div>
+                    </div>
+
+                    @if (!string.IsNullOrEmpty(_newStyleTestError))
+                    {
+                        <div style="margin-top:0.5rem;color:var(--danger);font-size:0.82rem;">@_newStyleTestError</div>
+                    }
+                }
+
+                @* Action buttons *@
+                <div style="display: flex; gap: 0.5rem; align-items: center; flex-wrap: wrap; margin-top: 0.5rem;">
+                    <label class="btn-primary-gradient btn-sm admin-upload-label"
+                           title="Upload a test image to preview this style"
+                           style="@(string.IsNullOrWhiteSpace(_newStylePrompt) || _newStyleTestProcessing ? "opacity:0.5;pointer-events:none;" : "")">
+                        &#10024; Test Prompt
+                        <InputFile OnChange="TestNewStyle" accept=".jpg,.jpeg,.png,.webp,.gif" style="display:none" />
+                    </label>
+
+                    @if (!_newStyleTestProcessing && !string.IsNullOrEmpty(_newStyleTestResultPath))
+                    {
+                        <button class="btn-primary-gradient btn-sm" @onclick="AddStyleWithThumbnail"
+                                disabled="@(string.IsNullOrWhiteSpace(_newStyleName))">
+                            &#10003; Save with Thumbnail
+                        </button>
+                    }
+
+                    <button class="btn-secondary btn-sm" @onclick="AddStyleOnly"
+                            disabled="@(string.IsNullOrWhiteSpace(_newStyleName) || string.IsNullOrWhiteSpace(_newStylePrompt))">
+                        Save without Thumbnail
+                    </button>
+
+                    @if (!string.IsNullOrEmpty(_newStyleTestSourcePath))
+                    {
+                        <button class="btn-secondary btn-sm" @onclick="ClearNewStylePreview" disabled="@_newStyleTestProcessing">
+                            &#10005; Clear Preview
+                        </button>
+                    }
+                </div>
+
+                @if (!string.IsNullOrEmpty(_styleMessage))
+                {
+                    <div style="margin-top: 0.5rem; color: var(--success); font-size: 0.82rem;">
+                        @_styleMessage
+                    </div>
+                }
+            </div>
+
             @if (_styleSubTab == "active")
             {
                 @* ── Active styles view ── *@
@@ -299,6 +405,12 @@
                                         <option value="Abstract">Abstract</option>
                                         <option value="Mythological">Mythological</option>
                                         <option value="Regional">Regional</option>
+                                        <option value="PhotoCollage">PhotoCollage</option>
+                                        <option value="PhotoArts">PhotoArts</option>
+                                        <option value="Cartoon Characters">Cartoon Characters</option>
+                                        <option value="Super Heroes">Super Heroes</option>
+                                        <option value="Anime &amp; Gaming">Anime &amp; Gaming</option>
+                                        <option value="K-Culture">K-Culture</option>
                                     </select>
                                     <input class="form-input" style="width: 50px;" @bind="_editStyleEmoji" placeholder="Emoji" />
                                     <input class="form-input" style="width: 80px;" @bind="_editStyleAccent" placeholder="#hex" />
@@ -456,103 +568,6 @@
                 </div>
             }
 
-            @* Add new style form *@
-            <div style="margin-top: 0.75rem; padding-top: 0.75rem; border-top: 1px solid var(--border-color);">
-                <div style="font-weight: 600; font-size: 0.85rem; margin-bottom: 0.5rem;">Add New Style</div>
-                <div style="display: flex; gap: 0.5rem; align-items: flex-start; flex-wrap: wrap;">
-                    <input class="form-input" style="width: 100px;" @bind="_newStyleName" placeholder="Name" />
-                    <input class="form-input" style="width: 120px;" @bind="_newStyleDesc" placeholder="Description" />
-                    <select class="form-input" style="width: 110px; padding: 0.35rem 0.4rem; font-size: 0.78rem;" @bind="_newStyleCategory">
-                        <option value="Artistic">Artistic</option>
-                        <option value="Fun">Fun</option>
-                        <option value="Professional">Professional</option>
-                        <option value="Abstract">Abstract</option>
-                        <option value="Mythological">Mythological</option>
-                        <option value="Regional">Regional</option>
-                    </select>
-                    <input class="form-input" style="width: 50px;" @bind="_newStyleEmoji" placeholder="Emoji" />
-                    <input class="form-input" style="width: 80px;" @bind="_newStyleAccent" placeholder="#hex" />
-                    <textarea class="form-input" style="width: 100%; min-height: 50px; font-size: 0.78rem;" @bind="_newStylePrompt" placeholder="Prompt Template"></textarea>
-                </div>
-
-                @* Inline test preview area *@
-                @if (!string.IsNullOrEmpty(_newStyleTestSourcePath))
-                {
-                    <div class="style-test-body" style="margin-top: 0.75rem;">
-                        @* Left: source image *@
-                        <div class="style-test-panel">
-                            <div class="style-test-panel-label">SOURCE</div>
-                            <div class="style-test-image-wrap">
-                                <img src="@($"{ImageStorage.GetWebPath(_newStyleTestSourcePath!)}?v={_testVersion}")" alt="Source" />
-                            </div>
-                        </div>
-
-                        @* Right: result *@
-                        <div class="style-test-panel">
-                            <div class="style-test-panel-label">Result</div>
-                            <div class="style-test-image-wrap">
-                                @if (_newStyleTestProcessing)
-                                {
-                                    <div style="display:flex;flex-direction:column;align-items:center;gap:0.75rem;padding:2rem;">
-                                        <div class="loading-spinner" style="width:36px;height:36px;margin:0;"></div>
-                                        <span style="font-size:0.85rem;color:var(--text-muted);">Applying style...</span>
-                                    </div>
-                                }
-                                else if (!string.IsNullOrEmpty(_newStyleTestResultPath))
-                                {
-                                    <img src="@($"{ImageStorage.GetWebPath(_newStyleTestResultPath)}?v={_testVersion}")" alt="Result" />
-                                }
-                                else
-                                {
-                                    <span style="color:var(--text-muted);font-size:0.85rem;">Waiting...</span>
-                                }
-                            </div>
-                        </div>
-                    </div>
-
-                    @if (!string.IsNullOrEmpty(_newStyleTestError))
-                    {
-                        <div style="margin-top:0.5rem;color:var(--danger);font-size:0.82rem;">@_newStyleTestError</div>
-                    }
-                }
-
-                @* Action buttons *@
-                <div style="display: flex; gap: 0.5rem; align-items: center; flex-wrap: wrap; margin-top: 0.5rem;">
-                    <label class="btn-primary-gradient btn-sm admin-upload-label"
-                           title="Upload a test image to preview this style"
-                           style="@(string.IsNullOrWhiteSpace(_newStylePrompt) || _newStyleTestProcessing ? "opacity:0.5;pointer-events:none;" : "")">
-                        &#10024; Test Prompt
-                        <InputFile OnChange="TestNewStyle" accept=".jpg,.jpeg,.png,.webp,.gif" style="display:none" />
-                    </label>
-
-                    @if (!_newStyleTestProcessing && !string.IsNullOrEmpty(_newStyleTestResultPath))
-                    {
-                        <button class="btn-primary-gradient btn-sm" @onclick="AddStyleWithThumbnail"
-                                disabled="@(string.IsNullOrWhiteSpace(_newStyleName))">
-                            &#10003; Save with Thumbnail
-                        </button>
-                    }
-
-                    <button class="btn-secondary btn-sm" @onclick="AddStyleOnly"
-                            disabled="@(string.IsNullOrWhiteSpace(_newStyleName) || string.IsNullOrWhiteSpace(_newStylePrompt))">
-                        Save without Thumbnail
-                    </button>
-
-                    @if (!string.IsNullOrEmpty(_newStyleTestSourcePath))
-                    {
-                        <button class="btn-secondary btn-sm" @onclick="ClearNewStylePreview" disabled="@_newStyleTestProcessing">
-                            &#10005; Clear Preview
-                        </button>
-                    }
-                </div>
-
-                @if (!string.IsNullOrEmpty(_styleMessage))
-                {
-                    <div style="margin-top: 0.5rem; color: var(--success); font-size: 0.82rem;">
-                        @_styleMessage
-                    </div>
-                }
-            </div>
             } @* end active sub-tab *@
 
             @if (_styleSubTab == "inactive")
@@ -771,6 +786,27 @@
                         <textarea @bind="_testMessageText" rows="3" placeholder="e.g. Happy Birthday, Olivia! Celebrate and enjoy!" maxlength="200"></textarea>
                     </div>
                 }
+                @if (_testPlaceholderPreset.PromptTemplate.Contains("{{CALENDAR}}"))
+                {
+                    <div class="qs-field">
+                        <label>Special Date <span class="qs-required">*</span></label>
+                        <input type="date" @bind="_testCalendarDate" />
+                    </div>
+                }
+                @if (_testPlaceholderPreset.PromptTemplate.Contains("{{NUMBER}}"))
+                {
+                    <div class="qs-field">
+                        <label>Number / Age <span class="qs-required">*</span></label>
+                        <input type="number" @bind="_testNumberValue" min="0" max="999" placeholder="e.g. 2, 5, 25..." />
+                    </div>
+                }
+                @if (_testPlaceholderPreset.PromptTemplate.Contains("{{DATE}}"))
+                {
+                    <div class="qs-field">
+                        <label>Date <span class="qs-required">*</span></label>
+                        <input type="text" @bind="_testDateText" placeholder="e.g. 26-07-2023" maxlength="30" />
+                    </div>
+                }
                 @if (!string.IsNullOrEmpty(_testPlaceholderError))
                 {
                     <div class="qs-field-error">@_testPlaceholderError</div>
@@ -881,7 +917,7 @@
     // Style presets
     private List<StylePreset> _allStyles = [];
     private string? _styleMessage;
-    private static readonly string[] _categoryOrder = ["Artistic", "Fun", "Professional", "Abstract", "Mythological", "Regional", "PhotoCollage"];
+    private static readonly string[] _categoryOrder = ["Artistic", "Fun", "Professional", "Abstract", "Mythological", "Regional", "PhotoCollage", "PhotoArts", "Cartoon Characters", "Super Heroes", "Anime & Gaming", "K-Culture"];
     private int? _generatingThumbnailId;
     private string? _thumbnailMessage;
 
@@ -906,6 +942,9 @@
     private StylePreset? _testPlaceholderPreset;
     private string _testOccasionText = string.Empty;
     private string _testMessageText = string.Empty;
+    private DateTime? _testCalendarDate;
+    private int? _testNumberValue;
+    private string _testDateText = string.Empty;
     private string? _testPlaceholderError;
 
     // Add form
@@ -1331,7 +1370,7 @@
     }
 
     private bool HasPlaceholders(StylePreset style)
-        => style.PromptTemplate.Contains("{{OCCASION}}") || style.PromptTemplate.Contains("{{MESSAGE}}");
+        => style.PromptTemplate.Contains("{{OCCASION}}") || style.PromptTemplate.Contains("{{MESSAGE}}") || style.PromptTemplate.Contains("{{CALENDAR}}") || style.PromptTemplate.Contains("{{NUMBER}}") || style.PromptTemplate.Contains("{{DATE}}");
 
     private string ReplacePlaceholders(string prompt, string occasion, string message)
     {
@@ -1341,6 +1380,12 @@
         else
             result = result.Replace("{{MESSAGE}}",
                 $"Generate a short warm heartfelt message (2-3 lines) appropriate for the occasion: {occasion.Trim()}");
+        if (_testCalendarDate.HasValue)
+            result = result.Replace("{{CALENDAR}}", BuildCalendarDescription(_testCalendarDate.Value));
+        if (_testNumberValue.HasValue)
+            result = result.Replace("{{NUMBER}}", _testNumberValue.Value.ToString());
+        if (!string.IsNullOrWhiteSpace(_testDateText))
+            result = result.Replace("{{DATE}}", _testDateText.Trim());
         return result;
     }
 
@@ -1359,6 +1404,9 @@
             _testPlaceholderPreset = preset;
             _testOccasionText = string.Empty;
             _testMessageText = string.Empty;
+            _testCalendarDate = null;
+            _testNumberValue = null;
+            _testDateText = string.Empty;
             _testPlaceholderError = null;
             _testPendingPlaceholders = true;
             StateHasChanged();
@@ -1378,6 +1426,24 @@
             return;
         }
 
+        if (_testPlaceholderPreset.PromptTemplate.Contains("{{CALENDAR}}") && !_testCalendarDate.HasValue)
+        {
+            _testPlaceholderError = "Please select the special date for the calendar.";
+            return;
+        }
+
+        if (_testPlaceholderPreset.PromptTemplate.Contains("{{NUMBER}}") && !_testNumberValue.HasValue)
+        {
+            _testPlaceholderError = "Please enter the number / age.";
+            return;
+        }
+
+        if (_testPlaceholderPreset.PromptTemplate.Contains("{{DATE}}") && string.IsNullOrWhiteSpace(_testDateText))
+        {
+            _testPlaceholderError = "Please enter the date (e.g. 26-07-2023).";
+            return;
+        }
+
         _testPlaceholderError = null;
         _testPendingPlaceholders = false;
         var prompt = ReplacePlaceholders(_testPlaceholderPreset.EffectivePrompt, _testOccasionText, _testMessageText);
@@ -1390,6 +1456,45 @@
         _testPlaceholderPreset = null;
         _testPlaceholderError = null;
         _testSourcePath = null;
+    }
+
+    private string BuildCalendarDescription(DateTime date)
+    {
+        var monthName = date.ToString("MMMM").ToUpper();
+        var year = date.Year;
+        var firstDay = new DateTime(year, date.Month, 1);
+        var daysInMonth = DateTime.DaysInMonth(year, date.Month);
+        var startDow = (int)firstDay.DayOfWeek; // 0=Sun
+
+        var sb = new StringBuilder();
+        sb.Append($"A clean CALENDAR GRID for {monthName} {year}. ");
+        sb.Append("White text on the dark background. ");
+        sb.Append($"Month name '{monthName} {year}' in bold uppercase above the grid. ");
+        sb.Append("Days of the week header row: SUN  MON  TUE  WED  THU  FRI  SAT. ");
+        sb.Append("Date number rows: ");
+
+        int dayNum = 1;
+        for (int week = 0; dayNum <= daysInMonth; week++)
+        {
+            var cells = new List<string>();
+            for (int dow = 0; dow < 7; dow++)
+            {
+                if ((week == 0 && dow < startDow) || dayNum > daysInMonth)
+                    cells.Add("blank");
+                else
+                {
+                    if (dayNum == date.Day)
+                        cells.Add($"[{dayNum} with a small RED HEART background]");
+                    else
+                        cells.Add(dayNum.ToString());
+                    dayNum++;
+                }
+            }
+            sb.Append($"Row {week + 1}: {string.Join(", ", cells)}. ");
+        }
+
+        sb.Append($"IMPORTANT: The date number {date.Day} MUST have a small red heart icon or red heart-shaped background behind it to mark the special day. All other dates are plain.");
+        return sb.ToString();
     }
 
     private async Task RunTestGeneration(StylePreset preset, string prompt)
@@ -1411,18 +1516,23 @@
                 return;
             }
 
-            // Use portrait dimensions for collage styles (they describe 20×30 sheets)
-            var isCollage = preset.Name.Contains("Collage", StringComparison.OrdinalIgnoreCase);
-            var width = isCollage ? 768 : 512;
-            var height = isCollage ? 1152 : 512;
+            // Always use 2:3 portrait dimensions (20x30 print ratio)
+            const int targetW = 1440;
+            const int targetH = 2160;
+
+            // Append explicit 2:3 format instruction
+            prompt += " OUTPUT FORMAT: The final image MUST be in exact 2:3 portrait aspect ratio (like a 20x30 inch print). Do NOT output square or landscape images.";
+
+            // Append universal face/identity preservation instruction
+            prompt += " FACE & IDENTITY PRESERVATION (CRITICAL): Carefully analyse the source photo to determine the subject's GENDER, approximate AGE, SKIN TONE, and every facial detail. The generated image MUST match the source exactly — same gender, same age range, same complexion and skin undertone, same face shape, jawline, eye shape, eye colour, eyebrow thickness and arch, nose shape and size, lip shape and fullness, ear shape, hairline, hair colour, hair texture, and hairstyle. Preserve moles, dimples, facial hair, wrinkles, and any distinguishing facial marks. Do NOT alter, beautify, age, de-age, lighten, darken, or change any facial feature. The face in every panel/photo MUST be immediately recognisable as the SAME person from the source image — identical in every detail.";
 
             // Run style transfer with the prompt
             var request = new GenerationRequest
             {
                 Prompt = prompt,
-                Width = width,
-                Height = height,
-                SizeName = isCollage ? "20x30" : "Square",
+                Width = targetW,
+                Height = targetH,
+                SizeName = "20x30",
                 EnhancePrompt = false,
                 ReferenceImagePaths = [_testSourcePath],
                 Provider = ImageProvider.Gemini
@@ -1441,6 +1551,9 @@
                     _testResultPath = result.LocalImagePath;
                     _testModelInfo = result.EnhancedPrompt;
                     _testVersion = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds();
+
+                    // Enforce 2:3 aspect ratio via center-crop + resize
+                    await EnforceAspectRatio(result.LocalImagePath, targetW, targetH);
                 }
                 else
                 {
@@ -1462,6 +1575,54 @@
         {
             _testProcessing = false;
             StateHasChanged();
+        }
+    }
+
+    private async Task EnforceAspectRatio(string localImagePath, int targetW, int targetH)
+    {
+        try
+        {
+            var fullPath = System.IO.Path.Combine(Env.WebRootPath,
+                localImagePath.Replace("/", System.IO.Path.DirectorySeparatorChar.ToString()));
+
+            if (!File.Exists(fullPath)) return;
+
+            var imageBytes = await File.ReadAllBytesAsync(fullPath);
+            using var img = Image.Load<Rgba32>(imageBytes);
+
+            double targetRatio = (double)targetW / targetH;
+            double currentRatio = (double)img.Width / img.Height;
+
+            if (Math.Abs(currentRatio - targetRatio) < 0.02) return;
+
+            int cropW, cropH;
+            if (currentRatio > targetRatio)
+            {
+                cropH = img.Height;
+                cropW = (int)Math.Round(cropH * targetRatio);
+            }
+            else
+            {
+                cropW = img.Width;
+                cropH = (int)Math.Round(cropW / targetRatio);
+            }
+
+            int cropX = (img.Width - cropW) / 2;
+            int cropY = (img.Height - cropH) / 2;
+
+            img.Mutate(ctx => ctx
+                .Crop(new SixLabors.ImageSharp.Rectangle(cropX, cropY, cropW, cropH))
+                .Resize(targetW, targetH));
+
+            await using var ms = new MemoryStream();
+            await img.SaveAsPngAsync(ms);
+            await File.WriteAllBytesAsync(fullPath, ms.ToArray());
+
+            Logger.LogInformation("Enforced 2:3 aspect ratio on test style output");
+        }
+        catch (Exception ex)
+        {
+            Logger.LogWarning(ex, "Aspect ratio enforcement failed (non-fatal)");
         }
     }
 

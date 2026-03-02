@@ -304,6 +304,9 @@
                     </button>
                 </div>
             </div>
+            <div class="ai-disclaimer">
+                AI-generated image — minor variations in facial features, colours, and details may occur. For best results, try regenerating if needed.
+            </div>
         }
         else if (_referenceImagePaths.Count == 0)
         {
@@ -728,11 +731,9 @@
         if (_result?.LocalImagePath is null) return;
         try
         {
-            var bytes = await ImageStorage.GetImageAsBytesAsync(_result.LocalImagePath, format);
-            var base64 = Convert.ToBase64String(bytes);
-            var contentType = format == "jpg" ? "image/jpeg" : "image/png";
+            var webPath = await ImageStorage.PrepareHighResDownloadAsync(_result.LocalImagePath, format);
             var fileName = $"artforge_style_{_result.GenerationId}.{format}";
-            await JS.InvokeVoidAsync("downloadFileFromBytes", fileName, contentType, base64);
+            await JS.InvokeVoidAsync("downloadFile", $"/{webPath}", fileName);
         }
         catch (Exception ex)
         {

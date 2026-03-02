@@ -37,6 +37,9 @@
                         &#128465; Delete
                     </button>
                 </div>
+                <div class="ai-disclaimer">
+                    AI-generated image — minor variations in facial features, colours, and details may occur.
+                </div>
             </div>
         </div>
     </div>
@@ -66,12 +69,9 @@
 
         try
         {
-            var bytes = await ImageStorage.GetImageAsBytesAsync(Generation.LocalImagePath, format);
-            var base64 = Convert.ToBase64String(bytes);
-            var contentType = format == "jpg" ? "image/jpeg" : "image/png";
+            var webPath = await ImageStorage.PrepareHighResDownloadAsync(Generation.LocalImagePath, format);
             var fileName = $"artforge_{Generation.Id}.{format}";
-
-            await JS.InvokeVoidAsync("downloadFileFromBytes", fileName, contentType, base64);
+            await JS.InvokeVoidAsync("downloadFile", $"/{webPath}", fileName);
         }
         catch (Exception ex)
         {

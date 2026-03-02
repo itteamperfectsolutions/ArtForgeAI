@@ -1,10 +1,15 @@
 @page "/quick-style"
 @rendermode InteractiveServer
+@using SixLabors.ImageSharp
+@using SixLabors.ImageSharp.PixelFormats
+@using SixLabors.ImageSharp.Processing
 @inject IStylePresetService StyleService
 @inject IImageGenerationService ImageGenService
 @inject IImageStorageService ImageStorage
 @inject ICinematicProfileService CinematicProfile
+@inject IWebHostEnvironment Env
 @inject IJSRuntime JS
+@using System.Text
 @inject ILogger<QuickStyle> Logger
 
 <PageTitle>ArtForge AI - Quick Style</PageTitle>
@@ -70,6 +75,27 @@
                         <textarea @bind="_messageText" rows="3" placeholder="e.g. Happy Birthday, Olivia! Celebrate and enjoy!" maxlength="200"></textarea>
                     </div>
                 }
+                @if (_selectedStyle?.PromptTemplate.Contains("{{CALENDAR}}") == true)
+                {
+                    <div class="qs-field">
+                        <label>Special Date <span class="qs-required">*</span></label>
+                        <input type="date" @bind="_calendarDate" />
+                    </div>
+                }
+                @if (_selectedStyle?.PromptTemplate.Contains("{{NUMBER}}") == true)
+                {
+                    <div class="qs-field">
+                        <label>Number / Age <span class="qs-required">*</span></label>
+                        <input type="number" @bind="_numberValue" min="0" max="999" placeholder="e.g. 2, 5, 25..." />
+                    </div>
+                }
+                @if (_selectedStyle?.PromptTemplate.Contains("{{DATE}}") == true)
+                {
+                    <div class="qs-field">
+                        <label>Date <span class="qs-required">*</span></label>
+                        <input type="text" @bind="_dateText" placeholder="e.g. 26-07-2023" maxlength="30" />
+                    </div>
+                }
                 @if (!string.IsNullOrEmpty(_placeholderError))
                 {
                     <div class="qs-field-error">@_placeholderError</div>
@@ -88,9 +114,8 @@
 {
     <div class="qs-processing-overlay">
         <div class="qs-processing-card">
+            <div style="font-size:0.85rem;margin-bottom:0.75rem;text-align:center;color:var(--text-secondary);min-height:1.2em;">@_processingStatus</div>
             <div class="loading-spinner" style="width:48px;height:48px;margin:0;"></div>
-            <div>Applying <strong>@_selectedStyle?.Name</strong> style...</div>
-            <div style="font-size:0.78rem;color:var(--text-muted);">Output: 1440 x 2160 px (20x30 in)</div>
         </div>
     </div>
 }
@@ -106,11 +131,9 @@
             </div>
             <div class="qs-modal-body">
                 <div class="qs-modal-img-card">
-                    <div class="qs-modal-img-label">Source</div>
                     <img src="/@_sourcePath" alt="Source" />
                 </div>
                 <div class="qs-modal-img-card">
-                    <div class="qs-modal-img-label">Result</div>
                     <img src="@(ImageStorage.GetWebPath(_result.LocalImagePath ?? ""))" alt="Result" />
                 </div>
             </div>
@@ -118,6 +141,9 @@
                 <button class="btn-primary-gradient" @onclick="DownloadPng">&#11015; Download PNG</button>
                 <button class="btn-secondary" @onclick="DownloadJpg">&#11015; Download JPG</button>
                 <button class="btn-secondary" @onclick="StartOver">&times; Close</button>
+            </div>
+            <div class="ai-disclaimer">
+                AI-generated image — minor variations in facial features, colours, and details may occur. For best results, try regenerating if needed.
             </div>
         </div>
     </div>
@@ -136,7 +162,12 @@
     private bool _pendingPlaceholders;
     private string _occasionText = string.Empty;
     private string _messageText = string.Empty;
+    private DateTime? _calendarDate;
+    private int? _numberValue;
+    private string _dateText = string.Empty;
     private string? _placeholderError;
+    private string _processingStatus = "";
+    private CancellationTokenSource? _statusCts;
 
     private static readonly string[] _categoryOrder = ["Artistic", "Fun", "Professional", "Abstract", "Mythological", "Regional", "PhotoCollage"];
 
@@ -150,7 +181,7 @@
     }
 
     private bool HasPlaceholders(StylePreset style)
-        => style.PromptTemplate.Contains("{{OCCASION}}") || style.PromptTemplate.Contains("{{MESSAGE}}");
+        => style.PromptTemplate.Contains("{{OCCASION}}") || style.PromptTemplate.Contains("{{MESSAGE}}") || style.PromptTemplate.Contains("{{CALENDAR}}") || style.PromptTemplate.Contains("{{NUMBER}}") || style.PromptTemplate.Contains("{{DATE}}");
 
     private string ReplacePlaceholders(string prompt)
     {
@@ -168,6 +199,21 @@
             // Instruct the AI to auto-generate a fitting message for this occasion
             result = result.Replace("{{MESSAGE}}",
                 $"Generate a short warm heartfelt message (2-3 lines) appropriate for the occasion: {occasion}");
+        }
+
+        if (_calendarDate.HasValue)
+        {
+            result = result.Replace("{{CALENDAR}}", BuildCalendarDescription(_calendarDate.Value));
+        }
+
+        if (_numberValue.HasValue)
+        {
+            result = result.Replace("{{NUMBER}}", _numberValue.Value.ToString());
+        }
+
+        if (!string.IsNullOrWhiteSpace(_dateText))
+        {
+            result = result.Replace("{{DATE}}", _dateText.Trim());
         }
 
         return result;
@@ -193,6 +239,9 @@
             {
                 _occasionText = string.Empty;
                 _messageText = string.Empty;
+                _calendarDate = null;
+                _numberValue = null;
+                _dateText = string.Empty;
                 _pendingPlaceholders = true;
                 StateHasChanged();
                 return;
@@ -220,6 +269,24 @@
             return;
         }
 
+        if (_selectedStyle.PromptTemplate.Contains("{{CALENDAR}}") && !_calendarDate.HasValue)
+        {
+            _placeholderError = "Please select the special date for the calendar.";
+            return;
+        }
+
+        if (_selectedStyle.PromptTemplate.Contains("{{NUMBER}}") && !_numberValue.HasValue)
+        {
+            _placeholderError = "Please enter the number / age.";
+            return;
+        }
+
+        if (_selectedStyle.PromptTemplate.Contains("{{DATE}}") && string.IsNullOrWhiteSpace(_dateText))
+        {
+            _placeholderError = "Please enter the date (e.g. 26-07-2023).";
+            return;
+        }
+
         _placeholderError = null;
         _pendingPlaceholders = false;
         var prompt = ReplacePlaceholders(_selectedStyle.EffectivePrompt);
@@ -237,29 +304,48 @@
     private async Task RunGeneration(string prompt)
     {
         _isProcessing = true;
+        _processingStatus = $"Analysing your photo for {_selectedStyle?.Name}...";
+        _statusCts = new CancellationTokenSource();
         StateHasChanged();
+
+        // Start background status rotation
+        _ = RotateStatusMessages(_statusCts.Token);
+
+        const int targetW = 1440;
+        const int targetH = 2160;
+
+        // Append explicit 2:3 format instruction
+        prompt += " OUTPUT FORMAT: The final image MUST be in exact 2:3 portrait aspect ratio (like a 20x30 inch print). Do NOT output square or landscape images.";
+
+        // Append universal face/identity preservation instruction
+        prompt += " FACE & IDENTITY PRESERVATION (CRITICAL): Carefully analyse the source photo to determine the subject's GENDER, approximate AGE, SKIN TONE, and every facial detail. The generated image MUST match the source exactly — same gender, same age range, same complexion and skin undertone, same face shape, jawline, eye shape, eye colour, eyebrow thickness and arch, nose shape and size, lip shape and fullness, ear shape, hairline, hair colour, hair texture, and hairstyle. Preserve moles, dimples, facial hair, wrinkles, and any distinguishing facial marks. Do NOT alter, beautify, age, de-age, lighten, darken, or change any facial feature. The face in every panel/photo MUST be immediately recognisable as the SAME person from the source image — identical in every detail.";
 
         try
         {
             // Multi-face cinematic pipeline: detect multiple faces, transform individually, composite
             if (_selectedStyle is not null && CinematicProfile.IsMultiFaceStyle(_selectedStyle.Name))
             {
-                var cinResult = await CinematicProfile.ProcessAsync(_sourcePath!, prompt, 1440, 2160);
+                await UpdateStatus("Detecting faces in your photo...");
+                var cinResult = await CinematicProfile.ProcessAsync(_sourcePath!, prompt, targetW, targetH);
                 if (cinResult is not null)
                 {
                     _result = cinResult;
                     if (!_result.Success)
                         _error = _result.ErrorMessage;
+                    else
+                    {
+                        await UpdateStatus("Perfecting the final composition...");
+                        await EnforceAspectRatio(targetW, targetH);
+                    }
                     return;
                 }
-                // null = 0-1 faces detected, fall through to normal pipeline
             }
 
             var request = new GenerationRequest
             {
                 Prompt = prompt,
-                Width = 1440,
-                Height = 2160,
+                Width = targetW,
+                Height = targetH,
                 SizeName = "20x30",
                 EnhancePrompt = false,
                 ReferenceImagePaths = [_sourcePath!],
@@ -268,7 +354,12 @@
 
             _result = await ImageGenService.GenerateImageAsync(request);
 
-            if (!_result.Success)
+            if (_result.Success)
+            {
+                await UpdateStatus("Perfecting the final composition...");
+                await EnforceAspectRatio(targetW, targetH);
+            }
+            else
             {
                 _error = _result.ErrorMessage;
             }
@@ -280,8 +371,121 @@
         }
         finally
         {
+            _statusCts?.Cancel();
+            _statusCts?.Dispose();
+            _statusCts = null;
             _isProcessing = false;
             StateHasChanged();
+        }
+    }
+
+    private async Task UpdateStatus(string message)
+    {
+        _processingStatus = message;
+        await InvokeAsync(StateHasChanged);
+    }
+
+    private async Task RotateStatusMessages(CancellationToken ct)
+    {
+        var styleName = _selectedStyle?.Name ?? "style";
+        var messages = new[]
+        {
+            $"Analysing your photo for {styleName}...",
+            "Identifying facial features and expressions...",
+            "Matching skin tone and lighting...",
+            $"Crafting the {styleName} layout...",
+            "Composing individual panels and frames...",
+            "Preserving identity across all elements...",
+            "Blending colours and applying effects...",
+            "Rendering high-quality artwork...",
+            "Adding finishing touches and details...",
+            "Almost there — polishing the final image..."
+        };
+
+        try
+        {
+            for (int i = 1; i < messages.Length && !ct.IsCancellationRequested; i++)
+            {
+                await Task.Delay(4000, ct);
+                _processingStatus = messages[i];
+                await InvokeAsync(StateHasChanged);
+            }
+
+            // If still running after all messages, cycle gentle reminders
+            var extras = new[]
+            {
+                "Still working — creating something beautiful...",
+                "Hang tight — fine-tuning every detail...",
+                "Processing complex elements — nearly done..."
+            };
+            int idx = 0;
+            while (!ct.IsCancellationRequested)
+            {
+                await Task.Delay(5000, ct);
+                _processingStatus = extras[idx % extras.Length];
+                await InvokeAsync(StateHasChanged);
+                idx++;
+            }
+        }
+        catch (OperationCanceledException) { /* expected on completion */ }
+    }
+
+    /// <summary>
+    /// Ensures the generated image is exactly the target 2:3 aspect ratio.
+    /// If not, center-crops and resizes to fit.
+    /// </summary>
+    private async Task EnforceAspectRatio(int targetW, int targetH)
+    {
+        if (_result?.LocalImagePath is null) return;
+
+        try
+        {
+            var fullPath = System.IO.Path.Combine(Env.WebRootPath,
+                _result.LocalImagePath.Replace("/", System.IO.Path.DirectorySeparatorChar.ToString()));
+
+            if (!File.Exists(fullPath)) return;
+
+            var imageBytes = await File.ReadAllBytesAsync(fullPath);
+            using var img = Image.Load<Rgba32>(imageBytes);
+
+            double targetRatio = (double)targetW / targetH; // 0.6667
+            double currentRatio = (double)img.Width / img.Height;
+
+            // Allow 2% tolerance
+            if (Math.Abs(currentRatio - targetRatio) < 0.02) return;
+
+            // Center-crop to target aspect ratio, then resize
+            int cropW, cropH;
+            if (currentRatio > targetRatio)
+            {
+                // Too wide — crop width
+                cropH = img.Height;
+                cropW = (int)Math.Round(cropH * targetRatio);
+            }
+            else
+            {
+                // Too tall — crop height
+                cropW = img.Width;
+                cropH = (int)Math.Round(cropW / targetRatio);
+            }
+
+            int cropX = (img.Width - cropW) / 2;
+            int cropY = (img.Height - cropH) / 2;
+
+            img.Mutate(ctx => ctx
+                .Crop(new SixLabors.ImageSharp.Rectangle(cropX, cropY, cropW, cropH))
+                .Resize(targetW, targetH));
+
+            await using var ms = new MemoryStream();
+            await img.SaveAsPngAsync(ms);
+            await File.WriteAllBytesAsync(fullPath, ms.ToArray());
+
+            Logger.LogInformation("Enforced 2:3 aspect ratio on Quick Style output ({OrigW}x{OrigH} → {W}x{H})",
+                imageBytes.Length, currentRatio.ToString("F3"), targetW, targetH);
+        }
+        catch (Exception ex)
+        {
+            Logger.LogWarning(ex, "Aspect ratio enforcement failed (non-fatal)");
         }
     }
 
@@ -301,16 +505,54 @@
         if (_result?.LocalImagePath is null) return;
         try
         {
-            var bytes = await ImageStorage.GetImageAsBytesAsync(_result.LocalImagePath, format);
-            var base64 = Convert.ToBase64String(bytes);
-            var contentType = format == "jpg" ? "image/jpeg" : "image/png";
+            // Prepare high-res print-ready file (12x18 @ 300 DPI) and download via HTTP streaming
+            var webPath = await ImageStorage.PrepareHighResDownloadAsync(_result.LocalImagePath, format);
             var fileName = $"artforge_quick_{_selectedStyle?.Name ?? "style"}_{_result.GenerationId}.{format}";
-            await JS.InvokeVoidAsync("downloadFileFromBytes", fileName, contentType, base64);
+            await JS.InvokeVoidAsync("downloadFile", $"/{webPath}", fileName);
         }
         catch (Exception ex)
         {
             Logger.LogError(ex, "Quick style download failed");
             _error = "Download failed. Please try again.";
         }
+    }
+
+    private string BuildCalendarDescription(DateTime date)
+    {
+        var monthName = date.ToString("MMMM").ToUpper();
+        var year = date.Year;
+        var firstDay = new DateTime(year, date.Month, 1);
+        var daysInMonth = DateTime.DaysInMonth(year, date.Month);
+        var startDow = (int)firstDay.DayOfWeek; // 0=Sun
+
+        var sb = new StringBuilder();
+        sb.Append($"A clean CALENDAR GRID for {monthName} {year}. ");
+        sb.Append("White text on the dark background. ");
+        sb.Append($"Month name '{monthName} {year}' in bold uppercase above the grid. ");
+        sb.Append("Days of the week header row: SUN  MON  TUE  WED  THU  FRI  SAT. ");
+        sb.Append("Date number rows: ");
+
+        int dayNum = 1;
+        for (int week = 0; dayNum <= daysInMonth; week++)
+        {
+            var cells = new List<string>();
+            for (int dow = 0; dow < 7; dow++)
+            {
+                if ((week == 0 && dow < startDow) || dayNum > daysInMonth)
+                    cells.Add("blank");
+                else
+                {
+                    if (dayNum == date.Day)
+                        cells.Add($"[{dayNum} with a small RED HEART background]");
+                    else
+                        cells.Add(dayNum.ToString());
+                    dayNum++;
+                }
+            }
+            sb.Append($"Row {week + 1}: {string.Join(", ", cells)}. ");
+        }
+
+        sb.Append($"IMPORTANT: The date number {date.Day} MUST have a small red heart icon or red heart-shaped background behind it to mark the special day. All other dates are plain.");
+        return sb.ToString();
     }
 }

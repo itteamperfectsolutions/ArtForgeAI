@@ -1,6 +1,9 @@
 using SixLabors.ImageSharp;
 using SixLabors.ImageSharp.Formats.Jpeg;
 using SixLabors.ImageSharp.Formats.Png;
+using SixLabors.ImageSharp.Metadata;
+using SixLabors.ImageSharp.PixelFormats;
+using SixLabors.ImageSharp.Processing;
 
 namespace ArtForgeAI.Services;
 
@@ -71,9 +74,9 @@ public class ImageStorageService : IImageStorageService
         var safeName = $"{Guid.NewGuid():N}_{Path.GetFileName(fileName)}";
         var filePath = Path.Combine(uploadsDir, safeName);
 
-        using (var fs = new FileStream(filePath, FileMode.Create))
+        using (var fs = new FileStream(filePath, FileMode.Create, FileAccess.Write, FileShare.None, bufferSize: 262144, useAsync: true))
         {
-            await fileStream.CopyToAsync(fs);
+            await fileStream.CopyToAsync(fs, bufferSize: 262144);
         }
 
         // Verify the file is actually a valid image (file must be closed first)
@@ -105,6 +108,69 @@ public class ImageStorageService : IImageStorageService
         }
 
         return ms.ToArray();
+    }
+
+    /// <summary>
+    /// Upscales the image to print-ready resolution (default 12x18 @ 300 DPI),
+    /// saves to a downloads folder, and returns the web path for direct HTTP download.
+    /// </summary>
+    public async Task<string> PrepareHighResDownloadAsync(string localPath, string format, int targetWidth = 3600, int targetHeight = 5400, int dpi = 300)
+    {
+        var fullPath = SafeResolvePath(localPath);
+        if (!File.Exists(fullPath))
+            throw new FileNotFoundException("Image file not found.");
+
+        var imageBytes = await File.ReadAllBytesAsync(fullPath);
+        using var image = Image.Load<Rgba32>(imageBytes);
+
+        // Upscale to target print dimensions using high-quality Lanczos resampler
+        image.Mutate(ctx => ctx.Resize(new ResizeOptions
+        {
+            Size = new Size(targetWidth, targetHeight),
+            Mode = ResizeMode.Max,
+            Sampler = KnownResamplers.Lanczos3
+        }));
+
+        // Set DPI metadata for print
+        image.Metadata.HorizontalResolution = dpi;
+        image.Metadata.VerticalResolution = dpi;
+        image.Metadata.ResolutionUnits = PixelResolutionUnit.PixelsPerInch;
+
+        // Save to downloads folder
+        var downloadsDir = Path.Combine(_env.WebRootPath, "downloads");
+        Directory.CreateDirectory(downloadsDir);
+
+        // Cleanup old downloads (older than 30 minutes)
+        try
+        {
+            foreach (var old in Directory.GetFiles(downloadsDir))
+            {
+                if (File.GetCreationTimeUtc(old) < DateTime.UtcNow.AddMinutes(-30))
+                    File.Delete(old);
+            }
+        }
+        catch { /* best effort cleanup */ }
+
+        var ext = format.Equals("jpg", StringComparison.OrdinalIgnoreCase) ? "jpg" : "png";
+        var fileName = $"{Guid.NewGuid():N}.{ext}";
+        var filePath = Path.Combine(downloadsDir, fileName);
+
+        if (ext == "jpg")
+        {
+            await image.SaveAsJpegAsync(filePath, new JpegEncoder { Quality = 95 });
+        }
+        else
+        {
+            await image.SaveAsPngAsync(filePath, new PngEncoder
+            {
+                CompressionLevel = PngCompressionLevel.BestSpeed
+            });
+        }
+
+        _logger.LogInformation("Prepared high-res download: {Width}x{Height} @ {Dpi}dpi → {Path}",
+            image.Width, image.Height, dpi, fileName);
+
+        return $"downloads/{fileName}";
     }
 
     public Task<bool> DeleteImageAsync(string localPath)

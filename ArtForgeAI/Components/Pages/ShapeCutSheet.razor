@@ -1,0 +1,966 @@
+@page "/shape-cut"
+@rendermode InteractiveServer
+@using SixLabors.ImageSharp
+@using SixLabors.ImageSharp.PixelFormats
+@using SixLabors.ImageSharp.Processing
+@using ArtForgeAI.Models
+@inject IImageStorageService ImageStorage
+@inject IJSRuntime JS
+@inject IWebHostEnvironment Env
+@inject ILogger<ShapeCutSheet> Logger
+@inject OnnxBgRemovalService BgRemoval
+@implements IDisposable
+
+<PageTitle>ArtForge AI - Shape Cut Sheet</PageTitle>
+
+<div class="page-header" style="margin-bottom: 0.75rem;">
+    <h2 style="font-size:1.5rem;">Shape Cut Gang Sheet</h2>
+    <p style="font-size:0.9rem;">Upload multiple designs, generate contour outlines, and create print + cut files</p>
+</div>
+
+<div class="create-layout">
+    @* ── Left column ── *@
+    <div class="create-left">
+        <div class="card">
+            <div class="card-body" style="padding: 1rem 1.5rem;">
+
+                @* Outline settings (global) *@
+                <label class="form-label">Outline Settings</label>
+                <div class="sc-outline-row">
+                    <label>Distance</label>
+                    <input type="range" min="0" max="80" step="1" @bind="_outlineDistancePx" @bind:event="oninput"
+                           @onchange="OnOutlineSettingsChanged" disabled="@_isProcessing" />
+                    <span>@(_outlineDistancePx)px</span>
+                </div>
+                <div class="sc-outline-row">
+                    <label>Corner Smooth</label>
+                    <input type="range" min="0" max="40" step="1" @bind="_cornerRadiusPx" @bind:event="oninput"
+                           @onchange="OnOutlineSettingsChanged" disabled="@_isProcessing" />
+                    <span>@(_cornerRadiusPx)px</span>
+                </div>
+                <div class="sc-outline-row">
+                    <label>Outline Width</label>
+                    <input type="range" min="1" max="15" step="1" @bind="_outlineWidthPx" @bind:event="oninput"
+                           @onchange="OnOutlineSettingsChanged" disabled="@_isProcessing" />
+                    <span>@(_outlineWidthPx)px</span>
+                </div>
+
+                <hr style="margin: 0.5rem 0; border-color: var(--border-color);" />
+
+                @* Upload area *@
+                <div class="mb-3">
+                    <label class="form-label">Design Images</label>
+                    <label class="upload-area upload-area-compact @(_isUploading ? "disabled" : "")">
+                        <span class="upload-icon">&#128424;</span>
+                        <span>@(_designs.Count == 0 ? "Upload design images" : "Add more designs")</span>
+                        <span style="font-size: 0.7rem; color: var(--text-muted); margin-left: 0.5rem;">PNG, JPG up to 10MB each</span>
+                        <InputFile OnChange="HandleFileUpload" accept=".jpg,.jpeg,.png,.webp" multiple style="display:none" disabled="@(_isProcessing || _isUploading)" />
+                    </label>
+                    @if (_isUploading)
+                    {
+                        <div class="upload-progress-bar" style="margin-top: 0.35rem;">
+                            <div class="upload-progress-fill" style="width: 50%"></div>
+                            <span class="upload-progress-text">Uploading...</span>
+                        </div>
+                    }
+                </div>
+
+                @* Design list *@
+                @if (_designs.Count > 0)
+                {
+                    <div class="gs-design-list">
+                        @foreach (var design in _designs)
+                        {
+                            <div class="gs-design-item-block" @key="design.Id">
+                                @* Row 1: thumb + info + qty + remove *@
+                                <div class="gs-design-row1">
+                                    <div class="gs-design-thumb">
+                                        @if (!string.IsNullOrEmpty(design.ProcessedDataUrl))
+                                        {
+                                            <img src="@design.ProcessedDataUrl" alt="@design.FileName" />
+                                        }
+                                        else if (!string.IsNullOrEmpty(design.OriginalDataUrl))
+                                        {
+                                            <img src="@design.OriginalDataUrl" alt="@design.FileName" />
+                                        }
+                                        @if (design.IsProcessing)
+                                        {
+                                            <div class="gs-thumb-spinner"></div>
+                                        }
+                                        <button class="gs-thumb-crop" @onclick="() => OpenCropModal(design)"
+                                                disabled="@(design.IsProcessing || _isProcessing)" title="Crop">&#9986;</button>
+                                    </div>
+
+                                    <div class="gs-design-info">
+                                        <span class="gs-design-filename" title="@design.FileName">@design.FileName</span>
+                                        <div class="gs-design-toggles">
+                                            @if (BgRemoval.IsAvailable)
+                                            {
+                                                <label class="gs-mini-toggle">
+                                                    <input type="checkbox" checked="@design.RemoveBg"
+                                                           @onchange="e => ToggleBgRemoval(design, (bool)e.Value!)"
+                                                           disabled="@(design.IsProcessing || _isProcessing)" />
+                                                    BG
+                                                </label>
+                                            }
+                                            <label class="gs-mini-toggle">
+                                                <input type="checkbox" checked="@design.RemoveWhites"
+                                                       @onchange="e => ToggleWhiteRemoval(design, (bool)e.Value!)"
+                                                       disabled="@(design.IsProcessing || _isProcessing)" />
+                                                W
+                                            </label>
+                                        </div>
+                                    </div>
+
+                                    <div class="gs-design-qty">
+                                        <button class="gs-qty-btn" @onclick="() => AdjustQuantity(design, -1)"
+                                                disabled="@(design.Quantity <= 1 || _isProcessing)">−</button>
+                                        <input type="number" class="gs-qty-input" min="1" value="@design.Quantity"
+                                               @onchange="e => SetQuantity(design, int.TryParse(e.Value?.ToString(), out var v) ? v : design.Quantity)"
+                                               disabled="@_isProcessing" />
+                                        <button class="gs-qty-btn" @onclick="() => AdjustQuantity(design, 1)"
+                                                disabled="@(_isProcessing)">+</button>
+                                    </div>
+
+                                    <button class="gs-design-remove" @onclick="() => RemoveDesign(design)"
+                                            disabled="@_isProcessing" title="Remove">✕</button>
+                                </div>
+
+                                @* Row 2: per-item size and spacing *@
+                                <div class="gs-design-row2">
+                                    <div class="gs-item-field">
+                                        <label>W</label>
+                                        <input type="number" min="0.5" max="24" step="0.25"
+                                               value="@design.WidthIn"
+                                               @onchange="e => OnItemSizeChanged(design, double.Parse(e.Value!.ToString()!), design.HeightIn)"
+                                               disabled="@(design.IsProcessing || _isProcessing)" />
+                                    </div>
+                                    <span class="gs-item-sep">×</span>
+                                    <div class="gs-item-field">
+                                        <label>H</label>
+                                        <input type="number" min="0.5" max="36" step="0.25"
+                                               value="@design.HeightIn"
+                                               @onchange="e => OnItemSizeChanged(design, design.WidthIn, double.Parse(e.Value!.ToString()!))"
+                                               disabled="@(design.IsProcessing || _isProcessing)" />
+                                    </div>
+                                    <div class="gs-item-field">
+                                        <label>SX</label>
+                                        <input type="number" min="0" max="2" step="0.0625"
+                                               value="@design.SpaceXIn"
+                                               @onchange="e => OnItemSpacingChanged(design, double.Parse(e.Value!.ToString()!), design.SpaceYIn)"
+                                               disabled="@_isProcessing" />
+                                    </div>
+                                    <div class="gs-item-field">
+                                        <label>SY</label>
+                                        <input type="number" min="0" max="2" step="0.0625"
+                                               value="@design.SpaceYIn"
+                                               @onchange="e => OnItemSpacingChanged(design, design.SpaceXIn, double.Parse(e.Value!.ToString()!))"
+                                               disabled="@_isProcessing" />
+                                    </div>
+                                </div>
+                            </div>
+                        }
+                    </div>
+
+                    <hr style="margin: 0.6rem 0; border-color: var(--border-color);" />
+
+                    @* Gang sheet size *@
+                    <div class="mb-3">
+                        <label class="form-label">Gang Sheet Size</label>
+                        <select class="form-select" @bind="_selectedSheet" @bind:after="OnSheetChanged" disabled="@_isProcessing">
+                            @foreach (var s in GangSheetConfig.Presets)
+                            {
+                                <option value="@s.Id">@s.Label</option>
+                            }
+                            <option value="Custom">Custom Size</option>
+                        </select>
+                    </div>
+
+                    @if (_selectedSheet == "Custom")
+                    {
+                        <div style="display:flex;gap:0.5rem;margin-bottom:0.75rem;">
+                            <div style="flex:1;">
+                                <label class="form-label" style="font-size:0.75rem;">Width (in)</label>
+                                <input type="number" class="form-input" min="4" max="60" step="1"
+                                       @bind="_customSheetWidthIn" @bind:event="oninput" @onchange="OnSheetChanged"
+                                       style="width:100%;padding:0.35rem 0.5rem;font-size:0.85rem;" />
+                            </div>
+                            <div style="flex:1;">
+                                <label class="form-label" style="font-size:0.75rem;">Height (in)</label>
+                                <input type="number" class="form-input" min="4" max="120" step="1"
+                                       @bind="_customSheetHeightIn" @bind:event="oninput" @onchange="OnSheetChanged"
+                                       style="width:100%;padding:0.35rem 0.5rem;font-size:0.85rem;" />
+                            </div>
+                        </div>
+                    }
+
+                    @* Auto-fill toggle *@
+                    <div class="gs-quantity-row">
+                        <div class="pp-toggle-row" style="margin-bottom:0.25rem;">
+                            <label class="pp-toggle">
+                                <input type="checkbox" @bind="_autoFill" @bind:after="OnAutoFillChanged" disabled="@_isProcessing" />
+                                <span class="pp-toggle-slider"></span>
+                            </label>
+                            <span class="pp-toggle-label">Auto-fill sheet</span>
+                        </div>
+                    </div>
+
+                    @* Layout info *@
+                    <div class="gs-layout-info">
+                        @_layoutInfoText
+                    </div>
+                }
+            </div>
+        </div>
+
+        @if (!string.IsNullOrEmpty(_errorMessage))
+        {
+            <div class="card" style="margin-top: 0.75rem; border-left: 3px solid var(--danger);">
+                <div class="card-body" style="padding: 0.75rem 1rem; color: var(--danger); font-size: 0.85rem;">
+                    <strong>Error:</strong> @_errorMessage
+                </div>
+            </div>
+        }
+    </div>
+
+    @* ── Right column: sheet preview ── *@
+    <div class="create-right">
+        @if (_sheetReady)
+        {
+            <div class="right-panel-card">
+                <div class="right-panel-label">Shape Cut Preview (@GetSheetLabel())</div>
+
+                <div class="sc-view-toggle-bar">
+                    <button class="sc-view-btn @(_viewMode == "print" ? "selected" : "")"
+                            @onclick="() => SetViewMode(true)">
+                        Print Sheet
+                    </button>
+                    <button class="sc-view-btn @(_viewMode == "cut" ? "selected" : "")"
+                            @onclick="() => SetViewMode(false)">
+                        Cut Sheet
+                    </button>
+                </div>
+
+                <div class="sc-sheet-container">
+                    <canvas id="scSheetCanvas"></canvas>
+                </div>
+                <div class="sc-download-bar">
+                    <button class="btn-primary-gradient" style="font-size: 0.85rem; padding: 0.4rem 0.85rem;" @onclick="DownloadBoth">
+                        &#128424; Download Both (Print + Cut)
+                    </button>
+                    <button class="btn-secondary" style="font-size: 0.85rem; padding: 0.4rem 0.85rem;" @onclick="DownloadPrintOnly">
+                        Print Only (PNG)
+                    </button>
+                    <button class="btn-secondary" style="font-size: 0.85rem; padding: 0.4rem 0.85rem;" @onclick="DownloadCutOnly">
+                        Cut Only (PNG)
+                    </button>
+                </div>
+            </div>
+        }
+    </div>
+</div>
+
+@* ── Processing modal overlay ── *@
+@if (_isProcessing)
+{
+    <div class="pp-processing-overlay">
+        <div class="pp-processing-modal">
+            <div class="processing-spinner" style="width:36px;height:36px;margin:0 auto 1rem;"></div>
+            <p style="margin:0;font-size:0.95rem;color:var(--text-primary);">@_processingStatus</p>
+        </div>
+    </div>
+}
+
+@* ── Crop modal overlay ── *@
+@if (_cropDesign != null)
+{
+    <div class="pp-processing-overlay" style="z-index:1000;">
+        <div class="gs-crop-modal">
+            <div class="gs-crop-modal-header">
+                <span>Crop: @_cropDesign.FileName</span>
+                <button class="gs-design-remove" @onclick="CancelCrop" style="width:24px;height:24px;">✕</button>
+            </div>
+            <div id="scCropArea" class="gs-crop-inline" style="max-height:400px;"></div>
+            <p style="font-size:0.72rem;color:var(--text-muted);margin:0.35rem 0 0;">
+                Drag to move, resize from corners. Aspect ratio locked to design size (@(_cropDesign.WidthIn)" × @(_cropDesign.HeightIn)").
+            </p>
+            <div style="display:flex;gap:0.5rem;margin-top:0.5rem;">
+                <button class="btn-primary-gradient" style="flex:1;font-size:0.85rem;padding:0.4rem;" @onclick="ApplyCrop">
+                    Apply Crop
+                </button>
+                <button class="btn-secondary" style="font-size:0.85rem;padding:0.4rem 0.75rem;" @onclick="CancelCrop">
+                    Cancel
+                </button>
+            </div>
+        </div>
+    </div>
+}
+
+@code {
+    // ── State ──
+    private List<DesignItem> _designs = new();
+    private bool _isUploading;
+    private bool _isProcessing;
+    private string _processingStatus = "";
+    private string? _errorMessage;
+    private DesignItem? _cropDesign;
+
+    // Outline (global)
+    private int _outlineDistancePx = 15;
+    private int _cornerRadiusPx = 20;
+    private int _outlineWidthPx = 3;
+
+    // Sheet settings
+    private string _selectedSheet = "11x12";
+    private double _customSheetWidthIn = 22;
+    private double _customSheetHeightIn = 24;
+    private bool _autoFill = true;
+    private string _layoutInfoText = "";
+
+    // Sheet state
+    private bool _sheetReady;
+    private string _viewMode = "print";
+
+    // Computed
+    private int TotalQuantity => _designs.Sum(d => d.Quantity);
+
+    // ── Lifecycle ──
+
+    public void Dispose()
+    {
+        try { JS.InvokeVoidAsync("shapeCut.dispose"); } catch { }
+    }
+
+    // ── Upload ──
+
+    private async Task HandleFileUpload(InputFileChangeEventArgs e)
+    {
+        _isUploading = true;
+        _errorMessage = null;
+        StateHasChanged();
+
+        try
+        {
+            var files = e.GetMultipleFiles(20);
+            foreach (var file in files)
+            {
+                if (file.Size > 10 * 1024 * 1024)
+                {
+                    _errorMessage = $"File '{file.Name}' exceeds 10MB limit, skipped.";
+                    continue;
+                }
+
+                try
+                {
+                    using var stream = file.OpenReadStream(10 * 1024 * 1024);
+                    var uploadedPath = await ImageStorage.SaveUploadedFileAsync(stream, file.Name);
+
+                    var design = new DesignItem
+                    {
+                        FileName = file.Name,
+                        UploadedPath = uploadedPath,
+                        Quantity = 1,
+                    };
+
+                    var fullPath = ResolveFullPath(uploadedPath);
+                    var imageBytes = await File.ReadAllBytesAsync(fullPath);
+                    var ext = uploadedPath.EndsWith(".png", StringComparison.OrdinalIgnoreCase) ? "png" : "jpeg";
+                    design.OriginalDataUrl = $"data:image/{ext};base64," + Convert.ToBase64String(imageBytes);
+
+                    _designs.Add(design);
+                }
+                catch (Exception ex)
+                {
+                    Logger.LogError(ex, "Failed to upload {FileName}", file.Name);
+                    _errorMessage = $"Failed to upload '{file.Name}'.";
+                }
+            }
+        }
+        finally
+        {
+            _isUploading = false;
+            StateHasChanged();
+        }
+
+        if (_designs.Count > 0)
+        {
+            _isProcessing = true;
+            _processingStatus = "Processing designs...";
+            StateHasChanged();
+
+            try
+            {
+                await ProcessAllDesigns();
+                UpdateLayoutInfo();
+                await RenderSheet();
+            }
+            finally
+            {
+                _isProcessing = false;
+                _processingStatus = "";
+                StateHasChanged();
+            }
+        }
+    }
+
+    // ── Per-item size changed ──
+
+    private async Task OnItemSizeChanged(DesignItem design, double newW, double newH)
+    {
+        design.WidthIn = Math.Max(0.5, Math.Min(24, newW));
+        design.HeightIn = Math.Max(0.5, Math.Min(36, newH));
+
+        await RebuildDesignImage(design);
+        await GenerateOutlineForDesign(design);
+        UpdateLayoutInfo();
+        await RenderSheet();
+    }
+
+    // ── Per-item spacing changed ──
+
+    private async Task OnItemSpacingChanged(DesignItem design, double newSX, double newSY)
+    {
+        design.SpaceXIn = Math.Max(0, Math.Min(2, newSX));
+        design.SpaceYIn = Math.Max(0, Math.Min(2, newSY));
+
+        UpdateLayoutInfo();
+        await RenderSheet();
+    }
+
+    // ── Toggle BG Removal (per-item) ──
+
+    private async Task ToggleBgRemoval(DesignItem design, bool enabled)
+    {
+        design.RemoveBg = enabled;
+
+        if (enabled && design.TransparentPngBytes == null)
+        {
+            design.IsProcessing = true;
+            StateHasChanged();
+
+            try
+            {
+                var fullPath = ResolveFullPath(design.UploadedPath!);
+                var imageBytes = await File.ReadAllBytesAsync(fullPath);
+                imageBytes = await Task.Run(() => ResizeForProcessing(imageBytes, 1600));
+                var bgRemoved = await BgRemoval.RemoveBackgroundAsync(imageBytes);
+                design.TransparentPngBytes = await Task.Run(() => DilateAlphaMask(bgRemoved, imageBytes, 10));
+            }
+            catch (Exception ex)
+            {
+                Logger.LogError(ex, "BG removal failed for {FileName}", design.FileName);
+                _errorMessage = $"BG removal failed for '{design.FileName}'.";
+                design.RemoveBg = false;
+                design.IsProcessing = false;
+                StateHasChanged();
+                return;
+            }
+        }
+
+        await RebuildDesignImage(design);
+        await GenerateOutlineForDesign(design);
+        await RenderSheet();
+    }
+
+    // ── Toggle White Removal (per-item) ──
+
+    private async Task ToggleWhiteRemoval(DesignItem design, bool enabled)
+    {
+        design.RemoveWhites = enabled;
+        await RebuildDesignImage(design);
+        await GenerateOutlineForDesign(design);
+        await RenderSheet();
+    }
+
+    // ── Rebuild single design image chain ──
+
+    private async Task RebuildDesignImage(DesignItem design)
+    {
+        design.IsProcessing = true;
+        StateHasChanged();
+
+        try
+        {
+            byte[] imageBytes;
+
+            if (design.RemoveBg && design.TransparentPngBytes != null)
+            {
+                imageBytes = design.TransparentPngBytes;
+            }
+            else
+            {
+                var fullPath = ResolveFullPath(design.UploadedPath!);
+                imageBytes = await File.ReadAllBytesAsync(fullPath);
+                imageBytes = await Task.Run(() => ResizeForProcessing(imageBytes, 1600));
+                imageBytes = await Task.Run(() => EnsurePng(imageBytes));
+            }
+
+            if (design.RemoveWhites)
+            {
+                var tol = design.WhiteTolerance;
+                imageBytes = await Task.Run(() => StripWhitePixels(imageBytes, tol));
+            }
+
+            design.ProcessedDataUrl = "data:image/png;base64," + Convert.ToBase64String(imageBytes);
+
+            int targetW = (int)Math.Round(design.WidthIn * GangSheetConfig.Dpi);
+            int targetH = (int)Math.Round(design.HeightIn * GangSheetConfig.Dpi);
+            var scaledBytes = await Task.Run(() => ScaleToDesignSize(imageBytes, targetW, targetH));
+            design.FinalDesignUrl = "data:image/png;base64," + Convert.ToBase64String(scaledBytes);
+        }
+        catch (Exception ex)
+        {
+            Logger.LogError(ex, "Image processing failed for {FileName}", design.FileName);
+            _errorMessage = $"Processing failed for '{design.FileName}'.";
+        }
+        finally
+        {
+            design.IsProcessing = false;
+            StateHasChanged();
+        }
+    }
+
+    // ── Generate outline for a single design ──
+
+    private async Task GenerateOutlineForDesign(DesignItem design)
+    {
+        if (string.IsNullOrEmpty(design.FinalDesignUrl)) return;
+
+        try
+        {
+            design.OutlineDataUrl = await JS.InvokeAsync<string>(
+                "shapeCut.generateOutline",
+                design.FinalDesignUrl,
+                _outlineDistancePx, _cornerRadiusPx, _outlineWidthPx);
+        }
+        catch (Exception ex)
+        {
+            Logger.LogError(ex, "Outline generation failed for {FileName}", design.FileName);
+        }
+    }
+
+    // ── Process all designs ──
+
+    private async Task ProcessAllDesigns()
+    {
+        foreach (var design in _designs)
+        {
+            await RebuildDesignImage(design);
+            await GenerateOutlineForDesign(design);
+        }
+    }
+
+    // ── Regenerate all outlines ──
+
+    private async Task RegenerateAllOutlines()
+    {
+        foreach (var design in _designs)
+        {
+            await GenerateOutlineForDesign(design);
+        }
+    }
+
+    // ── Scale image to fit within target dimensions ──
+
+    private static byte[] ScaleToDesignSize(byte[] imageBytes, int targetW, int targetH)
+    {
+        using var src = Image.Load<Rgba32>(imageBytes);
+
+        var scale = Math.Min((double)targetW / src.Width, (double)targetH / src.Height);
+        int scaledW = (int)Math.Round(src.Width * scale);
+        int scaledH = (int)Math.Round(src.Height * scale);
+
+        using var result = new Image<Rgba32>(targetW, targetH);
+        src.Mutate(ctx => ctx.Resize(scaledW, scaledH));
+
+        int offsetX = (targetW - scaledW) / 2;
+        int offsetY = (targetH - scaledH) / 2;
+
+        result.Mutate(ctx => ctx.DrawImage(src, new SixLabors.ImageSharp.Point(offsetX, offsetY), 1f));
+
+        using var ms = new MemoryStream();
+        result.SaveAsPng(ms);
+        return ms.ToArray();
+    }
+
+    // ── Quantity adjustment ──
+
+    private async Task AdjustQuantity(DesignItem design, int delta)
+    {
+        design.Quantity = Math.Max(1, design.Quantity + delta);
+        UpdateLayoutInfo();
+        await RenderSheet();
+    }
+
+    private async Task SetQuantity(DesignItem design, int qty)
+    {
+        design.Quantity = Math.Max(1, qty);
+        UpdateLayoutInfo();
+        await RenderSheet();
+    }
+
+    // ── Crop ──
+
+    private async Task OpenCropModal(DesignItem design)
+    {
+        _cropDesign = design;
+        StateHasChanged();
+        await Task.Delay(100);
+
+        var dataUrl = design.ProcessedDataUrl ?? design.OriginalDataUrl;
+        if (string.IsNullOrEmpty(dataUrl)) return;
+
+        var ratio = design.WidthIn / design.HeightIn;
+        await JS.InvokeVoidAsync("shapeCut.setAspectRatio", ratio);
+        await JS.InvokeVoidAsync("shapeCut.initCropTool", "scCropArea", dataUrl);
+    }
+
+    private async Task ApplyCrop()
+    {
+        if (_cropDesign == null) return;
+
+        var design = _cropDesign;
+        int targetW = (int)Math.Round(design.WidthIn * GangSheetConfig.Dpi);
+        int targetH = (int)Math.Round(design.HeightIn * GangSheetConfig.Dpi);
+
+        try
+        {
+            var croppedUrl = await JS.InvokeAsync<string>("shapeCut.extractCrop", targetW, targetH);
+            if (!string.IsNullOrEmpty(croppedUrl))
+            {
+                design.FinalDesignUrl = croppedUrl;
+                design.ProcessedDataUrl = croppedUrl;
+            }
+        }
+        catch (Exception ex)
+        {
+            Logger.LogError(ex, "Crop failed for {FileName}", design.FileName);
+            _errorMessage = $"Crop failed for '{design.FileName}'.";
+        }
+
+        try { await JS.InvokeVoidAsync("shapeCut.disposeCropTool"); } catch { }
+        _cropDesign = null;
+        StateHasChanged();
+        await GenerateOutlineForDesign(design);
+        await RenderSheet();
+    }
+
+    private async Task CancelCrop()
+    {
+        try { await JS.InvokeVoidAsync("shapeCut.disposeCropTool"); } catch { }
+        _cropDesign = null;
+    }
+
+    // ── Auto-fill ──
+
+    private async Task OnAutoFillChanged()
+    {
+        UpdateLayoutInfo();
+        await RenderSheet();
+    }
+
+    // ── Remove design ──
+
+    private async Task RemoveDesign(DesignItem design)
+    {
+        if (!string.IsNullOrEmpty(design.UploadedPath))
+            await ImageStorage.DeleteImageAsync(design.UploadedPath);
+
+        _designs.Remove(design);
+
+        if (_designs.Count == 0)
+        {
+            _sheetReady = false;
+            try { await JS.InvokeVoidAsync("shapeCut.dispose"); } catch { }
+        }
+        else
+        {
+            UpdateLayoutInfo();
+            await RenderSheet();
+        }
+    }
+
+    // ── Outline settings changed ──
+
+    private async Task OnOutlineSettingsChanged()
+    {
+        if (_designs.Count > 0 && _designs.Any(d => d.FinalDesignUrl != null))
+        {
+            _isProcessing = true;
+            _processingStatus = "Regenerating outlines...";
+            StateHasChanged();
+
+            try
+            {
+                await RegenerateAllOutlines();
+                await RenderSheet();
+            }
+            finally
+            {
+                _isProcessing = false;
+                _processingStatus = "";
+                StateHasChanged();
+            }
+        }
+    }
+
+    // ── Sheet settings ──
+
+    private async Task OnSheetChanged()
+    {
+        UpdateLayoutInfo();
+        if (_sheetReady && _designs.Any(d => d.FinalDesignUrl != null))
+            await RenderSheet();
+    }
+
+    // ── Layout info ──
+
+    private void UpdateLayoutInfo()
+    {
+        var sheet = GetCurrentSheetSize();
+        int totalQty = TotalQuantity;
+        int imageCount = _designs.Count;
+        _layoutInfoText = $"{totalQty} designs on {sheet.Label} [{imageCount} image{(imageCount != 1 ? "s" : "")}]";
+    }
+
+    // ── Render sheet ──
+
+    private async Task RenderSheet()
+    {
+        if (!_designs.Any(d => d.FinalDesignUrl != null)) return;
+
+        if (!_sheetReady)
+        {
+            _sheetReady = true;
+            StateHasChanged();
+            await Task.Delay(50);
+        }
+
+        var sheet = GetCurrentSheetSize();
+
+        var entries = _designs
+            .Where(d => d.FinalDesignUrl != null && d.OutlineDataUrl != null)
+            .Select(d => new
+            {
+                designUrl = d.FinalDesignUrl!,
+                outlineUrl = d.OutlineDataUrl!,
+                quantity = d.Quantity,
+                widthPx = (int)Math.Round(d.WidthIn * GangSheetConfig.Dpi),
+                heightPx = (int)Math.Round(d.HeightIn * GangSheetConfig.Dpi),
+                spaceXPx = (int)Math.Round(d.SpaceXIn * GangSheetConfig.Dpi),
+                spaceYPx = (int)Math.Round(d.SpaceYIn * GangSheetConfig.Dpi),
+            })
+            .ToArray();
+
+        await JS.InvokeVoidAsync("shapeCut.renderSheetMulti",
+            "scSheetCanvas",
+            entries,
+            sheet.WidthPx,
+            sheet.HeightPx);
+
+        StateHasChanged();
+    }
+
+    // ── View mode toggle ──
+
+    private async Task SetViewMode(bool isPrint)
+    {
+        _viewMode = isPrint ? "print" : "cut";
+        await JS.InvokeVoidAsync("shapeCut.setViewMode", _viewMode);
+    }
+
+    // ── Downloads ──
+
+    private string GetSafeSheetName()
+    {
+        var sheet = GetCurrentSheetSize();
+        return sheet.Id == "custom"
+            ? $"custom_{_customSheetWidthIn}x{_customSheetHeightIn}in"
+            : sheet.Id;
+    }
+
+    private object[] BuildDownloadEntries() => _designs
+        .Where(d => d.FinalDesignUrl != null && d.OutlineDataUrl != null)
+        .Select(d => (object)new
+        {
+            designUrl = d.FinalDesignUrl!,
+            outlineUrl = d.OutlineDataUrl!,
+            quantity = d.Quantity,
+            widthPx = (int)Math.Round(d.WidthIn * GangSheetConfig.Dpi),
+            heightPx = (int)Math.Round(d.HeightIn * GangSheetConfig.Dpi),
+            spaceXPx = (int)Math.Round(d.SpaceXIn * GangSheetConfig.Dpi),
+            spaceYPx = (int)Math.Round(d.SpaceYIn * GangSheetConfig.Dpi),
+        })
+        .ToArray();
+
+    private async Task DownloadBoth()
+    {
+        try
+        {
+            var sheet = GetCurrentSheetSize();
+            await JS.InvokeVoidAsync("shapeCut.downloadBothMulti",
+                $"shapecut_{GetSafeSheetName()}_PRINT.png",
+                $"shapecut_{GetSafeSheetName()}_CUT.png",
+                BuildDownloadEntries(),
+                sheet.WidthPx, sheet.HeightPx);
+        }
+        catch (Exception ex) { Logger.LogError(ex, "Download failed"); _errorMessage = "Download failed."; }
+    }
+
+    private async Task DownloadPrintOnly()
+    {
+        try
+        {
+            var sheet = GetCurrentSheetSize();
+            await JS.InvokeVoidAsync("shapeCut.downloadSingleMulti",
+                "print", $"shapecut_{GetSafeSheetName()}_PRINT.png",
+                BuildDownloadEntries(),
+                sheet.WidthPx, sheet.HeightPx);
+        }
+        catch (Exception ex) { Logger.LogError(ex, "Download failed"); _errorMessage = "Download failed."; }
+    }
+
+    private async Task DownloadCutOnly()
+    {
+        try
+        {
+            var sheet = GetCurrentSheetSize();
+            await JS.InvokeVoidAsync("shapeCut.downloadSingleMulti",
+                "cut", $"shapecut_{GetSafeSheetName()}_CUT.png",
+                BuildDownloadEntries(),
+                sheet.WidthPx, sheet.HeightPx);
+        }
+        catch (Exception ex) { Logger.LogError(ex, "Download failed"); _errorMessage = "Download failed."; }
+    }
+
+    // ── Helpers ──
+
+    private GangSheetSize GetCurrentSheetSize()
+    {
+        if (_selectedSheet == "Custom")
+            return GangSheetConfig.CreateCustom(_customSheetWidthIn, _customSheetHeightIn);
+
+        return GangSheetConfig.Presets
+            .FirstOrDefault(s => s.Id == _selectedSheet)
+            ?? GangSheetConfig.Presets[0];
+    }
+
+    private string GetSheetLabel()
+    {
+        var sheet = GetCurrentSheetSize();
+        return $"{sheet.Label} - {TotalQuantity} designs";
+    }
+
+    private string ResolveFullPath(string webRelativePath) =>
+        System.IO.Path.Combine(Env.WebRootPath, webRelativePath.Replace("/", System.IO.Path.DirectorySeparatorChar.ToString()));
+
+    private static byte[] ResizeForProcessing(byte[] imageBytes, int maxDimension)
+    {
+        using var img = Image.Load<Rgba32>(imageBytes);
+        if (img.Width <= maxDimension && img.Height <= maxDimension)
+            return imageBytes;
+
+        var scale = (double)maxDimension / Math.Max(img.Width, img.Height);
+        int newW = (int)(img.Width * scale);
+        int newH = (int)(img.Height * scale);
+        img.Mutate(ctx => ctx.Resize(newW, newH));
+
+        using var ms = new MemoryStream();
+        img.SaveAsPng(ms);
+        return ms.ToArray();
+    }
+
+    private static byte[] EnsurePng(byte[] imageBytes)
+    {
+        using var img = Image.Load<Rgba32>(imageBytes);
+        using var ms = new MemoryStream();
+        img.SaveAsPng(ms);
+        return ms.ToArray();
+    }
+
+    private static byte[] StripWhitePixels(byte[] pngBytes, int tolerance)
+    {
+        using var img = Image.Load<Rgba32>(pngBytes);
+        byte threshold = (byte)(255 - Math.Clamp(tolerance, 0, 254));
+
+        img.ProcessPixelRows(accessor =>
+        {
+            for (int y = 0; y < accessor.Height; y++)
+            {
+                var row = accessor.GetRowSpan(y);
+                for (int x = 0; x < row.Length; x++)
+                {
+                    ref var pixel = ref row[x];
+                    if (pixel.A == 0) continue;
+                    if (pixel.R >= threshold && pixel.G >= threshold && pixel.B >= threshold)
+                    {
+                        pixel.A = 0;
+                    }
+                }
+            }
+        });
+
+        using var ms = new MemoryStream();
+        img.SaveAsPng(ms);
+        return ms.ToArray();
+    }
+
+    private static byte[] DilateAlphaMask(byte[] transparentPng, byte[] originalBytes, int radiusPx)
+    {
+        using var transImg = Image.Load<Rgba32>(transparentPng);
+        using var origImg = Image.Load<Rgba32>(originalBytes);
+        int w = transImg.Width, h = transImg.Height;
+
+        if (origImg.Width != w || origImg.Height != h)
+            origImg.Mutate(ctx => ctx.Resize(w, h));
+
+        var hasAlpha = new bool[w * h];
+        for (int y = 0; y < h; y++)
+            for (int x = 0; x < w; x++)
+                hasAlpha[y * w + x] = transImg[x, y].A > 0;
+
+        var dilatedH = new bool[w * h];
+        for (int y = 0; y < h; y++)
+        {
+            for (int x = 0; x < w; x++)
+            {
+                int xStart = Math.Max(0, x - radiusPx);
+                int xEnd = Math.Min(w - 1, x + radiusPx);
+                for (int nx = xStart; nx <= xEnd; nx++)
+                {
+                    if (hasAlpha[y * w + nx]) { dilatedH[y * w + x] = true; break; }
+                }
+            }
+        }
+
+        var dilated = new bool[w * h];
+        for (int y = 0; y < h; y++)
+        {
+            for (int x = 0; x < w; x++)
+            {
+                int yStart = Math.Max(0, y - radiusPx);
+                int yEnd = Math.Min(h - 1, y + radiusPx);
+                for (int ny = yStart; ny <= yEnd; ny++)
+                {
+                    if (dilatedH[ny * w + x]) { dilated[y * w + x] = true; break; }
+                }
+            }
+        }
+
+        for (int y = 0; y < h; y++)
+        {
+            for (int x = 0; x < w; x++)
+            {
+                if (dilated[y * w + x] && transImg[x, y].A == 0)
+                {
+                    var orig = origImg[x, y];
+                    transImg[x, y] = new Rgba32(orig.R, orig.G, orig.B, 255);
+                }
+            }
+        }
+
+        using var ms = new MemoryStream();
+        transImg.SaveAsPng(ms);
+        return ms.ToArray();
+    }
+}

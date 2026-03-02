@@ -173,6 +173,25 @@
                                 @_bgRemovalStatus
                             </p>
                         }
+
+                        @if (_removeBg)
+                        {
+                            <div id="ppBgColourSection" style="margin-top: 0.4rem; margin-bottom: 0.25rem;">
+                                <label style="font-size: 0.78rem; font-weight: 500; color: var(--text-secondary); display:block; margin-bottom: 0.3rem;">Background Colour</label>
+                                <div style="display:flex; gap:0.4rem; flex-wrap:wrap;">
+                                    @for (int i = 0; i < _bgColors.Length; i++)
+                                    {
+                                        var color = _bgColors[i];
+                                        <span @onclick="() => OnBgColorChanged(color.Hex)"
+                                              title="@color.Name"
+                                              style="display:inline-block; width:28px; height:28px; border-radius:50%;
+                                                     background-color:@(color.Hex); cursor:pointer; flex-shrink:0;
+                                                     border: @(_selectedBgColor == color.Hex ? "3px solid #6366f1" : "2px solid #888");
+                                                     box-shadow: @(_selectedBgColor == color.Hex ? "0 0 0 2px rgba(99,102,241,0.35)" : "0 1px 2px rgba(0,0,0,0.2)");"></span>
+                                    }
+                                </div>
+                            </div>
+                        }
                     }
                 }
             </div>
@@ -257,7 +276,23 @@
     private bool _removeBg;
     private string? _bgRemovalStatus;
     private string? _originalDataUrl;   // original image data URL (before bg removal)
-    private string? _bgRemovedDataUrl;  // bg-removed image data URL (on white)
+    private string? _bgRemovedDataUrl;  // bg-removed image data URL (composited on selected colour)
+    private byte[]? _transparentPngCache; // cached transparent PNG for re-compositing on colour change
+    private string _selectedBgColor = "#FFFFFF";
+
+    // Background colour palette
+    private record BgColor(string Name, string Hex);
+    private static readonly BgColor[] _bgColors = new[]
+    {
+        new BgColor("White",      "#FFFFFF"),
+        new BgColor("Light Grey", "#D3D3D3"),
+        new BgColor("Light Blue", "#ADD8E6"),
+        new BgColor("Blue",       "#4A90D9"),
+        new BgColor("Red",        "#DC3545"),
+        new BgColor("Green",      "#28A745"),
+        new BgColor("Yellow",     "#FFC107"),
+        new BgColor("Black",      "#000000"),
+    };
 
     // ── Lifecycle ──
 
@@ -316,6 +351,8 @@
                 var dataUrl = $"data:image/{ext};base64," + Convert.ToBase64String(imageBytes);
                 _originalDataUrl = dataUrl;
                 _bgRemovedDataUrl = null;
+                _transparentPngCache = null;
+                _selectedBgColor = "#FFFFFF";
                 _removeBg = false;
                 await JS.InvokeVoidAsync("passportPhoto.initCropTool", "ppCropArea", dataUrl);
                 // Enable auto-regenerate on crop changes
@@ -336,7 +373,8 @@
                 var bgResult = await BgRemoval.RemoveBackgroundWithBoundsAsync(resizedBytes);
 
                 // Pre-cache the bg-removed composite for instant toggle
-                _bgRemovedDataUrl = await Task.Run(() => CompositeOnWhite(bgResult.TransparentPngBytes));
+                _transparentPngCache = bgResult.TransparentPngBytes;
+                _bgRemovedDataUrl = await Task.Run(() => CompositeOnColour(bgResult.TransparentPngBytes, _selectedBgColor));
 
                 // Convert subject bounds to face estimates for crop positioning
                 // For portrait photos: head ≈ top of subject, face ≈ upper 45% of subject
@@ -407,6 +445,32 @@
         _bgRemovalStatus = null;
         _originalDataUrl = null;
         _bgRemovedDataUrl = null;
+        _transparentPngCache = null;
+        _selectedBgColor = "#FFFFFF";
+    }
+
+    // ── Scroll bg colour section into view ──
+
+    private async Task ScrollBgColourIntoView()
+    {
+        await Task.Delay(100); // let Blazor render the section first
+        try
+        {
+            await JS.InvokeVoidAsync("eval", "document.getElementById('ppBgColourSection')?.scrollIntoView({behavior:'smooth',block:'nearest'})");
+        }
+        catch { }
+    }
+
+    // ── Background colour change ──
+
+    private async Task OnBgColorChanged(string hex)
+    {
+        if (_selectedBgColor == hex || _transparentPngCache == null) return;
+        _selectedBgColor = hex;
+        _enhancedDataUrl = null; // base changed, invalidate sharpen cache
+
+        _bgRemovedDataUrl = await Task.Run(() => CompositeOnColour(_transparentPngCache, hex));
+        await SwapToCurrentImage();
     }
 
     // ── Render helpers ──
@@ -522,6 +586,7 @@
             if (!string.IsNullOrEmpty(_bgRemovedDataUrl))
             {
                 await SwapToCurrentImage();
+                await ScrollBgColourIntoView();
                 return;
             }
 
@@ -549,12 +614,14 @@
                 StateHasChanged();
 
                 // Composite transparent subject on white background (JPEG for smaller data URL)
-                var whiteDataUrl = await Task.Run(() => CompositeOnWhite(transparentBytes));
+                _transparentPngCache = transparentBytes;
+                var whiteDataUrl = await Task.Run(() => CompositeOnColour(transparentBytes, _selectedBgColor));
 
                 _bgRemovedDataUrl = whiteDataUrl;
                 _bgRemovalStatus = "Background removed (U-2-Net local)";
 
                 await SwapToCurrentImage();
+                await ScrollBgColourIntoView();
             }
             catch (Exception ex)
             {
@@ -595,16 +662,19 @@
         return ms.ToArray();
     }
 
-    /// <summary>Composite a transparent PNG onto a white background. Returns a JPEG data URL.</summary>
-    private static string CompositeOnWhite(byte[] transparentPngBytes)
+    /// <summary>Composite a transparent PNG onto a coloured background. Returns a JPEG data URL.</summary>
+    private static string CompositeOnColour(byte[] transparentPngBytes, string hexColor = "#FFFFFF")
     {
-        using var subject = Image.Load<Rgba32>(transparentPngBytes);
-        using var white = new Image<Rgba32>(subject.Width, subject.Height, new Rgba32(255, 255, 255, 255));
+        var bg = Rgba32.ParseHex(hexColor);
+        bg.A = 255;
 
-        white.Mutate(ctx => ctx.DrawImage(subject, 1f));
+        using var subject = Image.Load<Rgba32>(transparentPngBytes);
+        using var canvas = new Image<Rgba32>(subject.Width, subject.Height, bg);
+
+        canvas.Mutate(ctx => ctx.DrawImage(subject, 1f));
 
         using var ms = new MemoryStream();
-        white.SaveAsJpeg(ms, new SixLabors.ImageSharp.Formats.Jpeg.JpegEncoder { Quality = 92 });
+        canvas.SaveAsJpeg(ms, new SixLabors.ImageSharp.Formats.Jpeg.JpegEncoder { Quality = 92 });
         return "data:image/jpeg;base64," + Convert.ToBase64String(ms.ToArray());
     }
 

@@ -1,0 +1,663 @@
+@page "/photo-size-expand"
+@rendermode InteractiveServer
+@using SixLabors.ImageSharp
+@using SixLabors.ImageSharp.PixelFormats
+@using ArtForgeAI.Models
+@inject PhotoExpandService ExpandService
+@inject IImageStorageService ImageStorage
+@inject IJSRuntime JS
+@inject IWebHostEnvironment Env
+@inject ILogger<PhotoSizeExpand> Logger
+@implements IDisposable
+
+<PageTitle>ArtForge AI - Photo Expand</PageTitle>
+
+<div class="page-header" style="margin-bottom: 0.75rem;">
+    <h2 style="font-size:1.5rem;">Photo Size Expand</h2>
+    <p style="font-size:0.9rem;">Expand a photo to a larger print size — AI fills the extended areas</p>
+</div>
+
+<div class="create-layout">
+    @* ── Left column: controls ── *@
+    <div class="create-left">
+        <div class="card">
+            <div class="card-body" style="padding: 1rem 1.5rem;">
+
+                @* Upload area *@
+                <div class="mb-3">
+                    <label class="form-label">Upload Your Photo</label>
+                    @if (_uploadedBytes != null)
+                    {
+                        <div style="position: relative;">
+                            <button class="ref-thumb-remove" @onclick="RemovePhoto" disabled="@_isProcessing"
+                                    style="position:absolute;top:4px;right:4px;z-index:20;">&#10005;</button>
+                            <div style="border-radius:6px;overflow:hidden;background:var(--bg-tertiary);text-align:center;">
+                                <img src="@_imageDataUrl" style="max-width:100%;max-height:200px;display:block;margin:0 auto;" />
+                            </div>
+                        </div>
+
+                        @* Auto-detected dimensions *@
+                        <div class="pse-detected" style="margin-top:0.5rem;">
+                            Source: <strong>@_detectedW &times; @_detectedH px</strong>
+                            @if (_detectedSize != null)
+                            {
+                                <span> &mdash; ~@_detectedSize.Label</span>
+                            }
+                        </div>
+                    }
+                    else
+                    {
+                        <label class="upload-area upload-area-compact @(_isUploading ? "disabled" : "")">
+                            <span class="upload-icon">&#128247;</span>
+                            <span>Upload a photo to expand</span>
+                            <span style="font-size: 0.7rem; color: var(--text-muted); margin-left: 0.5rem;">JPG, PNG up to 10MB</span>
+                            <InputFile OnChange="HandleFileUpload" accept=".jpg,.jpeg,.png,.webp" style="display:none"
+                                       disabled="@(_isProcessing || _isUploading)" />
+                        </label>
+                    }
+                    @if (_isUploading)
+                    {
+                        <div class="upload-progress-bar" style="margin-top: 0.35rem;">
+                            <div class="upload-progress-fill" style="width: 50%"></div>
+                            <span class="upload-progress-text">Uploading...</span>
+                        </div>
+                    }
+                </div>
+
+                @if (_uploadedBytes != null)
+                {
+                    <hr style="margin: 0.5rem 0; border-color: var(--border-color);" />
+
+                    @* Canvas wrap *@
+                    <span class="pse-section-label">Canvas Wrap (bleed)</span>
+                    <div class="pse-wrap-row">
+                        <input type="number" class="form-input" min="0" max="5" step="0.25"
+                               style="width:80px;text-align:center;"
+                               @bind="_canvasWrap" @bind:event="oninput" disabled="@_isProcessing" />
+                        <span style="font-size:0.82rem;color:var(--text-muted);">
+                            inches on each side
+                            @if (_canvasWrap > 0 && _selectedTarget != null)
+                            {
+                                var wPx = (int)Math.Round(_canvasWrap * PhotoExpandConfig.Dpi);
+                                var (tw, th) = PhotoExpandConfig.GetPixels(_selectedTarget, _landscape);
+                                <span>&mdash; total output: @(tw + 2 * wPx)&times;@(th + 2 * wPx) px</span>
+                            }
+                        </span>
+                    </div>
+
+                    <hr style="margin: 0.5rem 0; border-color: var(--border-color);" />
+
+                    @* Target size selector *@
+                    <span class="pse-section-label">Expand To</span>
+                    <select class="form-input pse-size-select" @onchange="OnTargetSizeChanged" disabled="@_isProcessing">
+                        @foreach (var p in PhotoExpandConfig.Presets)
+                        {
+                            var isTooSmall = p.TotalPixels <= _sourceTotalPixels;
+                            var isSelected = _selectedTarget?.Name == p.Name && !_isCustomTarget;
+                            <option value="@p.Name" disabled="@isTooSmall" selected="@isSelected">
+                                @p.Label — @p.WidthPx&times;@p.HeightPx px @(isTooSmall ? " (too small)" : "")
+                            </option>
+                        }
+                        <option value="__custom" selected="@_isCustomTarget">Custom size...</option>
+                    </select>
+
+                    @if (_isCustomTarget)
+                    {
+                        <div class="pse-custom-row" style="margin-top:0.4rem;">
+                            <div>
+                                <label>Width (in)</label>
+                                <input type="number" class="form-input" min="1" max="50" step="0.5"
+                                       @bind="_customTargetW" @bind:event="oninput" />
+                            </div>
+                            <div>
+                                <label>Height (in)</label>
+                                <input type="number" class="form-input" min="1" max="50" step="0.5"
+                                       @bind="_customTargetH" @bind:event="oninput" />
+                            </div>
+                            <div style="display:flex;align-items:flex-end;">
+                                <button class="btn-secondary" style="font-size:0.78rem;padding:0.35rem 0.6rem;"
+                                        @onclick="ApplyCustomTarget">Set</button>
+                            </div>
+                        </div>
+                    }
+
+                    <hr style="margin: 0.5rem 0; border-color: var(--border-color);" />
+
+                    @* Orientation toggle *@
+                    <div class="pp-orientation-row">
+                        <button class="pp-orient-btn @(!_landscape ? "selected" : "")"
+                                @onclick="() => SetOrientation(false)" disabled="@_isProcessing">
+                            <span style="font-size: 1.1rem;">&#9645;</span> Portrait
+                        </button>
+                        <button class="pp-orient-btn @(_landscape ? "selected" : "")"
+                                @onclick="() => SetOrientation(true)" disabled="@_isProcessing">
+                            <span style="font-size: 1.1rem;">&#9644;</span> Landscape
+                        </button>
+                    </div>
+
+                    @* Position *@
+                    <span class="pse-section-label">Photo Position</span>
+                    <div class="pse-position-row">
+                        @foreach (var pos in _positions)
+                        {
+                            var isSelected = _selectedPosition == pos.Name;
+                            <button class="pse-pos-btn @(isSelected ? "selected" : "")"
+                                    @onclick="() => SetPosition(pos.Name, pos.X, pos.Y)" disabled="@_isProcessing">
+                                @pos.Name
+                            </button>
+                        }
+                    </div>
+
+                    @* Prompt hint *@
+                    <details style="margin-bottom:0.6rem;">
+                        <summary style="font-size:0.78rem;color:var(--text-muted);cursor:pointer;">
+                            Describe expanded area (optional)
+                        </summary>
+                        <textarea class="pse-prompt-hint" style="margin-top:0.35rem;"
+                                  placeholder="e.g. Continue the sky and grass, add trees on the left..."
+                                  @bind="_promptHint" @bind:event="oninput" disabled="@_isProcessing"></textarea>
+                    </details>
+
+                    @* Expand button *@
+                    <button class="btn-primary-gradient" style="width:100%;padding:0.6rem;font-size:0.95rem;margin-top:0.25rem;"
+                            disabled="@(!CanExpand)" @onclick="ExpandWithAI">
+                        &#10024; Expand with AI
+                    </button>
+                }
+            </div>
+        </div>
+
+        @if (!string.IsNullOrEmpty(_errorMessage))
+        {
+            <div class="card" style="margin-top: 0.75rem; border-left: 3px solid var(--danger);">
+                <div class="card-body" style="padding: 0.75rem 1rem; color: var(--danger); font-size: 0.85rem;">
+                    <strong>Error:</strong> @_errorMessage
+                </div>
+            </div>
+        }
+    </div>
+
+    @* ── Right column: preview / result ── *@
+    <div class="create-right">
+        <div class="right-panel-card">
+            <div class="right-panel-label">
+                @if (_resultReady)
+                {
+                    <span>Result (@_resultW&times;@_resultH px @@ @PhotoExpandConfig.Dpi DPI)@(_resultWrapPx > 0 ? $" — incl. {_canvasWrap}\" wrap" : "")</span>
+                }
+                else if (_uploadedBytes != null && _selectedTarget != null)
+                {
+                    <span>Preview &mdash; @(PhotoExpandConfig.GetPixels(_selectedTarget, _landscape).w)&times;@(PhotoExpandConfig.GetPixels(_selectedTarget, _landscape).h) target</span>
+                }
+                else
+                {
+                    <span>Upload a photo to get started</span>
+                }
+            </div>
+
+            <div class="pse-preview-container" style="flex:1;min-height:0;display:flex;align-items:center;justify-content:center;overflow:hidden;">
+                @if (_resultReady && !string.IsNullOrEmpty(_resultDataUrl))
+                {
+                    <img src="@_resultDataUrl" alt="Expanded result"
+                         style="display:block;max-height:100%;max-width:100%;object-fit:contain;" />
+                }
+                else
+                {
+                    <canvas id="pseCanvas"></canvas>
+                }
+            </div>
+
+            @if (_resultReady)
+            {
+                <div class="pse-info-bar">
+                    <span>&#128208; @_resultW &times; @_resultH px</span>
+                    <span>&#127912; @PhotoExpandConfig.Dpi DPI</span>
+                    <span>&#128196; @FormatFileSize(_resultBytes?.Length ?? 0)</span>
+                    @if (_resultWrapPx > 0)
+                    {
+                        <span>&#128459; Wrap: @(_resultWrapPx / PhotoExpandConfig.Dpi)\" each side</span>
+                    }
+                </div>
+                <div class="pse-download-bar">
+                    <button class="btn-primary-gradient" style="font-size: 0.85rem; padding: 0.4rem 0.85rem;"
+                            @onclick="DownloadPng">
+                        &#128424; Download PNG (300 DPI)
+                    </button>
+                    <button class="btn-secondary" style="font-size: 0.85rem; padding: 0.4rem 0.85rem;"
+                            @onclick="DownloadJpg">
+                        Download JPG (300 DPI)
+                    </button>
+                    <button class="btn-secondary" style="font-size: 0.85rem; padding: 0.4rem 0.85rem;"
+                            @onclick="Regenerate">
+                        &#128260; Regenerate
+                    </button>
+                </div>
+            }
+        </div>
+    </div>
+</div>
+
+@* ── Processing overlay ── *@
+@if (_isProcessing)
+{
+    <div class="pp-processing-overlay">
+        <div class="pp-processing-modal">
+            <div class="processing-spinner" style="width:36px;height:36px;margin:0 auto 1rem;"></div>
+            <p style="margin:0;font-size:0.95rem;color:var(--text-primary);">@_processingStatus</p>
+        </div>
+    </div>
+}
+
+@code {
+    // ── State ──
+    private byte[]? _uploadedBytes;
+    private string? _imageDataUrl;
+    private bool _isUploading;
+    private bool _isProcessing;
+    private string _processingStatus = "";
+    private string? _errorMessage;
+
+    // Detected source image dimensions (used directly — no source size picker)
+    private int _detectedW;
+    private int _detectedH;
+    private long _sourceTotalPixels;
+    private PrintSize? _detectedSize;
+
+    // Source size derived from actual image (auto-created, not user-selected)
+    private PrintSize _sourceSize = new("Source", 0, 0, 0, 0);
+
+    // Target size
+    private PrintSize? _selectedTarget;
+    private bool _isCustomTarget;
+    private double _customTargetW = 12;
+    private double _customTargetH = 18;
+
+    // Orientation
+    private bool _landscape;
+
+    // Position
+    private string _selectedPosition = "Auto";
+    private double _posX = 0.5;
+    private double _posY = 0.5;
+
+    // Face detection (eyeY = estimated eye-line position)
+    private double _faceCenterX = 0.5;
+    private double _faceEyeY = 0.30;
+
+    // Canvas wrap
+    private double _canvasWrap;
+
+    // Prompt
+    private string? _promptHint;
+
+    // Result
+    private bool _resultReady;
+    private byte[]? _resultBytes;
+    private string? _resultDataUrl;
+    private int _resultW;
+    private int _resultH;
+    private int _resultWrapPx;
+
+    // Position presets
+    private record PositionPreset(string Name, double X, double Y);
+    private static readonly PositionPreset[] _positions =
+    [
+        new("Auto", 0.5, 0.5),
+        new("Top", 0.5, 0.0),
+        new("Center", 0.5, 0.5),
+        new("Bottom", 0.5, 1.0),
+        new("Left", 0.0, 0.5),
+        new("Right", 1.0, 0.5),
+    ];
+
+    private bool CanExpand => _uploadedBytes != null && _selectedTarget != null && !_isProcessing;
+
+    // ── Lifecycle ──
+
+    public void Dispose()
+    {
+        try { JS.InvokeVoidAsync("photoExpand.dispose"); } catch { }
+    }
+
+    // ── Upload ──
+
+    private async Task HandleFileUpload(InputFileChangeEventArgs e)
+    {
+        _isUploading = true;
+        _errorMessage = null;
+        _resultReady = false;
+        _resultBytes = null;
+        _resultDataUrl = null;
+        StateHasChanged();
+
+        try
+        {
+            var file = e.File;
+            if (file.Size > 10 * 1024 * 1024)
+            {
+                _errorMessage = "File size must be under 10MB.";
+                return;
+            }
+
+            using var ms = new MemoryStream();
+            await file.OpenReadStream(10 * 1024 * 1024).CopyToAsync(ms);
+            _uploadedBytes = ms.ToArray();
+
+            // Detect dimensions — these ARE the source size
+            using var img = Image.Load<Rgba32>(_uploadedBytes);
+            _detectedW = img.Width;
+            _detectedH = img.Height;
+
+            // Normalize to portrait for comparison (short side × long side)
+            int shortSide = Math.Min(_detectedW, _detectedH);
+            int longSide = Math.Max(_detectedW, _detectedH);
+            _sourceSize = new PrintSize("Source",
+                Math.Round(shortSide / 300.0, 1), Math.Round(longSide / 300.0, 1),
+                shortSide, longSide);
+            _sourceTotalPixels = (long)shortSide * longSide;
+
+            _detectedSize = PhotoExpandConfig.FindClosest(_detectedW, _detectedH, 300);
+
+            // Detect face center for auto-positioning
+            (_faceCenterX, _faceEyeY) = PhotoExpandService.DetectFaceCenter(_uploadedBytes);
+
+            // Auto-select 12×18 as default, or first valid target if 12×18 is too small
+            _isCustomTarget = false;
+            var preferred = PhotoExpandConfig.Presets.FirstOrDefault(p => p.Name == "12×18");
+            if (preferred != null && preferred.TotalPixels > _sourceTotalPixels)
+            {
+                _selectedTarget = preferred;
+            }
+            else
+            {
+                _selectedTarget = PhotoExpandConfig.Presets.FirstOrDefault(p => p.TotalPixels > _sourceTotalPixels);
+            }
+
+            // Build data URL for thumbnail
+            var ext = file.Name.EndsWith(".png", StringComparison.OrdinalIgnoreCase) ? "png" : "jpeg";
+            _imageDataUrl = $"data:image/{ext};base64," + Convert.ToBase64String(_uploadedBytes);
+
+            // Detect orientation from image
+            _landscape = _detectedW > _detectedH;
+        }
+        catch (Exception ex)
+        {
+            Logger.LogError(ex, "Upload failed");
+            _errorMessage = "Upload failed. Please try again.";
+            return;
+        }
+        finally
+        {
+            _isUploading = false;
+            StateHasChanged();
+        }
+
+        // Initialize preview
+        await UpdatePreview();
+    }
+
+    // ── Remove photo ──
+
+    private async Task RemovePhoto()
+    {
+        try { await JS.InvokeVoidAsync("photoExpand.dispose"); } catch { }
+        _uploadedBytes = null;
+        _imageDataUrl = null;
+        _resultReady = false;
+        _resultBytes = null;
+        _resultDataUrl = null;
+        _errorMessage = null;
+        _selectedTarget = null;
+    }
+
+    // ── Target size ──
+
+    private async Task OnTargetSizeChanged(ChangeEventArgs e)
+    {
+        var val = e.Value?.ToString();
+        if (val == "__custom")
+        {
+            _isCustomTarget = true;
+            // Apply current custom values if valid
+            await ApplyCustomTarget();
+            return;
+        }
+
+        _isCustomTarget = false;
+        var preset = PhotoExpandConfig.Presets.FirstOrDefault(p => p.Name == val);
+        if (preset != null && preset.TotalPixels > _sourceTotalPixels)
+        {
+            await SelectTarget(preset);
+        }
+    }
+
+    private async Task SelectTarget(PrintSize size)
+    {
+        _selectedTarget = size;
+        _resultReady = false;
+        _resultBytes = null;
+        _resultDataUrl = null;
+        await UpdatePreview();
+    }
+
+    private async Task ApplyCustomTarget()
+    {
+        var custom = PhotoExpandConfig.CreateCustom(_customTargetW, _customTargetH);
+        if (custom.TotalPixels <= _sourceTotalPixels)
+        {
+            _errorMessage = "Target must be larger than source image.";
+            return;
+        }
+        _errorMessage = null;
+        _isCustomTarget = true;
+        _selectedTarget = custom;
+        _resultReady = false;
+        await UpdatePreview();
+    }
+
+    // ── Orientation ──
+
+    private async Task SetOrientation(bool landscape)
+    {
+        _landscape = landscape;
+        _resultReady = false;
+        _resultBytes = null;
+        _resultDataUrl = null;
+        await UpdatePreview();
+    }
+
+    // ── Position ──
+
+    private async Task SetPosition(string name, double x, double y)
+    {
+        _selectedPosition = name;
+        _resultReady = false;
+        _resultBytes = null;
+        _resultDataUrl = null;
+
+        if (name == "Auto" && _selectedTarget != null)
+        {
+            var (tgtW, tgtH) = PhotoExpandConfig.GetPixels(_selectedTarget, _landscape);
+            (_posX, _posY) = PhotoExpandService.CalculateFaceCenterPosition(
+                _faceCenterX, _faceEyeY, _detectedW, _detectedH, tgtW, tgtH);
+        }
+        else
+        {
+            _posX = x;
+            _posY = y;
+        }
+
+        try { await JS.InvokeVoidAsync("photoExpand.setPosition", _posX, _posY); } catch { }
+    }
+
+    // ── Preview ──
+
+    private async Task UpdatePreview()
+    {
+        if (_uploadedBytes == null || _selectedTarget == null || string.IsNullOrEmpty(_imageDataUrl))
+            return;
+
+        try
+        {
+            int srcW = _detectedW;
+            int srcH = _detectedH;
+
+            var (tgtW, tgtH) = PhotoExpandConfig.GetPixels(_selectedTarget, _landscape);
+
+            // Auto-position: center the face in the target
+            if (_selectedPosition == "Auto")
+            {
+                (_posX, _posY) = PhotoExpandService.CalculateFaceCenterPosition(
+                    _faceCenterX, _faceEyeY, srcW, srcH, tgtW, tgtH);
+            }
+
+            // Include canvas wrap in preview
+            int wrapPx = (int)Math.Round(_canvasWrap * PhotoExpandConfig.Dpi);
+            int totalW = tgtW + 2 * wrapPx;
+            int totalH = tgtH + 2 * wrapPx;
+
+            StateHasChanged();
+            await Task.Delay(80); // Let Blazor render canvas element
+            await JS.InvokeVoidAsync("photoExpand.initPreview", "pseCanvas", _imageDataUrl, srcW, srcH, totalW, totalH, wrapPx, _posX, _posY);
+        }
+        catch (Exception ex)
+        {
+            Logger.LogWarning(ex, "Preview init failed");
+        }
+    }
+
+    // ── Expand with AI ──
+
+    private async Task ExpandWithAI()
+    {
+        if (!CanExpand) return;
+
+        _isProcessing = true;
+        _errorMessage = null;
+        _resultReady = false;
+        _resultBytes = null;
+        _resultDataUrl = null;
+        _processingStatus = "Preparing...";
+        StateHasChanged();
+
+        try
+        {
+            // Get current position: auto-calculated or from JS drag
+            if (_selectedPosition == "Auto")
+            {
+                var (tgtW, tgtH) = PhotoExpandConfig.GetPixels(_selectedTarget!, _landscape);
+                (_posX, _posY) = PhotoExpandService.CalculateFaceCenterPosition(
+                    _faceCenterX, _faceEyeY, _detectedW, _detectedH, tgtW, tgtH);
+            }
+            else
+            {
+                try
+                {
+                    var pos = await JS.InvokeAsync<PositionResult>("photoExpand.getPosition");
+                    _posX = pos.X;
+                    _posY = pos.Y;
+                }
+                catch { /* keep current position */ }
+            }
+
+            var request = new PhotoExpandRequest
+            {
+                SourceBytes = _uploadedBytes!,
+                SourceSize = _sourceSize,
+                TargetSize = _selectedTarget!,
+                Landscape = _landscape,
+                PosX = _posX,
+                PosY = _posY,
+                PromptHint = _promptHint,
+                CanvasWrapInches = _canvasWrap,
+            };
+
+            var progress = new Progress<string>(msg =>
+            {
+                _processingStatus = msg;
+                InvokeAsync(StateHasChanged);
+            });
+
+            var result = await ExpandService.ExpandAsync(request, progress);
+
+            if (!result.Success)
+            {
+                _errorMessage = result.ErrorMessage ?? "Expansion failed.";
+                return;
+            }
+
+            _resultBytes = result.ResultBytes;
+            _resultW = result.ResultWidthPx;
+            _resultH = result.ResultHeightPx;
+            _resultWrapPx = result.WrapPx;
+            _resultDataUrl = "data:image/png;base64," + Convert.ToBase64String(_resultBytes!);
+            _resultReady = true;
+
+            // Dispose the preview canvas — result uses a plain <img> tag
+            try { await JS.InvokeVoidAsync("photoExpand.dispose"); } catch { }
+        }
+        catch (Exception ex)
+        {
+            Logger.LogError(ex, "Expand failed");
+            _errorMessage = "Expansion failed: " + ex.Message;
+        }
+        finally
+        {
+            _isProcessing = false;
+            _processingStatus = "";
+            StateHasChanged();
+        }
+    }
+
+    // ── Downloads ──
+
+    private async Task DownloadPng()
+    {
+        if (_resultBytes == null) return;
+        try
+        {
+            var base64 = Convert.ToBase64String(_resultBytes);
+            var fileName = $"expanded_{_resultW}x{_resultH}_300dpi.png";
+            await JS.InvokeVoidAsync("photoExpand.downloadBytes", base64, fileName, "image/png");
+        }
+        catch (Exception ex) { Logger.LogError(ex, "Download failed"); _errorMessage = "Download failed."; }
+    }
+
+    private async Task DownloadJpg()
+    {
+        if (_resultBytes == null) return;
+        try
+        {
+            var jpgBytes = PhotoExpandService.ConvertToJpeg(_resultBytes, 95);
+            var base64 = Convert.ToBase64String(jpgBytes);
+            var fileName = $"expanded_{_resultW}x{_resultH}_300dpi.jpg";
+            await JS.InvokeVoidAsync("photoExpand.downloadBytes", base64, fileName, "image/jpeg");
+        }
+        catch (Exception ex) { Logger.LogError(ex, "Download failed"); _errorMessage = "Download failed."; }
+    }
+
+    private async Task Regenerate()
+    {
+        _resultReady = false;
+        _resultBytes = null;
+        _resultDataUrl = null;
+        StateHasChanged();
+        await UpdatePreview();
+        await ExpandWithAI();
+    }
+
+    // ── Helpers ──
+
+    private static string FormatFileSize(int bytes)
+    {
+        if (bytes < 1024) return $"{bytes} B";
+        if (bytes < 1024 * 1024) return $"{bytes / 1024.0:F1} KB";
+        return $"{bytes / (1024.0 * 1024.0):F1} MB";
+    }
+
+    private class PositionResult
+    {
+        public double X { get; set; }
+        public double Y { get; set; }
+    }
+}
