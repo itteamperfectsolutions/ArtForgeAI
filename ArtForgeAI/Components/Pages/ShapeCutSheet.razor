@@ -1,5 +1,6 @@
 @page "/shape-cut"
 @rendermode InteractiveServer
+@attribute [Authorize]
 @using SixLabors.ImageSharp
 @using SixLabors.ImageSharp.PixelFormats
 @using SixLabors.ImageSharp.Processing
@@ -9,20 +10,24 @@
 @inject IWebHostEnvironment Env
 @inject ILogger<ShapeCutSheet> Logger
 @inject OnnxBgRemovalService BgRemoval
+@inject ISubscriptionService SubscriptionService
+@inject ICoinService CoinService
+@inject AuthenticationStateProvider AuthState
+@inject NavigationManager Nav
 @implements IDisposable
 
 <PageTitle>ArtForge AI - Shape Cut Sheet</PageTitle>
 
-<div class="page-header" style="margin-bottom: 0.75rem;">
-    <h2 style="font-size:1.5rem;">Shape Cut Gang Sheet</h2>
-    <p style="font-size:0.9rem;">Upload multiple designs, generate contour outlines, and create print + cut files</p>
+<div class="page-header page-header-lg">
+    <h2>Shape Cut Gang Sheet</h2>
+    <p>Upload multiple designs, generate contour outlines, and create print + cut files</p>
 </div>
 
 <div class="create-layout">
     @* ── Left column ── *@
     <div class="create-left">
         <div class="card">
-            <div class="card-body" style="padding: 1rem 1.5rem;">
+            <div class="card-body">
 
                 @* Outline settings (global) *@
                 <label class="form-label">Outline Settings</label>
@@ -326,6 +331,23 @@
 
     // ── Lifecycle ──
 
+    protected override async Task OnInitializedAsync()
+    {
+        var authState = await AuthState.GetAuthenticationStateAsync();
+        if (!authState.User.IsInRole("SuperAdmin"))
+        {
+            var userIdStr = authState.User.FindFirstValue(System.Security.Claims.ClaimTypes.NameIdentifier);
+            if (int.TryParse(userIdStr, out var uid))
+            {
+                if (!await SubscriptionService.HasFeatureAccessAsync(uid, ArtForgeAI.Models.FeatureAccess.ShapeCutSheet))
+                {
+                    Nav.NavigateTo("/pricing", forceLoad: true);
+                    return;
+                }
+            }
+        }
+    }
+
     public void Dispose()
     {
         try { JS.InvokeVoidAsync("shapeCut.dispose"); } catch { }
@@ -384,6 +406,19 @@
 
         if (_designs.Count > 0)
         {
+            var authStateC = await AuthState.GetAuthenticationStateAsync();
+            var uidStrC = authStateC.User.FindFirstValue(System.Security.Claims.ClaimTypes.NameIdentifier);
+            if (int.TryParse(uidStrC, out var userIdC) && !authStateC.User.IsInRole("SuperAdmin"))
+            {
+                var cost = ArtForgeAI.Models.FeatureAccess.GetCost("ShapeCutSheet");
+                if (!await CoinService.DebitCoinsAsync(userIdC, cost, ArtForgeAI.Models.CoinTransactionType.GenerationSpend, "Shape Cut Sheet generation"))
+                {
+                    _errorMessage = "Insufficient coins. Please purchase more.";
+                    StateHasChanged();
+                    return;
+                }
+            }
+
             _isProcessing = true;
             _processingStatus = "Processing designs...";
             StateHasChanged();

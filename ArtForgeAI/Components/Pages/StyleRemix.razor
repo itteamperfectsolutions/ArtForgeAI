@@ -1,0 +1,1020 @@
+@page "/style-remix"
+@rendermode InteractiveServer
+@attribute [Authorize]
+@inject IImageGenerationService ImageGenService
+@inject IImageStorageService ImageStorage
+@inject IBackgroundRemovalService BgRemoval
+@inject IImageEnhancerService ImageEnhancer
+@inject IColorEnhancementService ColorEnhancer
+@inject IJSRuntime JS
+@inject IWebHostEnvironment Env
+@inject IGeminiImageService GeminiService
+@inject ILogger<StyleRemix> Logger
+@inject ISubscriptionService SubscriptionService
+@inject ICoinService CoinService
+@inject AuthenticationStateProvider AuthState
+@inject NavigationManager Nav
+
+<PageTitle>ArtForge AI - Style Remix</PageTitle>
+
+<div class="page-header">
+    <h2>Style Remix</h2>
+    <p>Upload a style reference and your photo — AI copies the look onto you</p>
+</div>
+
+<div class="create-layout">
+    @* ── Left column: controls ── *@
+    <div class="create-left">
+        <div class="card">
+            <div class="card-body">
+
+                @* Dual upload row *@
+                <div class="sr-upload-row">
+                    @* Style Reference upload *@
+                    <div class="sr-upload-col">
+                        <div class="sr-upload-label">Style Reference</div>
+                        <div class="sr-upload-subtitle">The look / style to copy</div>
+                        @if (!string.IsNullOrEmpty(_styleRefPath))
+                        {
+                            <div class="sr-upload-preview">
+                                <img src="/@_styleRefPath" alt="Style Reference" />
+                                <button class="ref-thumb-remove" @onclick="RemoveStyleRef" disabled="@(_isGenerating || _isUploading)">&#10005;</button>
+                            </div>
+                        }
+                        else
+                        {
+                            <label class="upload-area sr-upload-box @(_isUploading ? "disabled" : "")">
+                                <span class="upload-icon">&#127912;</span>
+                                <span>Upload style photo</span>
+                                <InputFile OnChange="HandleStyleRefUpload" accept=".jpg,.jpeg,.png,.webp" style="display:none" disabled="@(_isGenerating || _isUploading)" />
+                            </label>
+                        }
+                    </div>
+
+                    @* Subject Photo upload *@
+                    <div class="sr-upload-col">
+                        <div class="sr-upload-label">Your Photo</div>
+                        <div class="sr-upload-subtitle">Your face will be preserved</div>
+                        @if (!string.IsNullOrEmpty(_subjectPath))
+                        {
+                            <div class="sr-upload-preview">
+                                <img src="/@_subjectPath" alt="Your Photo" />
+                                <button class="ref-thumb-remove" @onclick="RemoveSubject" disabled="@(_isGenerating || _isUploading)">&#10005;</button>
+                            </div>
+                        }
+                        else
+                        {
+                            <label class="upload-area sr-upload-box @(_isUploading ? "disabled" : "")">
+                                <span class="upload-icon">&#128100;</span>
+                                <span>Upload your photo</span>
+                                <InputFile OnChange="HandleSubjectUpload" accept=".jpg,.jpeg,.png,.webp" style="display:none" disabled="@(_isGenerating || _isUploading)" />
+                            </label>
+                        }
+                    </div>
+                </div>
+
+                @if (_isUploading)
+                {
+                    <div class="upload-progress-bar" style="margin-top: 0.35rem;">
+                        <div class="upload-progress-fill" style="width: @(_uploadProgress)%"></div>
+                        <span class="upload-progress-text">Uploading... @(_uploadProgress)%</span>
+                    </div>
+                }
+
+                @* Optional additional instructions *@
+                <div class="mb-3" style="margin-top: 0.75rem;">
+                    <button class="style-custom-toggle" @onclick="() => _showCustomInstructions = !_showCustomInstructions" disabled="@_isGenerating">
+                        @if (_showCustomInstructions)
+                        {
+                            <span>&#9660; Additional Instructions</span>
+                        }
+                        else
+                        {
+                            <span>&#9654; Add instructions (optional)</span>
+                        }
+                    </button>
+                    @if (_showCustomInstructions)
+                    {
+                        <textarea class="form-input" rows="2" style="margin-top: 0.35rem;"
+                                  placeholder="e.g. make the background a sunset, add dramatic lighting..."
+                                  @bind="_customInstructions"
+                                  disabled="@_isGenerating"></textarea>
+                    }
+                </div>
+
+                @* Generate button *@
+                <button class="btn-primary-gradient"
+                        style="width: 100%; justify-content: center; padding: 0.55rem;"
+                        @onclick="GenerateStyleRemix"
+                        disabled="@(_isGenerating || string.IsNullOrEmpty(_styleRefPath) || string.IsNullOrEmpty(_subjectPath))">
+                    @if (_isGenerating)
+                    {
+                        <span>Generating...</span>
+                    }
+                    else
+                    {
+                        <span>&#10024; Generate (@_coinCost coins)</span>
+                    }
+                </button>
+            </div>
+        </div>
+
+        @if (!string.IsNullOrEmpty(_errorMessage))
+        {
+            <div class="card" style="margin-top: 0.75rem; border-left: 3px solid var(--danger);">
+                <div class="card-body" style="padding: 0.75rem 1rem; color: var(--danger); font-size: 0.85rem;">
+                    <strong>Error:</strong> @_errorMessage
+                </div>
+            </div>
+        }
+    </div>
+
+    @* ── Right column: result ── *@
+    <div class="create-right sr-right-col">
+        @if (_result is not null && _result.Success)
+        {
+            <div class="right-panel-card">
+                <div class="right-panel-label">
+                    Style Remix Result
+                    @if (_refinementCount > 0)
+                    {
+                        <span class="sr-refinement-counter">Refinement #@_refinementCount</span>
+                    }
+                </div>
+                <div class="right-panel-image-wrap" @key="@_imgVersion">
+                    <img src="@($"{ImageStorage.GetWebPath(_result.LocalImagePath ?? "")}?v={_imgVersion}")" alt="Style Remix result" />
+                    @if (_isReprocessing)
+                    {
+                        <div class="ref-processing-overlay">
+                            <div class="loading-spinner" style="width:36px;height:36px;margin:0;"></div>
+                        </div>
+                    }
+                </div>
+                @if (!string.IsNullOrEmpty(_recolorError))
+                {
+                    <div style="padding: 0.5rem 0.75rem; color: var(--danger); font-size: 0.8rem; border-top: 1px solid var(--border-color);">
+                        @_recolorError
+                    </div>
+                }
+                <div class="right-panel-actions">
+                    <button class="btn-secondary" @onclick="DownloadPng">&#11015; PNG</button>
+                    <button class="btn-secondary" @onclick="DownloadJpg">&#11015; JPG</button>
+                    @if (_transparentImageBytes is not null)
+                    {
+                        <button class="btn-transparent-download" @onclick="DownloadTransparent" title="Download with transparent background">
+                            &#11015; Transparent
+                        </button>
+                    }
+                    @if (ImageEnhancer.IsAvailable)
+                    {
+                        <button class="btn-enhance" @onclick="EnhanceImage" disabled="@_isEnhancing">
+                            @if (_isEnhancing)
+                            {
+                                <span>Enhancing...</span>
+                            }
+                            else
+                            {
+                                <span>&#9889; Enhance 4x</span>
+                            }
+                        </button>
+                    }
+                    @*@if (ColorEnhancer.IsAvailable)
+                    {
+                        <button class="btn-color-enhance" @onclick="ColorEnhanceImage" disabled="@_isColorEnhancing">
+                            @if (_isColorEnhancing)
+                            {
+                                <span>Enhancing...</span>
+                            }
+                            else
+                            {
+                                <span>&#127912; Enhance Colors</span>
+                            }
+                        </button>
+                    }*@
+                    <button class="btn-primary-gradient" @onclick="StartNew">&#10024; New</button>
+                </div>
+                @if (_isEnhancing)
+                {
+                    <div class="enhance-progress-bar">
+                        <div class="enhance-progress-fill" style="width: @(_enhanceProgress)%"></div>
+                        <span class="enhance-progress-text">@(_enhanceProgress)%</span>
+                    </div>
+                }
+
+                @* Remove Background section *@
+                @if (BgRemoval.IsAvailable)
+                {
+                    <div class="bg-remove-section">
+                        @if (!_showBgOptions)
+                        {
+                            <button class="ref-bg-remove-btn" @onclick="RemoveGeneratedBackground" disabled="@_isReprocessing">
+                                @if (_isReprocessing)
+                                {
+                                    <span class="loading-spinner" style="width:16px;height:16px;margin:0;border-width:2px;"></span>
+                                    <span>Removing...</span>
+                                }
+                                else
+                                {
+                                    <span>&#9986; Remove Background</span>
+                                }
+                            </button>
+                        }
+
+                        @if (_showBgOptions)
+                        {
+                            <div class="bg-options-header">
+                                <span>Background Options</span>
+                                @if (_isReprocessing)
+                                {
+                                    <span class="bg-reprocessing-indicator">Applying...</span>
+                                }
+                            </div>
+
+                            <div class="bg-color-swatches">
+                                @foreach (var swatch in _bgSwatches)
+                                {
+                                    <button class="bg-color-swatch @(swatch.Hex == _selectedBgColor ? "active" : "")"
+                                            style="@(swatch.Hex == "transparent"
+                                                ? "background: repeating-conic-gradient(#ccc 0% 25%, #fff 0% 50%) 50% / 10px 10px;"
+                                                : $"background-color: {swatch.Hex};")"
+                                            title="@swatch.Name"
+                                            disabled="@_isReprocessing"
+                                            @onclick="() => ChangeBackgroundColor(swatch.Hex)">
+                                    </button>
+                                }
+                            </div>
+
+                            <div class="bg-custom-row">
+                                <input type="text" class="form-input bg-hex-input"
+                                       placeholder="#FF6600"
+                                       @bind="_customHexColor"
+                                       @bind:event="oninput"
+                                       disabled="@_isReprocessing" />
+                                <button class="btn-secondary" @onclick="ApplyCustomHex" disabled="@_isReprocessing">Apply</button>
+                            </div>
+                        }
+                    </div>
+                }
+            </div>
+
+            @* Refinement section — above analysis *@
+            <div class="finetune-section sr-refinement-section" style="margin-top: 0.75rem;">
+                <div class="finetune-input-area">
+                    <label class="finetune-label">Refine your result</label>
+                    <textarea class="form-input finetune-textarea"
+                              rows="2"
+                              placeholder="e.g. change background to a palace, make lighting warmer, add a crown..."
+                              @bind="_refinementText"
+                              disabled="@_isGenerating"></textarea>
+                    <button class="btn-regenerate"
+                            @onclick="RefineResult"
+                            disabled="@(_isGenerating || string.IsNullOrWhiteSpace(_refinementText))">
+                        @if (_isGenerating)
+                        {
+                            <span>Refining...</span>
+                        }
+                        else
+                        {
+                            <span>&#128260; Refine (@_coinCost coins)</span>
+                        }
+                    </button>
+                </div>
+            </div>
+
+            @* Analysis details — collapsible, below refine *@
+            <div style="margin-top: 0.5rem;">
+                @if (!string.IsNullOrEmpty(_analysisText))
+                {
+                    <details class="result-prompt" style="padding: 0.6rem 1rem; border-bottom: 1px solid var(--border-color); cursor: pointer;">
+                        <summary style="font-size: 0.8rem; font-weight: 600; color: var(--text-secondary);">Style Analysis (extracted from reference)</summary>
+                        <p style="font-size: 0.8rem; color: var(--text-muted); margin-top: 0.35rem; white-space: pre-wrap;">@_analysisText</p>
+                    </details>
+                }
+                @if (!string.IsNullOrEmpty(_subjectAnalysisText))
+                {
+                    <details class="result-prompt" style="padding: 0.6rem 1rem; border-bottom: 1px solid var(--border-color); cursor: pointer;">
+                        <summary style="font-size: 0.8rem; font-weight: 600; color: var(--text-secondary);">Subject Analysis (your photo)</summary>
+                        <p style="font-size: 0.8rem; color: var(--text-muted); margin-top: 0.35rem; white-space: pre-wrap;">@_subjectAnalysisText</p>
+                    </details>
+                }
+                @if (!string.IsNullOrEmpty(_lastPromptUsed))
+                {
+                    <details class="result-prompt" style="padding: 0.6rem 1rem; border-bottom: 1px solid var(--border-color); cursor: pointer;">
+                        <summary style="font-size: 0.8rem; font-weight: 600; color: var(--text-secondary);">Prompt used</summary>
+                        <p style="font-size: 0.8rem; color: var(--text-muted); margin-top: 0.35rem; white-space: pre-wrap;">@_lastPromptUsed</p>
+                    </details>
+                }
+            </div>
+            <div class="ai-disclaimer">
+                AI-generated image — minor variations in facial features, colours, and details may occur. For best results, try refining if needed.
+            </div>
+        }
+        else if (string.IsNullOrEmpty(_styleRefPath) && string.IsNullOrEmpty(_subjectPath))
+        {
+            <div class="right-panel-empty">
+                <div class="empty-icon">&#127912;</div>
+                <p>Upload a style reference and your photo to get started</p>
+            </div>
+        }
+        else
+        {
+            @* Show uploaded previews at full size before generation *@
+            <div class="right-panel-card">
+                <div class="right-panel-label">Preview</div>
+                <div style="display: flex; gap: 0.75rem; padding: 0.75rem;">
+                    @if (!string.IsNullOrEmpty(_styleRefPath))
+                    {
+                        <div style="flex: 1; position: relative; min-width: 0;">
+                            <div class="sr-preview-tag" style="position: absolute; top: 6px; left: 6px; z-index: 1;">Style Reference</div>
+                            <img src="/@_styleRefPath" alt="Style Reference" style="width: 100%; height: auto; border-radius: 8px; display: block;" />
+                        </div>
+                    }
+                    @if (!string.IsNullOrEmpty(_subjectPath))
+                    {
+                        <div style="flex: 1; position: relative; min-width: 0;">
+                            <div class="sr-preview-tag" style="position: absolute; top: 6px; left: 6px; z-index: 1;">Your Photo</div>
+                            <img src="/@_subjectPath" alt="Subject" style="width: 100%; height: auto; border-radius: 8px; display: block;" />
+                        </div>
+                    }
+                </div>
+            </div>
+        }
+    </div>
+</div>
+
+<LoadingOverlay IsVisible="_isGenerating" CurrentStep="_loadingStep" Provider="ImageProvider.Gemini"
+    StepLabels="@(new[] { "Analyzing your images with AI...", "Building your custom style prompt...", "Generating styled image...", "Saving & optimizing..." })" />
+<Toast @ref="_toast" />
+
+@code {
+    // Upload state
+    private string? _styleRefPath;
+    private string? _subjectPath;
+    private string? _originalSubjectPath;
+    private bool _isUploading;
+    private int _uploadProgress;
+
+    // Generation state
+    private string _customInstructions = string.Empty;
+    private bool _showCustomInstructions;
+    private bool _isGenerating;
+    private int _loadingStep = 1;
+    private string? _errorMessage;
+    private GenerationResult? _result;
+    private Toast? _toast;
+    private int _coinCost = ArtForgeAI.Models.FeatureAccess.GetCost(ArtForgeAI.Models.FeatureAccess.StyleRemix);
+
+    // Style analysis state
+    private string? _analysisText;
+    private string? _subjectAnalysisText;
+
+    // Refinement state
+    private string _refinementText = string.Empty;
+    private string? _currentResultPath;
+    private string? _lastPromptUsed;
+    private int _refinementCount;
+
+    // Enhancement state
+    private bool _isEnhancing;
+    private int _enhanceProgress;
+    private bool _isColorEnhancing;
+
+    // Background options state
+    private byte[]? _transparentImageBytes;
+    private string _selectedBgColor = "#FFFFFF";
+    private string _customHexColor = string.Empty;
+    private bool _isReprocessing;
+    private bool _showBgOptions;
+    private long _imgVersion;
+    private string? _recolorError;
+
+    private static readonly (string Name, string Hex)[] _bgSwatches =
+    [
+        ("White", "#FFFFFF"),
+        ("Black", "#000000"),
+        ("Transparent", "transparent"),
+        ("Red", "#FF0000"),
+        ("Blue", "#0000FF"),
+        ("Green", "#008000"),
+        ("Gray", "#808080"),
+        ("Pink", "#FFC0CB"),
+        ("Navy", "#000080"),
+        ("Teal", "#008080"),
+    ];
+
+    protected override async Task OnInitializedAsync()
+    {
+        var authState = await AuthState.GetAuthenticationStateAsync();
+        if (!authState.User.IsInRole("SuperAdmin"))
+        {
+            var userIdStr = authState.User.FindFirstValue(System.Security.Claims.ClaimTypes.NameIdentifier);
+            if (int.TryParse(userIdStr, out var uid))
+            {
+                if (!await SubscriptionService.HasFeatureAccessAsync(uid, ArtForgeAI.Models.FeatureAccess.StyleRemix))
+                {
+                    Nav.NavigateTo("/pricing", forceLoad: true);
+                    return;
+                }
+            }
+        }
+    }
+
+    // ── Upload handlers ──
+
+    private async Task HandleStyleRefUpload(InputFileChangeEventArgs e)
+    {
+        var file = e.File;
+        if (file is null || file.Size > 10 * 1024 * 1024) return;
+
+        _isUploading = true;
+        _uploadProgress = 0;
+        StateHasChanged();
+
+        try
+        {
+            using var stream = file.OpenReadStream(10 * 1024 * 1024);
+            _styleRefPath = await ImageStorage.SaveUploadedFileAsync(stream, file.Name);
+            _uploadProgress = 100;
+        }
+        finally
+        {
+            _isUploading = false;
+            StateHasChanged();
+        }
+    }
+
+    private async Task HandleSubjectUpload(InputFileChangeEventArgs e)
+    {
+        var file = e.File;
+        if (file is null || file.Size > 10 * 1024 * 1024) return;
+
+        _isUploading = true;
+        _uploadProgress = 0;
+        StateHasChanged();
+
+        try
+        {
+            using var stream = file.OpenReadStream(10 * 1024 * 1024);
+            _subjectPath = await ImageStorage.SaveUploadedFileAsync(stream, file.Name);
+            _originalSubjectPath = _subjectPath;
+            _uploadProgress = 100;
+        }
+        finally
+        {
+            _isUploading = false;
+            StateHasChanged();
+        }
+    }
+
+    private async Task RemoveStyleRef()
+    {
+        if (!string.IsNullOrEmpty(_styleRefPath))
+        {
+            await ImageStorage.DeleteImageAsync(_styleRefPath);
+            _styleRefPath = null;
+        }
+    }
+
+    private async Task RemoveSubject()
+    {
+        if (!string.IsNullOrEmpty(_subjectPath))
+        {
+            await ImageStorage.DeleteImageAsync(_subjectPath);
+            _subjectPath = null;
+            _originalSubjectPath = null;
+        }
+    }
+
+    // ── Generation ──
+
+    private (byte[] data, string mimeType) ReadImageBytes(string webRelativePath)
+    {
+        var fullPath = ResolveFullPath(webRelativePath);
+        var bytes = File.ReadAllBytes(fullPath);
+        var ext = Path.GetExtension(fullPath).ToLowerInvariant();
+        var mime = ext switch
+        {
+            ".jpg" or ".jpeg" => "image/jpeg",
+            ".png" => "image/png",
+            ".webp" => "image/webp",
+            _ => "image/png"
+        };
+        return (bytes, mime);
+    }
+
+    private async Task<string> AnalyzeStyleReferenceAsync()
+    {
+        var (data, mime) = ReadImageBytes(_styleRefPath!);
+
+        var analysisPrompt = @"You are analyzing a STYLE REFERENCE image. Your job is to extract ONLY the style, aesthetic, and scene elements — NOT the identity or faces of any people in this image.
+
+IMPORTANT: Do NOT describe who the people are, their faces, or their identity. The people in this image will NOT appear in the final output. Only describe the STYLE elements that can be applied to a DIFFERENT person.
+
+Extract the following with extreme precision:
+
+CLOTHING & OUTFIT (for each person visible): List EVERY garment — type (shirt, kurta, saree, lehenga, suit, dress, etc.), color, fabric, texture, pattern, fit, design details (neckline shape, sleeve type, hemline, buttons, embroidery, sequins, prints, pleats, draping, border designs). Include all layers. If multiple people wear different outfits, describe each outfit separately as 'Outfit 1', 'Outfit 2', etc.
+
+ACCESSORIES: ALL jewelry (earrings type/design, necklace/chain, rings, bangles/bracelets, anklets, nose ring, tikka/maang tikka), headwear, eyewear, bags, shoes/footwear type and color, belt, watch, hair accessories, scarves, dupatta/shawl.
+
+HAIR STYLING: Exact style (loose, tied up, braided, curled, straight, wavy), any accessories or flowers in hair. Describe per person if multiple people.
+
+MAKEUP STYLE: Eye shadow colors, eyeliner style, lip color and finish, blush, contouring style, bindi/tikka if present, mehndi/henna if visible.
+
+POSE & BODY LANGUAGE: Exact pose for each person (body angle, arm positions, hand placement, leg stance, head tilt, interaction between people if any).
+
+BACKGROUND & SETTING: Exact location type (studio, outdoor, indoor, palace, garden, street), all objects visible, architecture style, nature elements, floor/ground type, walls, furniture, decorative items, depth.
+
+LIGHTING: Direction (front/side/back/rim/top), quality (soft diffused, hard dramatic, natural, studio flash), color temperature (warm golden, cool blue, neutral), visible light sources, shadow patterns, highlights, any bokeh or glow effects.
+
+COLOR PALETTE: All dominant colors, accent colors, overall warm/cool tone, saturation level, contrast level, color harmony.
+
+COMPOSITION: Camera angle (eye-level, low angle, high angle), framing (close-up, medium shot, full body, 3/4), depth of field (shallow/deep), background blur level, how people are arranged in frame.
+
+ARTISTIC STYLE: Photography genre (portrait, fashion editorial, traditional/cultural, candid, glamour), post-processing style (filters, grain, vintage, HDR, matte, vibrant).
+
+MOOD & ATMOSPHERE: Overall feeling (elegant, dramatic, casual, festive, romantic, royal, modern, traditional, ethereal, bold).
+
+PROPS & OBJECTS: Anything held or present — flowers, fans, instruments, furniture, decorations.
+
+NUMBER OF PEOPLE IN IMAGE: Count exactly how many people appear.
+
+Output a comprehensive structured description. Be extremely specific about colors (use 'deep maroon', 'champagne gold', 'emerald green' not just 'red', 'gold', 'green'). Remember: describe STYLE ONLY, not people's identity/faces.";
+
+        return await GeminiService.AnalyzeImageAsync(data, mime, analysisPrompt);
+    }
+
+    private async Task<string> AnalyzeSubjectAsync()
+    {
+        var (data, mime) = ReadImageBytes(_subjectPath!);
+
+        var analysisPrompt = @"Analyze the people in this photo. For each person, provide:
+
+1. PERSON COUNT: Exactly how many people are in this image?
+2. For EACH person (label as Person 1, Person 2, etc.):
+   - Gender (male/female/child)
+   - Approximate age (baby/toddler/child/teenager/young adult/adult/elderly)
+   - Brief physical description (body type, skin tone, hair color)
+   - Current pose and expression
+
+Be precise and factual. This analysis determines who will appear in the output image.";
+
+        return await GeminiService.AnalyzeImageAsync(data, mime, analysisPrompt);
+    }
+
+    private string BuildInitialPrompt(string styleAnalysis, string subjectAnalysis)
+    {
+        var prompt = $@"You are creating a styled photo. You will take the person(s) from [Reference Image 2] and completely restyle them using the style from [Reference Image 1].
+
+STYLE TO APPLY (from Reference Image 1):
+{styleAnalysis}
+
+SUBJECT INFO (from Reference Image 2):
+{subjectAnalysis}
+
+YOUR TASK — DO BOTH OF THESE:
+
+A) COMPLETELY CHANGE THE STYLE — You MUST change ALL of these to match the Style Analysis above:
+- REMOVE their current clothing entirely and DRESS each person in NEW clothing matching the Style Analysis. This is NOT optional — they MUST wear different clothes matching the reference style. For example if the style shows traditional wedding attire, dress them in traditional wedding attire. If it shows a lehenga and sherwani, dress them in a lehenga and sherwani (gender-appropriate).
+- REPLACE the background completely with the background/setting described in the Style Analysis.
+- CHANGE the lighting to match the Style Analysis (direction, warmth, quality).
+- APPLY the color palette, mood, and artistic style from the Style Analysis.
+- MATCH the composition and camera angle from the Style Analysis.
+- ADD the accessories, jewelry, and ornaments described in the Style Analysis (gender-appropriate — see rules below).
+
+B) KEEP THE PERSON(S) IDENTICAL — While changing the style, preserve these from [Reference Image 2]:
+- FACE: Keep each person's face pixel-perfect identical — same face shape, nose, eyes, eyebrows, lips, jawline, chin, moles, marks.
+- AGE: Keep the same age. Do not age anyone up or down.
+- BODY: Keep the same body type and proportions.
+- SKIN TONE: Keep the exact same skin tone.
+- PERSON COUNT: Output EXACTLY the same number of people as in [Reference Image 2]. Never add people from [Reference Image 1].
+
+GENDER-APPROPRIATE ADAPTATION:
+- If the style shows female attire (saree, lehenga) but the subject is male → dress in male equivalent (sherwani, kurta, suit) in the SAME colors, fabric, and richness level.
+- If the style shows male attire but the subject is female → dress in female equivalent in the SAME colors and richness.
+- Jewelry: Males get male accessories (chain, watch, ring). Females get female jewelry (necklace, earrings, bangles). Never cross-gender jewelry.
+- Children get age-appropriate gender-correct versions of the outfit.
+- Makeup only on female subjects.
+
+IMPORTANT — The output must show the SAME people from [Reference Image 2] but dressed in COMPLETELY DIFFERENT clothing and placed in a COMPLETELY DIFFERENT setting as described in the Style Analysis. Their current clothes from [Reference Image 2] should NOT appear in the output.
+
+OUTPUT: Highest quality, photorealistic detail, sharp facial features, 2:3 portrait aspect ratio.";
+
+        if (_showCustomInstructions && !string.IsNullOrWhiteSpace(_customInstructions))
+        {
+            prompt += $"\n\nADDITIONAL INSTRUCTIONS FROM USER: {_customInstructions.Trim()}";
+        }
+
+        return prompt;
+    }
+
+    private string BuildRefinementPrompt(string refinementText)
+    {
+        var prompt = @"EXACT PERSON PRESERVATION — ABSOLUTE HIGHEST PRIORITY:
+Look at [Reference Image 2]. These are the ORIGINAL SUBJECT(s). Every person MUST be preserved EXACTLY:
+- Face: pixel-perfect identical (shape, nose, eyes, eyebrows, lips, jawline, chin, skin tone, moles, marks)
+- Age: SAME age — do NOT age up or age down anyone
+- Body: SAME proportions, height, and build
+- Skin tone: SAME — do NOT lighten or darken
+- Person count: SAME number of people as [Reference Image 2]
+
+PREVIOUS OUTPUT — [Reference Image 1]:
+This is the result from the previous generation. Keep everything from this image (style, costume, setting, pose, background, lighting) EXCEPT the specific changes requested below.
+
+ORIGINAL SUBJECT — [Reference Image 2]:
+This is the original person(s) who MUST remain identical in the output. ONLY these person(s) should appear.
+
+CHANGE REQUESTED: " + refinementText.Trim() + @"
+
+RULES:
+- Apply ONLY the requested change. Do not alter anything else.
+- NEVER change face, age, body, or skin tone of any person. Only style elements can change.
+- Output must contain ONLY the person(s) from [Reference Image 2]. Do NOT add any other people.
+- The number of people must match [Reference Image 2] exactly.
+
+OUTPUT: Highest quality, photorealistic detail, sharp facial features, same aspect ratio as previous output.";
+
+        return prompt;
+    }
+
+    private async Task<bool> DebitCoins()
+    {
+        var authState2 = await AuthState.GetAuthenticationStateAsync();
+        var uidStr = authState2.User.FindFirstValue(System.Security.Claims.ClaimTypes.NameIdentifier);
+        if (int.TryParse(uidStr, out var userId) && !authState2.User.IsInRole("SuperAdmin"))
+        {
+            if (!await CoinService.DebitCoinsAsync(userId, _coinCost, ArtForgeAI.Models.CoinTransactionType.GenerationSpend, "Style Remix generation"))
+            {
+                _errorMessage = "Insufficient coins. Please purchase more coins.";
+                return false;
+            }
+        }
+        return true;
+    }
+
+    private async Task GenerateStyleRemix()
+    {
+        if (string.IsNullOrEmpty(_styleRefPath) || string.IsNullOrEmpty(_subjectPath)) return;
+
+        if (!await DebitCoins()) return;
+
+        _isGenerating = true;
+        _errorMessage = null;
+        _result = null;
+        _analysisText = null;
+        _subjectAnalysisText = null;
+        _loadingStep = 1;
+        _showBgOptions = false;
+        _transparentImageBytes = null;
+        _recolorError = null;
+        _refinementCount = 0;
+        _refinementText = string.Empty;
+        StateHasChanged();
+
+        try
+        {
+            // Step 1: Analyze both images in parallel
+            Logger.LogInformation("Analyzing style reference and subject images");
+            var styleTask = AnalyzeStyleReferenceAsync();
+            var subjectTask = AnalyzeSubjectAsync();
+            await Task.WhenAll(styleTask, subjectTask);
+            _analysisText = styleTask.Result;
+            _subjectAnalysisText = subjectTask.Result;
+            Logger.LogInformation("Analysis complete — style: {StyleLen} chars, subject: {SubjectLen} chars",
+                _analysisText?.Length ?? 0, _subjectAnalysisText?.Length ?? 0);
+
+            _loadingStep = 2;
+            StateHasChanged();
+
+            // Step 2: Build a tailored prompt from both analyses
+            var prompt = BuildInitialPrompt(_analysisText ?? "", _subjectAnalysisText ?? "");
+            _lastPromptUsed = prompt;
+
+            _loadingStep = 3;
+            StateHasChanged();
+
+            // Step 3: Generate image using the tailored prompt + both reference images
+            var request = new GenerationRequest
+            {
+                Prompt = prompt,
+                Width = 832,
+                Height = 1216,
+                SizeName = "20x30",
+                EnhancePrompt = false,
+                ReferenceImagePaths = [_styleRefPath, _subjectPath],
+                Provider = ImageProvider.Gemini,
+                SkipMultiImageComposition = true
+            };
+
+            _result = await ImageGenService.GenerateImageAsync(request);
+
+            _loadingStep = 4;
+            StateHasChanged();
+            await Task.Delay(300);
+
+            if (!_result.Success)
+            {
+                _errorMessage = _result.ErrorMessage;
+            }
+            else
+            {
+                _currentResultPath = _result.LocalImagePath;
+
+                if (_result.TransparentImagePath is not null)
+                {
+                    _transparentImageBytes = _result.TransparentPngBytes;
+                    _showBgOptions = true;
+                    _selectedBgColor = "#FFFFFF";
+                }
+
+                if (_toast is not null)
+                    _ = _toast.ShowAsync("Style Remix complete!");
+            }
+        }
+        catch (Exception ex)
+        {
+            Logger.LogError(ex, "Style Remix generation failed");
+            _errorMessage = "An unexpected error occurred. Please try again.";
+        }
+        finally
+        {
+            _isGenerating = false;
+            StateHasChanged();
+        }
+    }
+
+    private async Task RefineResult()
+    {
+        if (string.IsNullOrWhiteSpace(_refinementText) || string.IsNullOrEmpty(_currentResultPath) || string.IsNullOrEmpty(_originalSubjectPath)) return;
+
+        if (!await DebitCoins()) return;
+
+        _isGenerating = true;
+        _errorMessage = null;
+        _result = null;
+        _loadingStep = 1;
+        _showBgOptions = false;
+        _transparentImageBytes = null;
+        _recolorError = null;
+        StateHasChanged();
+
+        try
+        {
+            var prompt = BuildRefinementPrompt(_refinementText);
+            _lastPromptUsed = prompt;
+
+            _loadingStep = 2;
+            StateHasChanged();
+
+            var request = new GenerationRequest
+            {
+                Prompt = prompt,
+                Width = 832,
+                Height = 1216,
+                SizeName = "20x30",
+                EnhancePrompt = false,
+                ReferenceImagePaths = [_currentResultPath, _originalSubjectPath],
+                Provider = ImageProvider.Gemini,
+                SkipMultiImageComposition = true
+            };
+
+            _result = await ImageGenService.GenerateImageAsync(request);
+
+            _loadingStep = 3;
+            StateHasChanged();
+            await Task.Delay(300);
+
+            if (!_result.Success)
+            {
+                _errorMessage = _result.ErrorMessage;
+            }
+            else
+            {
+                _refinementCount++;
+                _currentResultPath = _result.LocalImagePath;
+                _refinementText = string.Empty;
+
+                if (_result.TransparentImagePath is not null)
+                {
+                    _transparentImageBytes = _result.TransparentPngBytes;
+                    _showBgOptions = true;
+                    _selectedBgColor = "#FFFFFF";
+                }
+
+                if (_toast is not null)
+                    _ = _toast.ShowAsync($"Refinement #{_refinementCount} complete!");
+            }
+        }
+        catch (Exception ex)
+        {
+            Logger.LogError(ex, "Style Remix refinement failed");
+            _errorMessage = "An unexpected error occurred. Please try again.";
+        }
+        finally
+        {
+            _isGenerating = false;
+            StateHasChanged();
+        }
+    }
+
+    private void StartNew()
+    {
+        _result = null;
+        _errorMessage = null;
+        _showBgOptions = false;
+        _transparentImageBytes = null;
+        _selectedBgColor = "#FFFFFF";
+        _customHexColor = string.Empty;
+        _recolorError = null;
+        _refinementText = string.Empty;
+        _refinementCount = 0;
+        _currentResultPath = null;
+        _lastPromptUsed = null;
+        _analysisText = null;
+        _subjectAnalysisText = null;
+    }
+
+    // ── Download helpers ──
+
+    private Task DownloadPng() => DownloadAs("png");
+    private Task DownloadJpg() => DownloadAs("jpg");
+
+    private async Task DownloadAs(string format)
+    {
+        if (_result?.LocalImagePath is null) return;
+        try
+        {
+            var webPath = await ImageStorage.PrepareHighResDownloadAsync(_result.LocalImagePath, format);
+            var fileName = $"artforge_remix_{_result.GenerationId}.{format}";
+            await JS.InvokeVoidAsync("downloadFile", $"/{webPath}", fileName);
+        }
+        catch (Exception ex)
+        {
+            Logger.LogError(ex, "Style Remix download failed");
+            _errorMessage = "Download failed. Please try again.";
+        }
+    }
+
+    private async Task DownloadTransparent()
+    {
+        if (_transparentImageBytes is null) return;
+        try
+        {
+            var base64 = Convert.ToBase64String(_transparentImageBytes);
+            var fileName = $"artforge_remix_{_result?.GenerationId ?? 0}_transparent.png";
+            await JS.InvokeVoidAsync("downloadFileFromBytes", fileName, "image/png", base64);
+        }
+        catch (Exception ex)
+        {
+            Logger.LogError(ex, "Style Remix transparent download failed");
+            _errorMessage = "Download failed. Please try again.";
+        }
+    }
+
+    // ── Enhancement ──
+
+    private async Task EnhanceImage()
+    {
+        if (_result?.LocalImagePath is null || _isEnhancing) return;
+
+        _isEnhancing = true;
+        _enhanceProgress = 0;
+        _errorMessage = null;
+        StateHasChanged();
+
+        try
+        {
+            var progress = new Progress<int>(pct =>
+            {
+                _enhanceProgress = pct;
+                InvokeAsync(StateHasChanged);
+            });
+
+            var enhancedPath = await ImageEnhancer.EnhanceImageAsync(_result.LocalImagePath, progress);
+            _result.LocalImagePath = enhancedPath;
+            _imgVersion++;
+
+            if (_toast is not null)
+                _ = _toast.ShowAsync("Image enhanced (4x upscale)!");
+        }
+        catch (Exception ex)
+        {
+            Logger.LogError(ex, "Style Remix enhancement failed");
+            _errorMessage = "Enhancement failed. Please try again.";
+        }
+        finally
+        {
+            _isEnhancing = false;
+            StateHasChanged();
+        }
+    }
+
+    private async Task ColorEnhanceImage()
+    {
+        if (_result?.LocalImagePath is null || _isColorEnhancing) return;
+
+        _isColorEnhancing = true;
+        _errorMessage = null;
+        StateHasChanged();
+
+        try
+        {
+            var enhancedPath = await ColorEnhancer.EnhanceColorsAsync(_result.LocalImagePath);
+            _result.LocalImagePath = enhancedPath;
+            _imgVersion++;
+
+            if (_toast is not null)
+                _ = _toast.ShowAsync("Colors enhanced!");
+        }
+        catch (Exception ex)
+        {
+            Logger.LogError(ex, "Style Remix color enhancement failed");
+            _errorMessage = "Color enhancement failed. Please try again.";
+        }
+        finally
+        {
+            _isColorEnhancing = false;
+            StateHasChanged();
+        }
+    }
+
+    // ── Background removal ──
+
+    private string ResolveFullPath(string webRelativePath) =>
+        Path.Combine(Env.WebRootPath, webRelativePath.Replace("/", Path.DirectorySeparatorChar.ToString()));
+
+    private async Task RemoveGeneratedBackground()
+    {
+        if (_result?.LocalImagePath is null || _isReprocessing) return;
+
+        _isReprocessing = true;
+        _recolorError = null;
+        StateHasChanged();
+
+        try
+        {
+            var fullPath = ResolveFullPath(_result.LocalImagePath);
+            var bgResult = await BgRemoval.RemoveBackgroundAsync(fullPath, "#FFFFFF");
+            _transparentImageBytes = bgResult.TransparentPngBytes;
+            _result.LocalImagePath = bgResult.ColoredImagePath;
+            _selectedBgColor = "#FFFFFF";
+            _showBgOptions = true;
+            _imgVersion++;
+        }
+        catch (Exception ex)
+        {
+            Logger.LogError(ex, "Style Remix background removal failed");
+            _recolorError = "Background removal failed. Please try again.";
+        }
+        finally
+        {
+            _isReprocessing = false;
+            StateHasChanged();
+        }
+    }
+
+    private async Task ChangeBackgroundColor(string color)
+    {
+        if (_result is null || _isReprocessing || _transparentImageBytes is null) return;
+
+        _isReprocessing = true;
+        _selectedBgColor = color;
+        _recolorError = null;
+        StateHasChanged();
+
+        try
+        {
+            var newPath = await BgRemoval.RecolorBackgroundFromBytesAsync(_transparentImageBytes, color);
+            _result.LocalImagePath = newPath;
+            _imgVersion++;
+        }
+        catch (Exception ex)
+        {
+            Logger.LogError(ex, "Style Remix recolor failed");
+            _recolorError = "Recolor failed. Please try again.";
+        }
+        finally
+        {
+            _isReprocessing = false;
+            StateHasChanged();
+        }
+    }
+
+    private async Task ApplyCustomHex()
+    {
+        var hex = _customHexColor.Trim();
+        if (string.IsNullOrEmpty(hex)) return;
+
+        if (hex.Length == 6 && !hex.StartsWith('#'))
+            hex = "#" + hex;
+
+        if (System.Text.RegularExpressions.Regex.IsMatch(hex, @"^#[0-9a-fA-F]{6}$"))
+        {
+            await ChangeBackgroundColor(hex);
+        }
+        else
+        {
+            _errorMessage = "Invalid hex color. Use format #RRGGBB.";
+            StateHasChanged();
+        }
+    }
+}

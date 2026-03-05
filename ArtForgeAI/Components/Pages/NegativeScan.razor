@@ -1,0 +1,630 @@
+@page "/negative-scan"
+@rendermode InteractiveServer
+@attribute [Authorize]
+@inject IImageGenerationService ImageGenService
+@inject IImageStorageService ImageStorage
+@inject IJSRuntime JS
+@inject IWebHostEnvironment Env
+@inject ILogger<NegativeScan> Logger
+@inject ISubscriptionService SubscriptionService
+@inject ICoinService CoinService
+@inject AuthenticationStateProvider AuthState
+@inject NavigationManager Nav
+@implements IDisposable
+
+<PageTitle>ArtForge AI - Negative Scan</PageTitle>
+
+<div class="page-header page-header-lg">
+    <h2>Negative Scan</h2>
+    <p>Convert photo negatives and slides to vivid positive images</p>
+</div>
+
+<div class="create-layout">
+    @* ── Left column ── *@
+    <div class="create-left">
+        <div class="card">
+            <div class="card-body">
+
+                @* Upload / Crop area *@
+                <div class="mb-3">
+                    <label class="form-label">Upload Negative / Slide</label>
+                    @if (!string.IsNullOrEmpty(_uploadedPath))
+                    {
+                        <div style="position: relative;">
+                            <button class="ref-thumb-remove" @onclick="RemovePhoto" disabled="@_isProcessing"
+                                    style="position:absolute;top:4px;right:4px;z-index:20;">&#10005;</button>
+                            <div id="nsCropArea" class="pp-crop-inline"></div>
+                        </div>
+                        <p style="font-size: 0.72rem; color: var(--text-muted); margin: 0.35rem 0 0 0;">
+                            Drag to move, resize from corners/edges. Free aspect ratio.
+                        </p>
+                    }
+                    else
+                    {
+                        <label class="upload-area upload-area-compact @(_isUploading ? "disabled" : "")">
+                            <span class="upload-icon">&#127902;</span>
+                            <span>Upload a photo negative or slide</span>
+                            <span style="font-size: 0.7rem; color: var(--text-muted); margin-left: 0.5rem;">JPG, PNG up to 10MB</span>
+                            <InputFile OnChange="HandleFileUpload" accept="image/*;capture=camera" style="display:none" disabled="@(_isProcessing || _isUploading)" />
+                        </label>
+                    }
+                    @if (_isUploading)
+                    {
+                        <div class="upload-progress-bar" style="margin-top: 0.35rem;">
+                            <div class="upload-progress-fill" style="width: 50%"></div>
+                            <span class="upload-progress-text">Uploading...</span>
+                        </div>
+                    }
+                </div>
+
+                @if (!string.IsNullOrEmpty(_uploadedPath))
+                {
+                    <hr style="margin: 0.5rem 0; border-color: var(--border-color);" />
+
+                    @* Negative Type Selector *@
+                    <div class="mb-3">
+                        <label class="form-label">Negative Type</label>
+                        <div class="ns-type-pills">
+                            <button class="ns-pill @(_negativeType == "color" ? "selected" : "")"
+                                    @onclick='() => _negativeType = "color"' disabled="@_isProcessing">
+                                &#127912; Color (C-41)
+                            </button>
+                            <button class="ns-pill @(_negativeType == "bw" ? "selected" : "")"
+                                    @onclick='() => _negativeType = "bw"' disabled="@_isProcessing">
+                                &#9898; B&W
+                            </button>
+                            <button class="ns-pill @(_negativeType == "slide" ? "selected" : "")"
+                                    @onclick='() => _negativeType = "slide"' disabled="@_isProcessing">
+                                &#127774; Slide (E-6)
+                            </button>
+                        </div>
+                    </div>
+
+                    @* Frame Style Selector *@
+                    <div class="mb-3">
+                        <label class="form-label">Frame Style</label>
+                        <div class="ns-type-pills">
+                            <button class="ns-pill @(_frameStyle == "classic" ? "selected" : "")"
+                                    @onclick='() => _frameStyle = "classic"' disabled="@_isProcessing">
+                                &#128444; Classic
+                            </button>
+                            <button class="ns-pill @(_frameStyle == "polaroid" ? "selected" : "")"
+                                    @onclick='() => _frameStyle = "polaroid"' disabled="@_isProcessing">
+                                &#128247; Polaroid
+                            </button>
+                            <button class="ns-pill @(_frameStyle == "modern" ? "selected" : "")"
+                                    @onclick='() => _frameStyle = "modern"' disabled="@_isProcessing">
+                                &#9632; Modern
+                            </button>
+                            <button class="ns-pill @(_frameStyle == "none" ? "selected" : "")"
+                                    @onclick='() => _frameStyle = "none"' disabled="@_isProcessing">
+                                &#10006; None
+                            </button>
+                        </div>
+                    </div>
+
+                    <button class="btn-primary-gradient" style="width:100%;margin-top:0.5rem;"
+                            @onclick="ConvertNegative" disabled="@_isProcessing">
+                        &#10024; Convert to Positive
+                    </button>
+                }
+            </div>
+        </div>
+
+        @if (!string.IsNullOrEmpty(_errorMessage))
+        {
+            <div class="card" style="margin-top: 0.75rem; border-left: 3px solid var(--danger);">
+                <div class="card-body" style="padding: 0.75rem 1rem; color: var(--danger); font-size: 0.85rem;">
+                    <strong>Error:</strong> @_errorMessage
+                </div>
+            </div>
+        }
+    </div>
+
+    @* ── Right column: result ── *@
+    <div class="create-right">
+        @* Hidden canvas for crop operations — always present *@
+        <canvas id="nsCropCanvas" style="display:none;"></canvas>
+
+        @if (_resultReady)
+        {
+            <div class="right-panel-card">
+                @if (_aiEnhanced && !string.IsNullOrEmpty(_enhancedImagePath))
+                {
+                    @* ── Comparison view: Before (converted) / After (AI enhanced) ── *@
+                    <div class="right-panel-label">AI Enhanced</div>
+                    <div class="ns-comparison-grid">
+                        <div class="ns-compare-item">
+                            <span class="ns-compare-label">Before</span>
+                            <img src="@_convertedDataUrl" alt="Converted"
+                                 style="max-width:100%;max-height:400px;object-fit:contain;" />
+                        </div>
+                        <div class="ns-compare-item">
+                            <span class="ns-compare-label">After</span>
+                            <img src="@_enhancedDataUrl" alt="Enhanced"
+                                 style="max-width:100%;max-height:400px;object-fit:contain;" />
+                        </div>
+                    </div>
+                    <div class="pp-download-bar" style="margin-top:0.5rem;flex-wrap:wrap;gap:0.4rem;">
+                        <button class="btn-primary-gradient" style="font-size: 0.85rem; padding: 0.4rem 0.85rem;"
+                                @onclick="DownloadEnhanced" disabled="@_isDownloading">
+                            &#128424; Enhanced PNG
+                        </button>
+                        <button class="btn-secondary" style="font-size: 0.85rem; padding: 0.4rem 0.85rem;"
+                                @onclick='() => DownloadResult("png")' disabled="@_isDownloading">
+                            Original PNG
+                        </button>
+                        <button class="btn-secondary" style="font-size: 0.85rem; padding: 0.4rem 0.85rem;"
+                                @onclick='() => DownloadResult("jpg")' disabled="@_isDownloading">
+                            Original JPG
+                        </button>
+                        <button class="btn-secondary" style="font-size: 0.85rem; padding: 0.4rem 0.85rem;"
+                                @onclick='() => Download4x("enhanced")' disabled="@_isDownloading">
+                            &#128200; Enhanced 4x
+                        </button>
+                        <button class="btn-secondary" style="font-size: 0.85rem; padding: 0.4rem 0.85rem;"
+                                @onclick='() => Download4x("original")' disabled="@_isDownloading">
+                            &#128200; Original 4x
+                        </button>
+                    </div>
+                    @if (_isDownloading)
+                    {
+                        <div class="upload-progress-bar" style="margin-top: 0.5rem;">
+                            <div class="upload-progress-fill" style="width: @(_downloadProgress)%"></div>
+                            <span class="upload-progress-text">@_downloadStatus @(_downloadProgress)%</span>
+                        </div>
+                    }
+                }
+                else
+                {
+                    @* ── AI Converted result ── *@
+                    <div class="right-panel-label">Converted Positive</div>
+                    <div class="ns-result-container">
+                        @if (!string.IsNullOrEmpty(_convertedDataUrl))
+                        {
+                            <img src="@_convertedDataUrl" alt="Converted" style="max-width:100%;border-radius:var(--radius-sm);" />
+                        }
+                    </div>
+
+                    <div class="pp-download-bar">
+                        <button class="btn-primary-gradient" style="font-size: 0.85rem; padding: 0.4rem 0.85rem;"
+                                @onclick='() => DownloadResult("png")' disabled="@_isDownloading">
+                            &#128424; PNG
+                        </button>
+                        <button class="btn-secondary" style="font-size: 0.85rem; padding: 0.4rem 0.85rem;"
+                                @onclick='() => DownloadResult("jpg")' disabled="@_isDownloading">
+                            JPG
+                        </button>
+                        <button class="btn-secondary" style="font-size: 0.85rem; padding: 0.4rem 0.85rem;"
+                                @onclick='() => Download4x("original")' disabled="@_isDownloading">
+                            &#128200; Download 4x
+                        </button>
+                    </div>
+                    @if (_isDownloading)
+                    {
+                        <div class="upload-progress-bar" style="margin-top: 0.5rem;">
+                            <div class="upload-progress-fill" style="width: @(_downloadProgress)%"></div>
+                            <span class="upload-progress-text">@_downloadStatus @(_downloadProgress)%</span>
+                        </div>
+                    }
+
+                    <hr style="margin: 0.75rem 0; border-color: var(--border-color);" />
+                    <button class="btn-primary-gradient" style="width:100%;font-size:0.85rem;"
+                            @onclick="AiEnhance" disabled="@_isProcessing">
+                        &#10024; AI Enhance (+3 coins)
+                    </button>
+                    <p style="font-size:0.7rem;color:var(--text-muted);margin-top:0.25rem;">
+                        Further restore clarity, remove grain/dust/scratches, preserve facial features
+                    </p>
+                }
+            </div>
+        }
+    </div>
+</div>
+
+@* ── Processing overlay ── *@
+@if (_isProcessing)
+{
+    <div class="pp-processing-overlay">
+        <div class="pp-processing-modal">
+            <div class="processing-spinner" style="width:36px;height:36px;margin:0 auto 1rem;"></div>
+            <p style="margin:0;font-size:0.95rem;color:var(--text-primary);">@_processingStatus</p>
+        </div>
+    </div>
+}
+
+@code {
+    // ── State ──
+    private string? _uploadedPath;
+    private bool _isUploading;
+    private bool _isProcessing;
+    private string _processingStatus = "";
+    private string? _errorMessage;
+
+    private string _negativeType = "color";
+    private string _frameStyle = "classic";
+    private bool _resultReady;
+
+    // AI enhancement
+    private bool _aiEnhanced;
+    private string? _enhancedImagePath;
+    private string? _convertedDataUrl;   // saved data URL of converted positive for comparison view
+    private string? _enhancedDataUrl;    // saved data URL of AI enhanced image
+    private string? _convertedFilePath;  // server-side saved converted file for 4x download
+
+    // Download 4x state
+    private bool _isDownloading;
+    private int _downloadProgress;
+    private string _downloadStatus = "";
+
+    // ── Lifecycle ──
+
+    protected override async Task OnInitializedAsync()
+    {
+        var authState = await AuthState.GetAuthenticationStateAsync();
+        if (!authState.User.IsInRole("SuperAdmin"))
+        {
+            var userIdStr = authState.User.FindFirstValue(System.Security.Claims.ClaimTypes.NameIdentifier);
+            if (int.TryParse(userIdStr, out var uid))
+            {
+                if (!await SubscriptionService.HasFeatureAccessAsync(uid, ArtForgeAI.Models.FeatureAccess.NegativeScan))
+                {
+                    Nav.NavigateTo("/pricing", forceLoad: true);
+                    return;
+                }
+            }
+        }
+    }
+
+    public void Dispose()
+    {
+        try { JS.InvokeVoidAsync("negativeScan.dispose"); } catch { }
+    }
+
+    // ── Upload ──
+
+    private async Task HandleFileUpload(InputFileChangeEventArgs e)
+    {
+        _isUploading = true;
+        _errorMessage = null;
+        StateHasChanged();
+
+        try
+        {
+            var file = e.File;
+            if (file.Size > 10 * 1024 * 1024)
+            {
+                _errorMessage = "File size must be under 10MB.";
+                return;
+            }
+
+            using var stream = file.OpenReadStream(10 * 1024 * 1024);
+            _uploadedPath = await ImageStorage.SaveUploadedFileAsync(stream, file.Name);
+            _resultReady = false;
+            _aiEnhanced = false;
+            _enhancedImagePath = null;
+        }
+        catch (Exception ex)
+        {
+            Logger.LogError(ex, "Upload failed");
+            _errorMessage = "Upload failed. Please try again.";
+            return;
+        }
+        finally
+        {
+            _isUploading = false;
+            StateHasChanged();
+        }
+
+        // Init crop tool
+        if (!string.IsNullOrEmpty(_uploadedPath))
+        {
+            await Task.Delay(150);
+            try
+            {
+                var fullPath = ResolveFullPath(_uploadedPath);
+                var imageBytes = await File.ReadAllBytesAsync(fullPath);
+                var ext = _uploadedPath.EndsWith(".png", StringComparison.OrdinalIgnoreCase) ? "png" : "jpeg";
+                var dataUrl = $"data:image/{ext};base64," + Convert.ToBase64String(imageBytes);
+                await JS.InvokeVoidAsync("negativeScan.initCropTool", "nsCropArea", dataUrl);
+            }
+            catch (Exception jsEx)
+            {
+                Logger.LogWarning(jsEx, "Crop tool init failed");
+            }
+        }
+    }
+
+    // ── Convert (canvas-based, no AI — preserves original pixels faithfully) ──
+
+    private async Task ConvertNegative()
+    {
+        if (string.IsNullOrEmpty(_uploadedPath)) return;
+
+        // Debit coins
+        var authStateC = await AuthState.GetAuthenticationStateAsync();
+        var uidStrC = authStateC.User.FindFirstValue(System.Security.Claims.ClaimTypes.NameIdentifier);
+        if (int.TryParse(uidStrC, out var userIdC) && !authStateC.User.IsInRole("SuperAdmin"))
+        {
+            var cost = ArtForgeAI.Models.FeatureAccess.GetCost("NegativeScan");
+            if (!await CoinService.DebitCoinsAsync(userIdC, cost, ArtForgeAI.Models.CoinTransactionType.GenerationSpend, "Negative Scan conversion"))
+            {
+                _errorMessage = "Insufficient coins. Please top up to continue.";
+                StateHasChanged();
+                return;
+            }
+        }
+
+        _isProcessing = true;
+        _processingStatus = "Converting negative to positive...";
+        _errorMessage = null;
+        _aiEnhanced = false;
+        _enhancedImagePath = null;
+        _convertedDataUrl = null;
+        _enhancedDataUrl = null;
+        StateHasChanged();
+
+        try
+        {
+            // Canvas-based inversion — faithful pixel conversion, no AI
+            await JS.InvokeAsync<object>("negativeScan.cropAndConvert", "nsCropCanvas", _negativeType, _frameStyle);
+
+            // Get the result
+            var resultDataUrl = await JS.InvokeAsync<string>("negativeScan.getResultDataUrl", "nsCropCanvas");
+            if (string.IsNullOrEmpty(resultDataUrl))
+            {
+                _errorMessage = "Could not process image.";
+                _resultReady = false;
+                return;
+            }
+
+            _convertedDataUrl = resultDataUrl;
+
+            // Save server-side for 4x download
+            var base64 = resultDataUrl[(resultDataUrl.IndexOf(",", StringComparison.Ordinal) + 1)..];
+            var bytes = Convert.FromBase64String(base64);
+            if (!string.IsNullOrEmpty(_convertedFilePath))
+                try { await ImageStorage.DeleteImageAsync(_convertedFilePath); } catch { }
+            _convertedFilePath = await ImageStorage.SaveImageFromBytesAsync(
+                BinaryData.FromBytes(bytes),
+                $"ns_conv_{Guid.NewGuid().ToString("N")[..8]}.png");
+
+            _resultReady = true;
+        }
+        catch (Exception ex)
+        {
+            Logger.LogError(ex, "Conversion failed");
+            _errorMessage = "Conversion failed: " + ex.Message;
+            _resultReady = false;
+        }
+        finally
+        {
+            _isProcessing = false;
+            _processingStatus = "";
+            StateHasChanged();
+        }
+    }
+
+    // ── AI Enhancement ──
+
+    private async Task AiEnhance()
+    {
+        if (!_resultReady) return;
+
+        // Debit 3 additional coins
+        var authStateC = await AuthState.GetAuthenticationStateAsync();
+        var uidStrC = authStateC.User.FindFirstValue(System.Security.Claims.ClaimTypes.NameIdentifier);
+        if (int.TryParse(uidStrC, out var userIdC) && !authStateC.User.IsInRole("SuperAdmin"))
+        {
+            if (!await CoinService.DebitCoinsAsync(userIdC, 3, ArtForgeAI.Models.CoinTransactionType.GenerationSpend, "Negative Scan AI enhancement"))
+            {
+                _errorMessage = "Insufficient coins (3 required). Please top up.";
+                StateHasChanged();
+                return;
+            }
+        }
+
+        _isProcessing = true;
+        _processingStatus = "Preparing image for AI enhancement...";
+        _errorMessage = null;
+        StateHasChanged();
+
+        try
+        {
+            if (string.IsNullOrEmpty(_convertedFilePath))
+            {
+                _errorMessage = "No converted image to enhance. Convert first.";
+                return;
+            }
+
+            var tempPath = _convertedFilePath;
+
+            _processingStatus = "AI enhancing (this may take a moment)...";
+            StateHasChanged();
+
+            // Send to Gemini for enhancement
+            var prompt = "Enhance and restore this photograph converted from a film negative. " +
+                         "Preserve exact facial features, face structure, and identity of all people. " +
+                         "Improve clarity and sharpness. Remove any remaining film grain, dust spots, and scratches. " +
+                         "Make colors more vivid and natural. Improve contrast and dynamic range. " +
+                         "Make it look like a high-quality modern digital photograph while keeping the original scene exactly the same. " +
+                         "Do NOT change the composition, add or remove any objects or people." +
+                         ArtForgeAI.Models.StylePreset.FacialIdentitySuffix;
+
+            var request = new ArtForgeAI.Models.GenerationRequest
+            {
+                Prompt = prompt,
+                ReferenceImagePaths = [tempPath],
+                Provider = ArtForgeAI.Models.ImageProvider.Gemini,
+                EnhancePrompt = false,
+                Width = 1024,
+                Height = 1024,
+                UserId = uidStrC ?? "default"
+            };
+
+            var result = await ImageGenService.GenerateImageAsync(request);
+
+            if (result.Success && !string.IsNullOrEmpty(result.LocalImagePath))
+            {
+                _enhancedImagePath = result.LocalImagePath;
+
+                // Read enhanced image as data URL
+                var enhancedFullPath = ResolveFullPath(result.LocalImagePath);
+                var enhancedBytes = await File.ReadAllBytesAsync(enhancedFullPath);
+                _enhancedDataUrl = "data:image/png;base64," + Convert.ToBase64String(enhancedBytes);
+
+                // Switch to comparison view (re-creates DOM with new canvas elements)
+                _aiEnhanced = true;
+                StateHasChanged();
+                await Task.Delay(150);
+
+                // Render both canvases in the new comparison DOM
+                await JS.InvokeVoidAsync("negativeScan.displayEnhancedImage", "nsResultCanvas", _convertedDataUrl);
+                await JS.InvokeVoidAsync("negativeScan.displayEnhancedImage", "nsEnhancedCanvas", _enhancedDataUrl);
+            }
+            else
+            {
+                _errorMessage = "AI enhancement failed: " + (result.ErrorMessage ?? "Unknown error");
+            }
+        }
+        catch (Exception ex)
+        {
+            Logger.LogError(ex, "AI enhancement failed");
+            _errorMessage = "AI enhancement failed: " + ex.Message;
+        }
+        finally
+        {
+            _isProcessing = false;
+            _processingStatus = "";
+            StateHasChanged();
+        }
+    }
+
+    // ── Downloads ──
+
+    private async Task DownloadResult(string format)
+    {
+        try
+        {
+            var fileName = "negative_scan_converted." + format;
+            if (!string.IsNullOrEmpty(_convertedDataUrl))
+                await JS.InvokeVoidAsync("negativeScan.downloadFromDataUrl", _convertedDataUrl, fileName);
+        }
+        catch (Exception ex) { Logger.LogError(ex, "Download failed"); _errorMessage = "Download failed."; }
+    }
+
+    private async Task DownloadEnhanced()
+    {
+        try
+        {
+            if (!string.IsNullOrEmpty(_enhancedDataUrl))
+                await JS.InvokeVoidAsync("negativeScan.downloadFromDataUrl", _enhancedDataUrl, "negative_scan_enhanced.png");
+        }
+        catch (Exception ex) { Logger.LogError(ex, "Download failed"); _errorMessage = "Download failed."; }
+    }
+
+    // ── Download 4x (server-side upscale) ──
+
+    private async Task Download4x(string source)
+    {
+        _isDownloading = true;
+        _downloadProgress = 10;
+        _downloadStatus = "Preparing image...";
+        _errorMessage = null;
+        StateHasChanged();
+
+        try
+        {
+            // Use server-side saved files when available (best quality)
+            string? sourcePath;
+            string filePrefix;
+            if (source == "enhanced" && !string.IsNullOrEmpty(_enhancedImagePath))
+            {
+                sourcePath = _enhancedImagePath;
+                filePrefix = "negative_scan_enhanced_4x";
+            }
+            else if (!string.IsNullOrEmpty(_convertedFilePath))
+            {
+                sourcePath = _convertedFilePath;
+                filePrefix = "negative_scan_converted_4x";
+            }
+            else
+            {
+                // Fallback: save from data URL
+                var dataUrl = _convertedDataUrl;
+                if (string.IsNullOrEmpty(dataUrl))
+                    dataUrl = await JS.InvokeAsync<string>("negativeScan.getResultDataUrl", "nsResultCanvas");
+                if (string.IsNullOrEmpty(dataUrl))
+                {
+                    _errorMessage = "Could not read image for 4x download.";
+                    return;
+                }
+                var b64 = dataUrl[(dataUrl.IndexOf(",", StringComparison.Ordinal) + 1)..];
+                var bytes = Convert.FromBase64String(b64);
+                sourcePath = await ImageStorage.SaveImageFromBytesAsync(
+                    BinaryData.FromBytes(bytes),
+                    $"ns_4x_{Guid.NewGuid().ToString("N")[..8]}.png");
+                filePrefix = "negative_scan_converted_4x";
+            }
+
+            _downloadProgress = 30;
+            _downloadStatus = "Upscaling 4x...";
+            StateHasChanged();
+
+            // Upscale using PrepareHighResDownloadAsync
+            var webPath = await ImageStorage.PrepareHighResDownloadAsync(sourcePath, "png");
+
+            _downloadProgress = 85;
+            _downloadStatus = "Starting download...";
+            StateHasChanged();
+
+            // Trigger download
+            await JS.InvokeVoidAsync("downloadFile", $"/{webPath}", $"{filePrefix}.png");
+
+            _downloadProgress = 100;
+            _downloadStatus = "Done!";
+            StateHasChanged();
+
+            await Task.Delay(500);
+        }
+        catch (Exception ex)
+        {
+            Logger.LogError(ex, "4x download failed");
+            _errorMessage = "4x download failed: " + ex.Message;
+        }
+        finally
+        {
+            _isDownloading = false;
+            _downloadProgress = 0;
+            _downloadStatus = "";
+            StateHasChanged();
+        }
+    }
+
+    // ── Remove photo ──
+
+    private async Task RemovePhoto()
+    {
+        try { await JS.InvokeVoidAsync("negativeScan.disposeCropTool"); } catch { }
+
+        if (!string.IsNullOrEmpty(_uploadedPath))
+            await ImageStorage.DeleteImageAsync(_uploadedPath);
+
+        if (!string.IsNullOrEmpty(_convertedFilePath))
+            try { await ImageStorage.DeleteImageAsync(_convertedFilePath); } catch { }
+
+        _uploadedPath = null;
+        _resultReady = false;
+        _errorMessage = null;
+        _aiEnhanced = false;
+        _enhancedImagePath = null;
+        _convertedDataUrl = null;
+        _enhancedDataUrl = null;
+        _convertedFilePath = null;
+    }
+
+    // ── Helpers ──
+
+    private string ResolveFullPath(string webRelativePath) =>
+        System.IO.Path.Combine(Env.WebRootPath, webRelativePath.Replace("/", System.IO.Path.DirectorySeparatorChar.ToString()));
+}

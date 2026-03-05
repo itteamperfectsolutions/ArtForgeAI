@@ -1,22 +1,30 @@
 @page "/mosaic-poster"
 @rendermode InteractiveServer
+@attribute [Authorize]
 @inject IImageStorageService ImageStorage
 @inject IJSRuntime JS
 @inject ILogger<MosaicPoster> Logger
+@inject ISubscriptionService SubscriptionService
+@inject ICoinService CoinService
+@inject AuthenticationStateProvider AuthState
+@inject NavigationManager Nav
+@inject IImageEnhancerService ImageEnhancer
+@inject IColorEnhancementService ColorEnhancer
+@inject IWebHostEnvironment Env
 @implements IDisposable
 
 <PageTitle>ArtForge AI - Mosaic Poster</PageTitle>
 
-<div class="page-header" style="margin-bottom: 0.5rem;">
-    <h2 style="font-size:1.3rem;">Mosaic Poster</h2>
-    <p style="font-size:0.82rem;">Create a stunning mosaic poster with your images</p>
+<div class="page-header">
+    <h2>Mosaic Poster</h2>
+    <p>Create a stunning mosaic poster with your images</p>
 </div>
 
 <div class="create-layout">
     @* ── Left column: controls ── *@
     <div class="create-left">
         <div class="card">
-            <div class="card-body" style="padding: 1rem 1.5rem;">
+            <div class="card-body">
 
                 @* Hidden plain HTML file inputs — no Blazor InputFile *@
                 <input type="file" id="mosaicMainInput" accept=".jpg,.jpeg,.png,.webp,.gif" style="display:none;" />
@@ -257,6 +265,32 @@
                     <button class="btn-primary-gradient" @onclick="ExportPng" disabled="@_isProcessing">
                         &#11015; Download PNG
                     </button>
+                    @if (ImageEnhancer.IsAvailable)
+                    {
+                        <button class="btn-enhance" @onclick="EnhanceAndDownload" disabled="@(_isEnhancing || _isProcessing)">
+                            @if (_isEnhancing)
+                            {
+                                <span>Enhancing...</span>
+                            }
+                            else
+                            {
+                                <span>&#9889; Enhance 4x</span>
+                            }
+                        </button>
+                    }
+                    @*@if (ColorEnhancer.IsAvailable)
+                    {
+                        <button class="btn-color-enhance" @onclick="ColorEnhanceAndDownload" disabled="@(_isColorEnhancing || _isProcessing)">
+                            @if (_isColorEnhancing)
+                            {
+                                <span>Enhancing...</span>
+                            }
+                            else
+                            {
+                                <span>&#127912; Enhance Colors</span>
+                            }
+                        </button>
+                    }*@
                     <button class="btn-secondary" @onclick="ExportZip" disabled="@_isProcessing">
                         &#128230; Download BG ZIP
                     </button>
@@ -264,6 +298,13 @@
                         &#128196; Metadata JSON
                     </button>
                 </div>
+                @if (_isEnhancing)
+                {
+                    <div class="enhance-progress-bar">
+                        <div class="enhance-progress-fill" style="width: @(_enhanceProgress)%"></div>
+                        <span class="enhance-progress-text">@(_enhanceProgress)%</span>
+                    </div>
+                }
             </div>
         }
         else
@@ -294,12 +335,32 @@
     private string _selectedLayout = "grid";
     private bool _isCanvasReady;
     private bool _isProcessing;
+    private bool _isEnhancing;
+    private int _enhanceProgress;
+    private bool _isColorEnhancing;
     private string? _errorMessage;
     private Toast? _toast;
     private bool _pendingInit;
 
     private MosaicSettings _settings = new();
     private DotNetObjectReference<MosaicPoster>? _dotNetRef;
+
+    protected override async Task OnInitializedAsync()
+    {
+        var authState = await AuthState.GetAuthenticationStateAsync();
+        if (!authState.User.IsInRole("SuperAdmin"))
+        {
+            var userIdStr = authState.User.FindFirstValue(System.Security.Claims.ClaimTypes.NameIdentifier);
+            if (int.TryParse(userIdStr, out var uid))
+            {
+                if (!await SubscriptionService.HasFeatureAccessAsync(uid, ArtForgeAI.Models.FeatureAccess.MosaicPoster))
+                {
+                    Nav.NavigateTo("/pricing", forceLoad: true);
+                    return;
+                }
+            }
+        }
+    }
 
     protected override async Task OnAfterRenderAsync(bool firstRender)
     {
@@ -693,6 +754,20 @@
     private async Task ExportPng()
     {
         if (!_isCanvasReady || _isProcessing) return;
+
+        // Debit coins for export
+        var authState2 = await AuthState.GetAuthenticationStateAsync();
+        var uidStr = authState2.User.FindFirstValue(System.Security.Claims.ClaimTypes.NameIdentifier);
+        if (int.TryParse(uidStr, out var userId2) && !authState2.User.IsInRole("SuperAdmin"))
+        {
+            var cost = ArtForgeAI.Models.FeatureAccess.GetCost("MosaicPoster");
+            if (!await CoinService.DebitCoinsAsync(userId2, cost, ArtForgeAI.Models.CoinTransactionType.GenerationSpend, "Mosaic Poster export"))
+            {
+                _errorMessage = "Insufficient coins. Please purchase more coins.";
+                return;
+            }
+        }
+
         _isProcessing = true;
         StateHasChanged();
 
@@ -779,6 +854,105 @@
         finally
         {
             _isProcessing = false;
+            StateHasChanged();
+        }
+    }
+
+    private async Task EnhanceAndDownload()
+    {
+        if (!_isCanvasReady || _isEnhancing) return;
+
+        _isEnhancing = true;
+        _enhanceProgress = 0;
+        _errorMessage = null;
+        StateHasChanged();
+
+        try
+        {
+            var dataUrl = await JS.InvokeAsync<string>("mosaicPoster.exportComposite");
+            if (string.IsNullOrEmpty(dataUrl)) return;
+
+            var base64 = dataUrl.Substring(dataUrl.IndexOf(",") + 1);
+            var imageBytes = Convert.FromBase64String(base64);
+
+            var outputDir = Path.Combine(Env.WebRootPath, "generated");
+            Directory.CreateDirectory(outputDir);
+            var tempPath = Path.Combine(outputDir, $"mosaic_temp_{Guid.NewGuid():N}.png");
+            await File.WriteAllBytesAsync(tempPath, imageBytes);
+
+            var progress = new Progress<int>(pct =>
+            {
+                _enhanceProgress = pct;
+                InvokeAsync(StateHasChanged);
+            });
+
+            var enhancedPath = await ImageEnhancer.EnhanceImageAsync(tempPath, progress);
+            var enhancedFullPath = Path.IsPathRooted(enhancedPath) ? enhancedPath : Path.Combine(Env.WebRootPath, enhancedPath.Replace('/', Path.DirectorySeparatorChar));
+            var enhancedBytes = await File.ReadAllBytesAsync(enhancedFullPath);
+            var enhancedBase64 = Convert.ToBase64String(enhancedBytes);
+            var fileName = $"mosaic_poster_4x_{DateTime.Now:yyyyMMdd_HHmmss}.png";
+            await JS.InvokeVoidAsync("downloadFileFromBytes", fileName, "image/png", enhancedBase64);
+
+            // Cleanup temp files
+            try { File.Delete(tempPath); } catch { }
+
+            if (_toast is not null)
+                _ = _toast.ShowAsync("Enhanced 4x PNG downloaded!");
+        }
+        catch (Exception ex)
+        {
+            Logger.LogError(ex, "Mosaic 4x enhance failed");
+            _errorMessage = "Enhancement failed. Please try again.";
+        }
+        finally
+        {
+            _isEnhancing = false;
+            StateHasChanged();
+        }
+    }
+
+    private async Task ColorEnhanceAndDownload()
+    {
+        if (!_isCanvasReady || _isColorEnhancing) return;
+
+        _isColorEnhancing = true;
+        _errorMessage = null;
+        StateHasChanged();
+
+        try
+        {
+            var dataUrl = await JS.InvokeAsync<string>("mosaicPoster.exportComposite");
+            if (string.IsNullOrEmpty(dataUrl)) return;
+
+            var base64 = dataUrl.Substring(dataUrl.IndexOf(",") + 1);
+            var imageBytes = Convert.FromBase64String(base64);
+
+            var outputDir = Path.Combine(Env.WebRootPath, "generated");
+            Directory.CreateDirectory(outputDir);
+            var tempPath = Path.Combine(outputDir, $"mosaic_temp_{Guid.NewGuid():N}.png");
+            await File.WriteAllBytesAsync(tempPath, imageBytes);
+
+            var enhancedPath = await ColorEnhancer.EnhanceColorsAsync(tempPath);
+            var enhancedFullPath = Path.IsPathRooted(enhancedPath) ? enhancedPath : Path.Combine(Env.WebRootPath, enhancedPath.Replace('/', Path.DirectorySeparatorChar));
+            var enhancedBytes = await File.ReadAllBytesAsync(enhancedFullPath);
+            var enhancedBase64 = Convert.ToBase64String(enhancedBytes);
+            var fileName = $"mosaic_poster_color_{DateTime.Now:yyyyMMdd_HHmmss}.png";
+            await JS.InvokeVoidAsync("downloadFileFromBytes", fileName, "image/png", enhancedBase64);
+
+            // Cleanup temp files
+            try { File.Delete(tempPath); } catch { }
+
+            if (_toast is not null)
+                _ = _toast.ShowAsync("Color-enhanced PNG downloaded!");
+        }
+        catch (Exception ex)
+        {
+            Logger.LogError(ex, "Mosaic color enhance failed");
+            _errorMessage = "Color enhancement failed. Please try again.";
+        }
+        finally
+        {
+            _isColorEnhancing = false;
             StateHasChanged();
         }
     }

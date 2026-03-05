@@ -50,14 +50,15 @@ public class PhotoExpandService
             _logger.LogInformation("Expand: {SrcW}x{SrcH} → {TgtW}x{TgtH} (wrap={WrapPx}px, total={TotalW}x{TotalH}), pos=({PosX},{PosY})",
                 srcW, srcH, tgtW, tgtH, wrapPx, totalW, totalH, request.PosX, request.PosY);
 
-            // 1. Best-fit upscale source to 96% of the output size
+            // 1. Best-fit upscale source to 96% of the TARGET area (not including wrap)
+            //    This ensures the source image stays within the printable area
             status?.Report("Preparing image for AI...");
             int outW = wrapPx > 0 ? totalW : tgtW;
             int outH = wrapPx > 0 ? totalH : tgtH;
-            var (bestFitBytes, fitW, fitH) = BestFitScale(request.SourceBytes, srcW, srcH, outW, outH);
+            var (bestFitBytes, fitW, fitH) = BestFitScale(request.SourceBytes, srcW, srcH, tgtW, tgtH);
 
-            _logger.LogInformation("Best-fit scaled: {SrcW}x{SrcH} → {FitW}x{FitH} for output {OutW}x{OutH}",
-                srcW, srcH, fitW, fitH, outW, outH);
+            _logger.LogInformation("Best-fit scaled: {SrcW}x{SrcH} → {FitW}x{FitH} for target {TgtW}x{TgtH} (output {OutW}x{OutH})",
+                srcW, srcH, fitW, fitH, tgtW, tgtH, outW, outH);
 
             // 2. Downscale for Gemini API limits if needed
             var (geminiSourceBytes, geminiW, geminiH) = DownscaleForGemini(bestFitBytes, fitW, fitH, outW, outH);
@@ -115,14 +116,25 @@ public class PhotoExpandService
         }
     }
 
+    // 5mm minimum headroom at 300 DPI ≈ 59 pixels on each side
+    private const int MinHeadroomPx = 59;
+
     /// <summary>
     /// Best-fit scale the source image to fill as much of the target as possible.
-    /// Scales up to match the larger fitting dimension (like "contain" / best-fit).
+    /// Ensures at least 5mm (59px) headroom on every side for safe printing.
     /// </summary>
     private (byte[] bytes, int w, int h) BestFitScale(byte[] sourceBytes, int srcW, int srcH, int tgtW, int tgtH)
     {
-        // Scale to 96% of best-fit — leaves a small margin for AI to blend edges
-        double scale = Math.Min((double)tgtW / srcW, (double)tgtH / srcH) * 0.96;
+        // Two constraints:
+        // 1) 96% of best-fit — leaves a small margin for AI to blend edges
+        // 2) Absolute minimum 5mm (59px) headroom on each side
+        double blendScale = Math.Min((double)tgtW / srcW, (double)tgtH / srcH) * 0.96;
+        double headroomScale = Math.Min(
+            (double)(tgtW - 2 * MinHeadroomPx) / srcW,
+            (double)(tgtH - 2 * MinHeadroomPx) / srcH);
+
+        double scale = Math.Min(blendScale, headroomScale);
+        if (scale <= 0) scale = blendScale; // fallback for extremely small targets
 
         int fitW = (int)Math.Round(srcW * scale);
         int fitH = (int)Math.Round(srcH * scale);
@@ -185,12 +197,17 @@ public class PhotoExpandService
 
         var prompt = $"Expand this photograph to a wider canvas, extending the scene {directionText}. " +
                      $"The final image should be approximately {ratioW:F1}x wider and {ratioH:F1}x taller. " +
-                     "CRITICAL INSTRUCTIONS: " +
-                     "1) Keep the original subject EXACTLY as they are — same face, same clothes, same pose, same colors, same expression. Do NOT change ANYTHING about the person or subject. " +
-                     "2) Naturally extend the background, environment, and surroundings to fill the larger canvas. " +
-                     "3) Match the lighting, color grading, perspective, and photographic style perfectly. " +
-                     "4) The result must look like a single natural photograph taken with a wider lens — NOT a collage or composite. " +
-                     "5) Do NOT add any new people, text, watermarks, or logos.";
+                     "CRITICAL RULES: " +
+                     "1) PROPORTIONS: The subject must stay at EXACTLY the same physical scale relative to the scene. " +
+                     "The head-to-body ratio, shoulder width, and all body proportions MUST remain realistic and natural. " +
+                     "Do NOT shrink, miniaturize, or make the subject look like a doll or toy figure. " +
+                     "The person should occupy the same visual proportion of the frame as in the original photo. " +
+                     "2) HEADROOM: Keep at least a small margin of background above the subject's head — the top of the head must NOT touch or be too close to the top edge. " +
+                     "3) IDENTITY: Keep the original subject EXACTLY as they are — same face, same clothes, same pose, same colors, same expression. Change NOTHING about the person. " +
+                     "4) BACKGROUND: Only extend the background, environment, and surroundings. " +
+                     "Match lighting, color grading, perspective, depth-of-field, and photographic style perfectly. " +
+                     "5) REALISM: The result must look like a single natural photograph taken with a wider lens — NOT a collage, composite, or digitally manipulated image. " +
+                     "6) Do NOT add new people, text, watermarks, or logos.";
 
         if (!string.IsNullOrWhiteSpace(userHint))
             prompt += $" Additional context for the expanded areas: {userHint.Trim()}";

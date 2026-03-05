@@ -1,5 +1,9 @@
 @inject IJSRuntime JS
 @inject IGenerationHistoryService HistoryService
+@inject ISubscriptionService SubscriptionService
+@inject ICoinService CoinService
+@inject AuthenticationStateProvider AuthState
+@inject IAuthService AuthService
 
 <nav class="sidebar">
     <div class="sidebar-brand">
@@ -7,64 +11,259 @@
         <h1>ArtForge AI</h1>
     </div>
 
+    <AuthorizeView>
+        <Authorized>
+            <div class="sidebar-user">
+                @if (!string.IsNullOrEmpty(context.User.FindFirst("avatar")?.Value))
+                {
+                    <img class="user-avatar" src="@context.User.FindFirst("avatar")?.Value" alt="avatar" referrerpolicy="no-referrer" />
+                }
+                else
+                {
+                    <div class="user-avatar-placeholder">@(context.User.Identity?.Name?.FirstOrDefault())</div>
+                }
+                <div class="user-info">
+                    <span class="user-name">@context.User.Identity?.Name</span>
+                    <span class="user-email">@context.User.FindFirst(System.Security.Claims.ClaimTypes.Email)?.Value</span>
+                </div>
+            </div>
+
+            @if (!_isSuperAdmin)
+            {
+                <div class="sidebar-coins">
+                    <span class="coin-icon">&#127902;</span>
+                    <span>@_coinBalance coins</span>
+                </div>
+            }
+        </Authorized>
+    </AuthorizeView>
+
     <div class="sidebar-nav" onclick="if(window.innerWidth<=768)toggleSidebar()">
-        <NavLink class="nav-item" href="" Match="NavLinkMatch.All">
-            <span class="nav-icon">&#127912;</span>
-            Create
-        </NavLink>
-
-        <NavLink class="nav-item" href="style-transfer">
-            <span class="nav-icon">&#10024;</span>
-            Style Transfer
-        </NavLink>
-
+        @* ── Always visible ── *@
         <NavLink class="nav-item" href="quick-style">
             <span class="nav-icon">&#9889;</span>
             Quick Style
         </NavLink>
 
-        <NavLink class="nav-item" href="mosaic-poster">
-            <span class="nav-icon">&#129513;</span>
-            Mosaic Poster
-        </NavLink>
+        @if (_isSuperAdmin)
+        {
+            @* ── SuperAdmin sees all features ── *@
+            <NavLink class="nav-item" href="" Match="NavLinkMatch.All">
+                <span class="nav-icon">&#127912;</span>
+                Create
+            </NavLink>
+            <NavLink class="nav-item" href="style-transfer">
+                <span class="nav-icon">&#10024;</span>
+                Style Transfer
+            </NavLink>
+            <NavLink class="nav-item" href="style-remix">
+                <span class="nav-icon">&#127912;</span>
+                Style Remix
+            </NavLink>
+            <NavLink class="nav-item" href="mosaic-poster">
+                <span class="nav-icon">&#129513;</span>
+                Mosaic Poster
+            </NavLink>
+            <NavLink class="nav-item" href="passport-photo">
+                <span class="nav-icon">&#128247;</span>
+                Passport Photo
+            </NavLink>
+            <NavLink class="nav-item" href="photo-size-expand">
+                <span class="nav-icon">&#128200;</span>
+                Photo Expand
+            </NavLink>
+            <NavLink class="nav-item" href="gang-sheet">
+                <span class="nav-icon">&#128424;</span>
+                Gang Sheet
+            </NavLink>
+            <NavLink class="nav-item" href="shape-cut">
+                <span class="nav-icon">&#9986;</span>
+                Shape Cut Sheet
+            </NavLink>
+            <NavLink class="nav-item" href="negative-scan">
+                <span class="nav-icon">&#127902;</span>
+                Negative Scan
+            </NavLink>
+            <NavLink class="nav-item" href="image-viewer">
+                <span class="nav-icon">&#128065;</span>
+                Image Viewer
+            </NavLink>
+            <NavLink class="nav-item" href="gallery">
+                <span class="nav-icon">&#128444;</span>
+                Gallery
+            </NavLink>
+            <NavLink class="nav-item" href="settings">
+                <span class="nav-icon">&#9881;</span>
+                Settings
+            </NavLink>
+            <NavLink class="nav-item nav-item-admin" href="admin">
+                <span class="nav-icon">&#128737;</span>
+                Admin Panel
+            </NavLink>
+        }
+        else
+        {
+            @* ── Regular users see plan-gated features ── *@
+            @if (_accessibleFeatures.Contains("Home"))
+            {
+                <NavLink class="nav-item" href="" Match="NavLinkMatch.All">
+                    <span class="nav-icon">&#127912;</span>
+                    Create
+                </NavLink>
+            }
+            @if (_accessibleFeatures.Contains("StyleTransfer"))
+            {
+                <NavLink class="nav-item" href="style-transfer">
+                    <span class="nav-icon">&#10024;</span>
+                    Style Transfer
+                </NavLink>
+            }
+            @if (_accessibleFeatures.Contains("StyleRemix"))
+            {
+                <NavLink class="nav-item" href="style-remix">
+                    <span class="nav-icon">&#127912;</span>
+                    Style Remix
+                </NavLink>
+            }
+            @if (_accessibleFeatures.Contains("MosaicPoster"))
+            {
+                <NavLink class="nav-item" href="mosaic-poster">
+                    <span class="nav-icon">&#129513;</span>
+                    Mosaic Poster
+                </NavLink>
+            }
+            @if (_accessibleFeatures.Contains("PassportPhoto"))
+            {
+                <NavLink class="nav-item" href="passport-photo">
+                    <span class="nav-icon">&#128247;</span>
+                    Passport Photo
+                </NavLink>
+            }
+            @if (_accessibleFeatures.Contains("PhotoExpand"))
+            {
+                <NavLink class="nav-item" href="photo-size-expand">
+                    <span class="nav-icon">&#128200;</span>
+                    Photo Expand
+                </NavLink>
+            }
+            @if (_accessibleFeatures.Contains("GangSheet"))
+            {
+                <NavLink class="nav-item" href="gang-sheet">
+                    <span class="nav-icon">&#128424;</span>
+                    Gang Sheet
+                </NavLink>
+            }
+            @if (_accessibleFeatures.Contains("ShapeCutSheet"))
+            {
+                <NavLink class="nav-item" href="shape-cut">
+                    <span class="nav-icon">&#9986;</span>
+                    Shape Cut Sheet
+                </NavLink>
+            }
+            @if (_accessibleFeatures.Contains("NegativeScan"))
+            {
+                <NavLink class="nav-item" href="negative-scan">
+                    <span class="nav-icon">&#127902;</span>
+                    Negative Scan
+                </NavLink>
+            }
+            @if (_accessibleFeatures.Contains("ImageViewer"))
+            {
+                <NavLink class="nav-item" href="image-viewer">
+                    <span class="nav-icon">&#128065;</span>
+                    Image Viewer
+                </NavLink>
+            }
+            @if (_accessibleFeatures.Contains("Gallery"))
+            {
+                <NavLink class="nav-item" href="gallery">
+                    <span class="nav-icon">&#128444;</span>
+                    Gallery
+                </NavLink>
+            }
+            @if (_accessibleFeatures.Contains("Settings"))
+            {
+                <NavLink class="nav-item" href="settings">
+                    <span class="nav-icon">&#9881;</span>
+                    Settings
+                </NavLink>
+            }
 
-        <NavLink class="nav-item" href="passport-photo">
-            <span class="nav-icon">&#128247;</span>
-            Passport Photo
-        </NavLink>
+            @* ── Regular users: Wallet, Pricing, Referrals, My Plan ── *@
+            <NavLink class="nav-item" href="wallet">
+                <span class="nav-icon">&#128176;</span>
+                Wallet
+            </NavLink>
 
-        <NavLink class="nav-item" href="photo-size-expand">
-            <span class="nav-icon">&#128200;</span>
-            Photo Expand
-        </NavLink>
+            <NavLink class="nav-item" href="pricing">
+                <span class="nav-icon">&#128179;</span>
+                Pricing
+            </NavLink>
 
-        <NavLink class="nav-item" href="gang-sheet">
-            <span class="nav-icon">&#128424;</span>
-            Gang Sheet
-        </NavLink>
+            <NavLink class="nav-item" href="referrals">
+                <span class="nav-icon">&#127873;</span>
+                Referrals
+            </NavLink>
 
-        <NavLink class="nav-item" href="shape-cut">
-            <span class="nav-icon">&#9986;</span>
-            Shape Cut Sheet
-        </NavLink>
-
-        <NavLink class="nav-item" href="image-viewer">
-            <span class="nav-icon">&#128065;</span>
-            Image Viewer
-        </NavLink>
-
-        <NavLink class="nav-item" href="gallery">
-            <span class="nav-icon">&#128444;</span>
-            Gallery
-        </NavLink>
-
-        <NavLink class="nav-item" href="settings">
-            <span class="nav-icon">&#9881;</span>
-            Settings
-        </NavLink>
+            <NavLink class="nav-item" href="my-subscription">
+                <span class="nav-icon">&#11088;</span>
+                My Plan
+            </NavLink>
+        }
     </div>
+
+    @* ── Upgrade CTA (only for regular non-Enterprise users) ── *@
+    @if (!_isSuperAdmin && _planName != "Enterprise")
+    {
+        <div class="sidebar-upgrade">
+            <a href="/pricing">&#9889; Upgrade to unlock more features</a>
+        </div>
+    }
 
     <div class="sidebar-footer">
         <ThemeToggle />
+        <a href="/api/auth/logout" class="nav-item sign-out-link">
+            <span class="nav-icon">&#128682;</span>
+            Sign Out
+        </a>
     </div>
 </nav>
+
+@code {
+    private int _coinBalance;
+    private string _planName = "Free";
+    private bool _isSuperAdmin;
+    private List<string> _accessibleFeatures = new();
+
+    protected override async Task OnInitializedAsync()
+    {
+        try
+        {
+            var authState = await AuthState.GetAuthenticationStateAsync();
+            var user = authState.User;
+
+            var userIdStr = user.FindFirstValue(System.Security.Claims.ClaimTypes.NameIdentifier);
+            if (int.TryParse(userIdStr, out var userId) && userId > 0)
+            {
+                // Check SuperAdmin via DB lookup (cookie claims may be stale)
+                var dbUser = await AuthService.GetUserByIdAsync(userId);
+                _isSuperAdmin = dbUser?.Role == ArtForgeAI.Models.AppRole.SuperAdmin;
+
+                if (_isSuperAdmin)
+                {
+                    _accessibleFeatures = ArtForgeAI.Models.FeatureAccess.AllFeatures.ToList();
+                }
+                else
+                {
+                    _coinBalance = await CoinService.GetBalanceAsync(userId);
+                    _planName = await SubscriptionService.GetCurrentPlanNameAsync(userId);
+                    _accessibleFeatures = await SubscriptionService.GetAccessibleFeaturesAsync(userId);
+                }
+            }
+        }
+        catch
+        {
+            _accessibleFeatures = ArtForgeAI.Models.FeatureAccess.PlanFeatures["Free"].ToList();
+        }
+    }
+}

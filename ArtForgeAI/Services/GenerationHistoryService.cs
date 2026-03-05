@@ -31,6 +31,23 @@ public class GenerationHistoryService : IGenerationHistoryService
             .ToListAsync();
     }
 
+    public async Task<List<ImageGeneration>> GetAllHistoryAsync(int page = 1, int pageSize = 20)
+    {
+        await using var db = await _dbFactory.CreateDbContextAsync();
+        return await db.ImageGenerations
+            .Where(g => g.IsSuccess)
+            .OrderByDescending(g => g.CreatedAt)
+            .Skip((page - 1) * pageSize)
+            .Take(pageSize)
+            .ToListAsync();
+    }
+
+    public async Task<int> GetAllTotalCountAsync()
+    {
+        await using var db = await _dbFactory.CreateDbContextAsync();
+        return await db.ImageGenerations.CountAsync(g => g.IsSuccess);
+    }
+
     public async Task<ImageGeneration?> GetByIdAsync(int id)
     {
         await using var db = await _dbFactory.CreateDbContextAsync();

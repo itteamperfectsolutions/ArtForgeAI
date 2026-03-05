@@ -38,18 +38,24 @@
     [Parameter] public int CurrentStep { get; set; } = 1;
     [Parameter] public ImageProvider Provider { get; set; } = ImageProvider.OpenAI;
     [Parameter] public bool AutoRemoveBg { get; set; }
+    [Parameter] public string[]? StepLabels { get; set; }
 
     private record StepInfo(int Order, string Label);
 
     private string GetModelName() => Provider switch
     {
-        ImageProvider.Gemini => "Gemini Pro",
+        ImageProvider.Gemini => "Style Remix",
         ImageProvider.Replicate => "FLUX",
         _ => "DALL-E 3"
     };
 
     private StepInfo[] GetSteps()
     {
+        if (StepLabels is not null && StepLabels.Length > 0)
+        {
+            return StepLabels.Select((label, i) => new StepInfo(i + 1, label)).ToArray();
+        }
+
         var steps = new List<StepInfo>
         {
             new(1, "Enhancing your prompt with AI..."),

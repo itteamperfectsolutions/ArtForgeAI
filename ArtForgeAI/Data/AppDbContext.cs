@@ -11,6 +11,13 @@ public class AppDbContext : DbContext
     public DbSet<UserPreference> UserPreferences => Set<UserPreference>();
     public DbSet<ImageSizeMaster> ImageSizeMasters => Set<ImageSizeMaster>();
     public DbSet<StylePreset> StylePresets => Set<StylePreset>();
+    public DbSet<AppUser> AppUsers => Set<AppUser>();
+    public DbSet<SubscriptionPlan> SubscriptionPlans => Set<SubscriptionPlan>();
+    public DbSet<UserSubscription> UserSubscriptions => Set<UserSubscription>();
+    public DbSet<CoinTransaction> CoinTransactions => Set<CoinTransaction>();
+    public DbSet<CoinPack> CoinPacks => Set<CoinPack>();
+    public DbSet<Payment> Payments => Set<Payment>();
+    public DbSet<Referral> Referrals => Set<Referral>();
 
     protected override void OnModelCreating(ModelBuilder modelBuilder)
     {
@@ -23,6 +30,57 @@ public class AppDbContext : DbContext
         modelBuilder.Entity<UserPreference>(entity =>
         {
             entity.HasIndex(e => e.UserId).IsUnique();
+        });
+
+        modelBuilder.Entity<AppUser>(entity =>
+        {
+            entity.HasIndex(e => e.GoogleId).IsUnique();
+            entity.HasIndex(e => e.Email).IsUnique();
+        });
+
+        modelBuilder.Entity<UserSubscription>(entity =>
+        {
+            entity.HasIndex(e => e.UserId);
+            entity.HasIndex(e => e.Status);
+        });
+
+        modelBuilder.Entity<CoinTransaction>(entity =>
+        {
+            entity.HasIndex(e => e.UserId);
+            entity.HasIndex(e => e.CreatedAt);
+        });
+
+        modelBuilder.Entity<Payment>(entity =>
+        {
+            entity.HasIndex(e => e.UserId);
+            entity.HasIndex(e => e.RazorpayOrderId);
+        });
+
+        modelBuilder.Entity<Referral>(entity =>
+        {
+            entity.HasIndex(e => e.ReferrerUserId);
+            entity.HasIndex(e => e.RefereeUserId).IsUnique();
+        });
+
+        modelBuilder.Entity<SubscriptionPlan>(entity =>
+        {
+            entity.Property(e => e.PriceInr).HasColumnType("decimal(10,2)");
+            entity.Property(e => e.GstAmount).HasColumnType("decimal(10,2)");
+            entity.Property(e => e.TotalPriceInr).HasColumnType("decimal(10,2)");
+        });
+
+        modelBuilder.Entity<CoinPack>(entity =>
+        {
+            entity.Property(e => e.PriceInr).HasColumnType("decimal(10,2)");
+            entity.Property(e => e.GstAmount).HasColumnType("decimal(10,2)");
+            entity.Property(e => e.TotalPriceInr).HasColumnType("decimal(10,2)");
+        });
+
+        modelBuilder.Entity<Payment>(entity =>
+        {
+            entity.Property(e => e.AmountInr).HasColumnType("decimal(10,2)");
+            entity.Property(e => e.GstAmount).HasColumnType("decimal(10,2)");
+            entity.Property(e => e.TotalAmountInr).HasColumnType("decimal(10,2)");
         });
 
         modelBuilder.Entity<ImageSizeMaster>().HasData(

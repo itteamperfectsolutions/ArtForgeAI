@@ -1,5 +1,6 @@
 @page "/"
 @rendermode InteractiveServer
+@attribute [Authorize]
 @inject IImageGenerationService ImageGenService
 @inject IImageStorageService ImageStorage
 @inject IBackgroundRemovalService BgRemoval
@@ -8,19 +9,23 @@
 @inject IJSRuntime JS
 @inject IWebHostEnvironment Env
 @inject ILogger<Home> Logger
+@inject ISubscriptionService SubscriptionService
+@inject ICoinService CoinService
+@inject AuthenticationStateProvider AuthStateProvider
+@inject NavigationManager Nav
 
 <PageTitle>ArtForge AI - Create</PageTitle>
 
-<div class="page-header" style="margin-bottom: 0.5rem;">
-    <h2 style="font-size:1.3rem;">Create Image</h2>
-    <p style="font-size:0.82rem;">Describe your vision and let AI bring it to life</p>
+<div class="page-header">
+    <h2>Create Image</h2>
+    <p>Describe your vision and let AI bring it to life</p>
 </div>
 
 <div class="create-layout">
     @* ── Left column: controls ── *@
     <div class="create-left">
         <div class="card">
-            <div class="card-body" style="padding: 1rem 1.5rem;">
+            <div class="card-body">
                 <PromptInput @bind-Prompt="_prompt"
                              @bind-EnhancePrompt="_enhancePrompt"
                              @bind-ReferenceImagePaths="_referenceImagePaths"
@@ -30,9 +35,9 @@
                 <ProviderSelector @bind-SelectedProvider="_selectedProvider"
                                  IsDisabled="_isGenerating" />
 
-                <SizeSelector SelectedSizeId="_selectedSize?.Id ?? 0"
+                @*<SizeSelector SelectedSizeId="_selectedSize?.Id ?? 0"
                               SelectedSizeChanged="OnSizeChanged"
-                              IsDisabled="_isGenerating" />
+                              IsDisabled="_isGenerating" />*@
 
                 @if (BgRemoval.IsAvailable)
                 {
@@ -110,10 +115,10 @@
                             {
                                 <button class="btn-enhance btn-sm" @onclick="() => EnhanceRefImage(p)" disabled="@state.IsProcessing">&#9889; 4x</button>
                             }
-                            @if (ColorEnhancer.IsAvailable && !state.IsProcessing)
+                            @*@if (ColorEnhancer.IsAvailable && !state.IsProcessing)
                             {
                                 <button class="btn-color-enhance btn-sm" @onclick="() => ColorEnhanceRefImage(p)" disabled="@state.IsProcessing">&#127912; Colors</button>
-                            }
+                            }*@
                         </div>
 
                         @if (BgRemoval.IsAvailable)
@@ -229,7 +234,7 @@
                             }
                         </button>
                     }
-                    @if (ColorEnhancer.IsAvailable)
+                    @*@if (ColorEnhancer.IsAvailable)
                     {
                         <button class="btn-color-enhance" @onclick="ColorEnhanceImage" disabled="@_isColorEnhancing">
                             @if (_isColorEnhancing)
@@ -241,7 +246,7 @@
                                 <span>&#127912; Enhance Colors</span>
                             }
                         </button>
-                    }
+                    }*@
                     @if (_result.WasLocalProcessing)
                     {
                         <button class="btn-retry-ai" @onclick="RetryWithAi">&#9729; Retry with AI</button>
@@ -351,6 +356,8 @@
 <Toast @ref="_toast" />
 
 @code {
+    [CascadingParameter] private Task<AuthenticationState>? AuthState { get; set; }
+    private string _userId = "default";
     private string _prompt = string.Empty;
     private bool _enhancePrompt = false;
     private bool _autoRemoveBg;
@@ -370,6 +377,32 @@
 
     // Reference image processing state
     private readonly Dictionary<string, RefImageState> _refImageStates = new();
+
+    protected override async Task OnInitializedAsync()
+    {
+        var authState = await AuthStateProvider.GetAuthenticationStateAsync();
+        if (!authState.User.IsInRole("SuperAdmin"))
+        {
+            var userIdStr = authState.User.FindFirstValue(ClaimTypes.NameIdentifier);
+            if (int.TryParse(userIdStr, out var uid))
+            {
+                if (!await SubscriptionService.HasFeatureAccessAsync(uid, FeatureAccess.Home))
+                {
+                    Nav.NavigateTo("/pricing", forceLoad: true);
+                    return;
+                }
+            }
+        }
+    }
+
+    private async Task ResolveUserIdAsync()
+    {
+        if (_userId == "default" && AuthState is not null)
+        {
+            var state = await AuthState;
+            _userId = state.User.FindFirstValue(ClaimTypes.NameIdentifier) ?? "default";
+        }
+    }
 
     // Background options state
     private string? _transparentImagePath;
@@ -400,6 +433,19 @@
     {
         if (string.IsNullOrWhiteSpace(_prompt)) return;
 
+        // Debit coins
+        var authState2 = await AuthStateProvider.GetAuthenticationStateAsync();
+        var uidStr = authState2.User.FindFirstValue(ClaimTypes.NameIdentifier);
+        if (int.TryParse(uidStr, out var userId) && !authState2.User.IsInRole("SuperAdmin"))
+        {
+            var cost = FeatureAccess.GetCost(FeatureAccess.Home);
+            if (!await CoinService.DebitCoinsAsync(userId, cost, CoinTransactionType.GenerationSpend, "Home image generation"))
+            {
+                _errorMessage = "Insufficient coins. Please purchase more coins.";
+                return;
+            }
+        }
+
         _isGenerating = true;
         _errorMessage = null;
         _result = null;
@@ -418,6 +464,7 @@
             _loadingStep = 2;
             StateHasChanged();
 
+            await ResolveUserIdAsync();
             var request = new GenerationRequest
             {
                 Prompt = _prompt,
@@ -426,7 +473,8 @@
                 SizeName = _selectedSize?.Name ?? "Square",
                 EnhancePrompt = _enhancePrompt,
                 ReferenceImagePaths = _referenceImagePaths,
-                Provider = _selectedProvider
+                Provider = _selectedProvider,
+                UserId = _userId
             };
 
             _result = await ImageGenService.GenerateImageAsync(request);
@@ -621,6 +669,7 @@
             _loadingStep = 2;
             StateHasChanged();
 
+            await ResolveUserIdAsync();
             var request = new GenerationRequest
             {
                 Prompt = _prompt,
@@ -630,7 +679,8 @@
                 EnhancePrompt = _enhancePrompt,
                 ReferenceImagePaths = _referenceImagePaths,
                 Provider = _selectedProvider,
-                ForceCloudProvider = true
+                ForceCloudProvider = true,
+                UserId = _userId
             };
 
             _result = await ImageGenService.GenerateImageAsync(request);

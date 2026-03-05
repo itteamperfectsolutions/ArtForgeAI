@@ -1,0 +1,270 @@
+@page "/pricing"
+@rendermode InteractiveServer
+@attribute [Authorize]
+@inject ISubscriptionService SubscriptionService
+@inject ICoinService CoinService
+@inject IRazorpayService RazorpayService
+@inject AuthenticationStateProvider AuthState
+@inject IJSRuntime JS
+@inject NavigationManager Nav
+@inject IDbContextFactory<ArtForgeAI.Data.AppDbContext> DbFactory
+@using Microsoft.EntityFrameworkCore
+
+<PageTitle>ArtForge AI - Pricing</PageTitle>
+
+<div class="page-header">
+    <h2>Plans &amp; Pricing</h2>
+    <p>Choose a plan that fits your creative needs</p>
+</div>
+
+@if (_loading)
+{
+    <div style="text-align:center;padding:3rem;">
+        <div class="loading-spinner"></div>
+    </div>
+}
+else
+{
+    @* ── Current Plan Banner ── *@
+    <div class="pricing-current-plan">
+        <span>Current Plan: <strong>@_currentPlan</strong></span>
+        <span style="margin-left:1rem;">Coins: <strong>@_coinBalance</strong></span>
+    </div>
+
+    @* ── Subscription Plans ── *@
+    <h3 class="pricing-section-title">Subscription Plans <span style="font-size:0.75rem;color:var(--text-muted);">(All prices include 18% GST)</span></h3>
+    <div class="pricing-grid">
+        @foreach (var plan in _plans)
+        {
+            var isCurrent = plan.Name == _currentPlan;
+            <div class="pricing-card @(isCurrent ? "pricing-card-active" : "") @(plan.Name == "Pro" ? "pricing-card-featured" : "")">
+                @if (plan.Name == "Pro")
+                {
+                    <div class="pricing-badge">Most Popular</div>
+                }
+                <h4 class="pricing-plan-name">@plan.Name</h4>
+                <div class="pricing-price">
+                    @if (plan.TotalPriceInr == 0)
+                    {
+                        <span class="pricing-amount">Free</span>
+                    }
+                    else
+                    {
+                        <span class="pricing-currency">&#8377;</span>
+                        <span class="pricing-amount">@plan.TotalPriceInr.ToString("N0")</span>
+                        <span class="pricing-period">/month</span>
+                    }
+                </div>
+                <div class="pricing-coins">@plan.MonthlyCoins coins/month</div>
+                <ul class="pricing-features">
+                    @foreach (var f in plan.AllowedFeatures.Split(',', StringSplitOptions.RemoveEmptyEntries))
+                    {
+                        <li>&#10003; @f.Trim()</li>
+                    }
+                </ul>
+                @if (isCurrent)
+                {
+                    <button class="btn-secondary" disabled style="width:100%;">Current Plan</button>
+                }
+                else if (plan.TotalPriceInr == 0)
+                {
+                    <button class="btn-secondary" disabled style="width:100%;">Free Tier</button>
+                }
+                else
+                {
+                    <button class="btn-primary-gradient" style="width:100%;"
+                            @onclick="() => PurchaseSubscription(plan)"
+                            disabled="@_isProcessing">
+                        @(_isProcessing ? "Processing..." : $"Subscribe - ₹{plan.TotalPriceInr:N0}")
+                    </button>
+                }
+            </div>
+        }
+    </div>
+
+    @* ── Coin Packs ── *@
+    <h3 class="pricing-section-title" style="margin-top:2.5rem;">Coin Packs <span style="font-size:0.75rem;color:var(--text-muted);">(One-time purchase, includes 18% GST)</span></h3>
+    <div class="pricing-grid pricing-grid-4">
+        @foreach (var pack in _packs)
+        {
+            <div class="pricing-card coin-pack-card">
+                <h4 class="pricing-plan-name">@pack.Name</h4>
+                <div class="pricing-coins" style="font-size:1.5rem;font-weight:700;color:var(--accent);">
+                    @pack.CoinAmount coins
+                </div>
+                @if (pack.BonusCoins > 0)
+                {
+                    <div class="coin-pack-bonus">+@pack.BonusCoins bonus!</div>
+                }
+                <div class="pricing-price" style="margin:0.75rem 0;">
+                    <span class="pricing-currency">&#8377;</span>
+                    <span class="pricing-amount" style="font-size:1.5rem;">@pack.TotalPriceInr.ToString("N0")</span>
+                </div>
+                <button class="btn-primary-gradient" style="width:100%;"
+                        @onclick="() => PurchaseCoinPack(pack)"
+                        disabled="@_isProcessing">
+                    @(_isProcessing ? "Processing..." : "Buy Now")
+                </button>
+            </div>
+        }
+    </div>
+
+    @* ── Generation Costs ── *@
+    <h3 class="pricing-section-title" style="margin-top:2.5rem;">Generation Costs</h3>
+    <div class="card" style="max-width:500px;">
+        <div class="card-body">
+            <table style="width:100%;font-size:0.85rem;">
+                <thead>
+                    <tr style="border-bottom:1px solid var(--border-color);">
+                        <th style="padding:0.4rem 0;text-align:left;">Feature</th>
+                        <th style="padding:0.4rem 0;text-align:right;">Coins</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    @foreach (var kv in FeatureAccess.GenerationCosts)
+                    {
+                        <tr style="border-bottom:1px solid var(--border-color);">
+                            <td style="padding:0.4rem 0;">@kv.Key</td>
+                            <td style="padding:0.4rem 0;text-align:right;font-weight:600;">@kv.Value</td>
+                        </tr>
+                    }
+                </tbody>
+            </table>
+        </div>
+    </div>
+}
+
+@if (!string.IsNullOrEmpty(_error))
+{
+    <div style="color:var(--danger);margin-top:1rem;padding:0.75rem;background:rgba(239,68,68,0.1);border-radius:8px;">
+        @_error
+    </div>
+}
+
+@code {
+    private bool _loading = true;
+    private bool _isProcessing;
+    private string _currentPlan = "Free";
+    private int _coinBalance;
+    private List<SubscriptionPlan> _plans = new();
+    private List<CoinPack> _packs = new();
+    private string? _error;
+
+    protected override async Task OnInitializedAsync()
+    {
+        try
+        {
+            var authState = await AuthState.GetAuthenticationStateAsync();
+            var userIdStr = authState.User.FindFirstValue(System.Security.Claims.ClaimTypes.NameIdentifier);
+            if (int.TryParse(userIdStr, out var userId))
+            {
+                _currentPlan = await SubscriptionService.GetCurrentPlanNameAsync(userId);
+                _coinBalance = await CoinService.GetBalanceAsync(userId);
+            }
+            _plans = await SubscriptionService.GetAllPlansAsync();
+
+            // Load coin packs via raw query since we have the plans DbSet pattern
+            _packs = await LoadCoinPacksAsync();
+        }
+        catch { }
+        finally { _loading = false; }
+    }
+
+    private async Task<List<CoinPack>> LoadCoinPacksAsync()
+    {
+        try
+        {
+            await using var db = await DbFactory.CreateDbContextAsync();
+            return await db.CoinPacks.Where(p => p.IsActive).OrderBy(p => p.SortOrder).ToListAsync();
+        }
+        catch { return new(); }
+    }
+
+    private async Task PurchaseSubscription(SubscriptionPlan plan)
+    {
+        await InitiatePayment(PaymentPurpose.Subscription, null, plan.Id);
+    }
+
+    private async Task PurchaseCoinPack(CoinPack pack)
+    {
+        await InitiatePayment(PaymentPurpose.CoinPurchase, pack.Id, null);
+    }
+
+    private async Task InitiatePayment(PaymentPurpose purpose, int? coinPackId, int? planId)
+    {
+        if (_isProcessing) return;
+        _isProcessing = true;
+        _error = null;
+        StateHasChanged();
+
+        try
+        {
+            var authState = await AuthState.GetAuthenticationStateAsync();
+            var userIdStr = authState.User.FindFirstValue(System.Security.Claims.ClaimTypes.NameIdentifier);
+            if (!int.TryParse(userIdStr, out var userId))
+                throw new InvalidOperationException("User not found");
+
+            var order = await RazorpayService.CreateOrderAsync(userId, purpose, coinPackId, planId);
+
+            // Open Razorpay checkout via JS interop
+            await JS.InvokeVoidAsync("razorpayCheckout", new
+            {
+                key = order.KeyId,
+                amount = order.AmountPaise,
+                currency = order.Currency,
+                order_id = order.OrderId,
+                paymentId = order.PaymentId,
+                name = "ArtForge AI",
+                description = purpose == PaymentPurpose.Subscription ? "Subscription" : "Coin Pack",
+                theme = new { color = "#6366f1" }
+            });
+        }
+        catch (Exception ex)
+        {
+            _error = ex.Message;
+        }
+        finally
+        {
+            _isProcessing = false;
+            StateHasChanged();
+        }
+    }
+
+    [JSInvokable]
+    public async Task OnPaymentSuccess(int paymentId, string razorpayPaymentId, string razorpaySignature)
+    {
+        try
+        {
+            var success = await RazorpayService.CompletePaymentAsync(paymentId, razorpayPaymentId, razorpaySignature);
+            if (success)
+            {
+                // Refresh data
+                var authState = await AuthState.GetAuthenticationStateAsync();
+                var userIdStr = authState.User.FindFirstValue(System.Security.Claims.ClaimTypes.NameIdentifier);
+                if (int.TryParse(userIdStr, out var userId))
+                {
+                    _currentPlan = await SubscriptionService.GetCurrentPlanNameAsync(userId);
+                    _coinBalance = await CoinService.GetBalanceAsync(userId);
+                }
+                StateHasChanged();
+            }
+            else
+            {
+                _error = "Payment verification failed. Please contact support.";
+                StateHasChanged();
+            }
+        }
+        catch (Exception ex)
+        {
+            _error = $"Payment processing error: {ex.Message}";
+            StateHasChanged();
+        }
+    }
+
+    [JSInvokable]
+    public void OnPaymentFailure(string errorMessage)
+    {
+        _error = $"Payment failed: {errorMessage}";
+        StateHasChanged();
+    }
+}

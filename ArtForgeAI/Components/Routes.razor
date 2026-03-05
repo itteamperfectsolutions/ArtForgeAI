@@ -2,7 +2,11 @@
     <Found Context="routeData">
         <ErrorBoundary>
             <ChildContent>
-                <RouteView RouteData="routeData" DefaultLayout="typeof(Layout.MainLayout)" />
+                <AuthorizeRouteView RouteData="routeData" DefaultLayout="typeof(Layout.MainLayout)">
+                    <NotAuthorized>
+                        <ArtForgeAI.Components.Shared.RedirectToLogin />
+                    </NotAuthorized>
+                </AuthorizeRouteView>
             </ChildContent>
             <ErrorContent>
                 <div style="text-align:center;padding:3rem;">

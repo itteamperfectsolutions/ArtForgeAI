@@ -1,5 +1,6 @@
 @page "/style-transfer"
 @rendermode InteractiveServer
+@attribute [Authorize]
 @inject IImageGenerationService ImageGenService
 @inject IImageStorageService ImageStorage
 @inject IBackgroundRemovalService BgRemoval
@@ -11,19 +12,23 @@
 @inject IImageSizeMasterService SizeMasterService
 @inject ICinematicProfileService CinematicProfile
 @inject ILogger<StyleTransfer> Logger
+@inject ISubscriptionService SubscriptionService
+@inject ICoinService CoinService
+@inject AuthenticationStateProvider AuthState
+@inject NavigationManager Nav
 
 <PageTitle>ArtForge AI - Style Transfer</PageTitle>
 
-<div class="page-header" style="margin-bottom: 0.5rem;">
-    <h2 style="font-size:1.3rem;">Style Transfer</h2>
-    <p style="font-size:0.82rem;">Upload a photo and transform it into any artistic style</p>
+<div class="page-header">
+    <h2>Style Transfer</h2>
+    <p>Upload a photo and transform it into any artistic style</p>
 </div>
 
 <div class="create-layout">
     @* ── Left column: controls ── *@
     <div class="create-left">
         <div class="card">
-            <div class="card-body" style="padding: 1rem 1.5rem;">
+            <div class="card-body">
 
                 @* Step 1: Style selection *@
                 <StyleSelector SelectedStyleId="_selectedStyle?.Id ?? 0"
@@ -97,11 +102,10 @@
                 <ProviderSelector @bind-SelectedProvider="_selectedProvider"
                                   IsDisabled="_isGenerating" />
 
-                @* Step 5: Size selector *@
-                <SizeSelector SelectedSizeId="_selectedSize?.Id ?? 0"
+                @*<SizeSelector SelectedSizeId="_selectedSize?.Id ?? 0"
                               SelectedSizeChanged="OnSizeChanged"
                               Sizes="_activeSizes"
-                              IsDisabled="_isGenerating" />
+                              IsDisabled="_isGenerating" />*@
 
                 @* Generate button *@
                 <button class="btn-primary-gradient"
@@ -196,7 +200,7 @@
                             }
                         </button>
                     }
-                    @if (ColorEnhancer.IsAvailable)
+                    @*@if (ColorEnhancer.IsAvailable)
                     {
                         <button class="btn-color-enhance" @onclick="ColorEnhanceImage" disabled="@_isColorEnhancing">
                             @if (_isColorEnhancing)
@@ -208,7 +212,7 @@
                                 <span>&#127912; Enhance Colors</span>
                             }
                         </button>
-                    }
+                    }*@
                     <button class="btn-primary-gradient" @onclick="StartNew">&#10024; New</button>
                 </div>
                 @if (_isEnhancing)
@@ -416,6 +420,20 @@
 
     protected override async Task OnInitializedAsync()
     {
+        var authState = await AuthState.GetAuthenticationStateAsync();
+        if (!authState.User.IsInRole("SuperAdmin"))
+        {
+            var userIdStr = authState.User.FindFirstValue(System.Security.Claims.ClaimTypes.NameIdentifier);
+            if (int.TryParse(userIdStr, out var uid))
+            {
+                if (!await SubscriptionService.HasFeatureAccessAsync(uid, ArtForgeAI.Models.FeatureAccess.StyleTransfer))
+                {
+                    Nav.NavigateTo("/pricing", forceLoad: true);
+                    return;
+                }
+            }
+        }
+
         // Load sequentially to avoid concurrent DbContext access
         _stylePresets = await StylePresetService.GetActivePresetsAsync();
         _activeSizes = await SizeMasterService.GetActiveSizesAsync();
@@ -539,6 +557,19 @@
 
     private async Task RunStyleTransfer(string basePrompt)
     {
+        // Debit coins for generation
+        var authState2 = await AuthState.GetAuthenticationStateAsync();
+        var uidStr = authState2.User.FindFirstValue(System.Security.Claims.ClaimTypes.NameIdentifier);
+        if (int.TryParse(uidStr, out var userId2) && !authState2.User.IsInRole("SuperAdmin"))
+        {
+            var cost = ArtForgeAI.Models.FeatureAccess.GetCost("StyleTransfer");
+            if (!await CoinService.DebitCoinsAsync(userId2, cost, ArtForgeAI.Models.CoinTransactionType.GenerationSpend, "Style Transfer generation"))
+            {
+                _errorMessage = "Insufficient coins. Please purchase more coins.";
+                return;
+            }
+        }
+
         _isGenerating = true;
         _errorMessage = null;
         _result = null;
@@ -550,8 +581,13 @@
 
         try
         {
-            // Build the prompt from the base prompt + optional custom instructions
-            var prompt = basePrompt;
+            // Build the prompt with identity-preservation preamble + base prompt + optional custom instructions
+            const string identityPreamble =
+                "Using the provided reference photo as the EXACT identity source: " +
+                "replicate every facial feature precisely (face shape, eyes, nose, lips, jawline, skin tone, facial hair, moles, dimples). " +
+                "Keep the EXACT same facial expression — do not alter the smile, eye openness, or mouth position. " +
+                "Apply the artistic style as a visual transformation over the real identity. Now: ";
+            var prompt = identityPreamble + basePrompt;
             if (_showCustomInstructions && !string.IsNullOrWhiteSpace(_customInstructions))
             {
                 prompt = $"{prompt}. Additional instructions: {_customInstructions.Trim()}";
@@ -658,8 +694,13 @@
 
         try
         {
-            // Build prompt from style + placeholder replacement + custom instructions + fine-tune
-            var prompt = _selectedStyle.EffectivePrompt;
+            // Build prompt with identity preamble + style + placeholder replacement + custom instructions + fine-tune
+            const string identityPreamble =
+                "Using the provided reference photo as the EXACT identity source: " +
+                "replicate every facial feature precisely (face shape, eyes, nose, lips, jawline, skin tone, facial hair, moles, dimples). " +
+                "Keep the EXACT same facial expression — do not alter the smile, eye openness, or mouth position. " +
+                "Apply the artistic style as a visual transformation over the real identity. Now: ";
+            var prompt = identityPreamble + _selectedStyle.EffectivePrompt;
             if (HasPlaceholders(_selectedStyle))
             {
                 prompt = ReplacePlaceholders(prompt, _stOccasionText, _stMessageText);
@@ -668,7 +709,7 @@
             {
                 prompt = $"{prompt}. Additional instructions: {_customInstructions.Trim()}";
             }
-            prompt = $"{prompt}. Fine-tune adjustments: {_finetunePrompt.Trim()}";
+            prompt = $"{prompt}. Fine-tune adjustments (apply while preserving face identity and expression): {_finetunePrompt.Trim()}";
 
             _loadingStep = 2;
             StateHasChanged();

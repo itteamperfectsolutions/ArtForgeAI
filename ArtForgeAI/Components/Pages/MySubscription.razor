@@ -1,0 +1,162 @@
+@page "/my-subscription"
+@rendermode InteractiveServer
+@attribute [Authorize]
+@inject ISubscriptionService SubscriptionService
+@inject ICoinService CoinService
+@inject AuthenticationStateProvider AuthState
+@inject NavigationManager Nav
+
+<PageTitle>ArtForge AI - My Subscription</PageTitle>
+
+<div class="page-header">
+    <h2>My Subscription</h2>
+    <p>Manage your subscription plan</p>
+</div>
+
+@if (_loading)
+{
+    <div style="text-align:center;padding:3rem;">
+        <div class="loading-spinner"></div>
+    </div>
+}
+else
+{
+    <div class="subscription-card">
+        <div class="subscription-plan-name">@_planName Plan</div>
+
+        @if (_subscription != null)
+        {
+            <div class="subscription-details">
+                <div class="subscription-detail-row">
+                    <span>Status</span>
+                    <span class="@(_subscription.Status == ArtForgeAI.Models.SubscriptionStatus.Active ? "tx-credit" : "tx-debit")">
+                        @_subscription.Status
+                    </span>
+                </div>
+                <div class="subscription-detail-row">
+                    <span>Start Date</span>
+                    <span>@_subscription.StartDate.ToString("MMM dd, yyyy")</span>
+                </div>
+                <div class="subscription-detail-row">
+                    <span>Renewal Date</span>
+                    <span>@_subscription.EndDate.ToString("MMM dd, yyyy")</span>
+                </div>
+                <div class="subscription-detail-row">
+                    <span>Auto Renew</span>
+                    <span>@(_subscription.AutoRenew ? "Yes" : "No")</span>
+                </div>
+                <div class="subscription-detail-row">
+                    <span>Coin Balance</span>
+                    <span style="font-weight:700;color:var(--accent);">@_coinBalance</span>
+                </div>
+            </div>
+
+            <div class="subscription-features">
+                <h4 style="margin-bottom:0.5rem;font-size:0.85rem;">Included Features:</h4>
+                <div class="subscription-feature-list">
+                    @foreach (var f in _features)
+                    {
+                        <span class="subscription-feature-tag">@f</span>
+                    }
+                </div>
+            </div>
+
+            <div style="display:flex;gap:0.75rem;margin-top:1.25rem;">
+                <button class="btn-primary-gradient" @onclick='() => Nav.NavigateTo("/pricing")'>
+                    Upgrade Plan
+                </button>
+                <button class="btn-secondary" style="border-color:var(--danger);color:var(--danger);"
+                        @onclick="CancelSubscription" disabled="@_isProcessing">
+                    @(_isProcessing ? "Cancelling..." : "Cancel Subscription")
+                </button>
+            </div>
+        }
+        else
+        {
+            <p style="color:var(--text-muted);margin:1rem 0;">You're on the Free plan with basic features.</p>
+            <div class="subscription-detail-row">
+                <span>Coin Balance</span>
+                <span style="font-weight:700;color:var(--accent);">@_coinBalance</span>
+            </div>
+            <div class="subscription-features" style="margin-top:1rem;">
+                <h4 style="margin-bottom:0.5rem;font-size:0.85rem;">Available Features:</h4>
+                <div class="subscription-feature-list">
+                    @foreach (var f in _features)
+                    {
+                        <span class="subscription-feature-tag">@f</span>
+                    }
+                </div>
+            </div>
+            <button class="btn-primary-gradient" style="margin-top:1.25rem;" @onclick='() => Nav.NavigateTo("/pricing")'>
+                Upgrade Now
+            </button>
+        }
+    </div>
+}
+
+@if (!string.IsNullOrEmpty(_message))
+{
+    <div style="margin-top:1rem;padding:0.75rem;border-radius:8px;background:rgba(239,68,68,0.1);color:var(--danger);">
+        @_message
+    </div>
+}
+
+@code {
+    private bool _loading = true;
+    private bool _isProcessing;
+    private string _planName = "Free";
+    private int _coinBalance;
+    private ArtForgeAI.Models.UserSubscription? _subscription;
+    private List<string> _features = new();
+    private string? _message;
+
+    protected override async Task OnInitializedAsync()
+    {
+        try
+        {
+            var userId = await GetUserIdAsync();
+            if (userId > 0)
+            {
+                _planName = await SubscriptionService.GetCurrentPlanNameAsync(userId);
+                _coinBalance = await CoinService.GetBalanceAsync(userId);
+                _subscription = await SubscriptionService.GetActiveSubscriptionAsync(userId);
+                _features = await SubscriptionService.GetAccessibleFeaturesAsync(userId);
+            }
+        }
+        catch { }
+        finally { _loading = false; }
+    }
+
+    private async Task CancelSubscription()
+    {
+        if (_isProcessing) return;
+        _isProcessing = true;
+        StateHasChanged();
+
+        try
+        {
+            var userId = await GetUserIdAsync();
+            await SubscriptionService.CancelSubscriptionAsync(userId);
+            _subscription = null;
+            _planName = "Free";
+            _features = ArtForgeAI.Models.FeatureAccess.PlanFeatures["Free"].ToList();
+            _message = "Subscription cancelled. You've been moved to the Free plan.";
+        }
+        catch (Exception ex)
+        {
+            _message = $"Error: {ex.Message}";
+        }
+        finally
+        {
+            _isProcessing = false;
+            StateHasChanged();
+        }
+    }
+
+    private async Task<int> GetUserIdAsync()
+    {
+        var authState = await AuthState.GetAuthenticationStateAsync();
+        var idStr = authState.User.FindFirstValue(System.Security.Claims.ClaimTypes.NameIdentifier);
+        return int.TryParse(idStr, out var id) ? id : 0;
+    }
+}

@@ -1,6 +1,10 @@
 using ArtForgeAI.Models;
 using Microsoft.Extensions.Options;
 using OpenAI.Images;
+using SixLabors.ImageSharp;
+using SixLabors.ImageSharp.Formats.Jpeg;
+using SixLabors.ImageSharp.PixelFormats;
+using SixLabors.ImageSharp.Processing;
 
 namespace ArtForgeAI.Services;
 
@@ -210,7 +214,7 @@ public class ImageGenerationService : IImageGenerationService
                 enhancedPrompt = enhancement.EnhancedPrompt;
             }
         }
-        else if (request.HasReferenceImages && request.ReferenceImagePaths.Count > 1)
+        else if (request.HasReferenceImages && request.ReferenceImagePaths.Count > 1 && !request.SkipMultiImageComposition)
         {
             // Even without AI enhancement, prepend multi-image composition instructions
             finalPrompt = $"Combine the subjects from all {request.ReferenceImagePaths.Count} provided reference images into a single scene. "
@@ -218,7 +222,7 @@ public class ImageGenerationService : IImageGenerationService
                         + finalPrompt;
         }
 
-        // Pre-load reference images (used for both attempts)
+        // Pre-load reference images, downscaling large ones for fast Gemini processing
         List<(byte[] data, string mimeType)>? images = null;
         if (request.HasReferenceImages)
         {
@@ -231,15 +235,8 @@ public class ImageGenerationService : IImageGenerationService
                     throw new FileNotFoundException("Reference image not found.");
 
                 var refBytes = await File.ReadAllBytesAsync(fullPath);
-                var ext = Path.GetExtension(fullPath).ToLowerInvariant();
-                var mimeType = ext switch
-                {
-                    ".jpg" or ".jpeg" => "image/jpeg",
-                    ".png" => "image/png",
-                    ".webp" => "image/webp",
-                    _ => "image/png"
-                };
-                images.Add((refBytes, mimeType));
+                var (optimised, mime) = OptimiseForGemini(refBytes, fullPath);
+                images.Add((optimised, mime));
             }
         }
 
@@ -540,5 +537,68 @@ public class ImageGenerationService : IImageGenerationService
         if (!fullPath.StartsWith(webRoot, StringComparison.OrdinalIgnoreCase))
             throw new UnauthorizedAccessException("Access to the specified path is denied.");
         return fullPath;
+    }
+
+    /// <summary>
+    /// Downscale large reference images to Gemini-friendly dimensions (max 1536px per side)
+    /// and convert to JPEG for smaller payload. This is the common optimisation point
+    /// for ALL features that send images to Gemini.
+    /// </summary>
+    private (byte[] data, string mimeType) OptimiseForGemini(byte[] rawBytes, string filePath)
+    {
+        const int MaxSide = 1536;
+        const int JpegQuality = 90;
+
+        try
+        {
+            using var img = Image.Load<Rgba32>(rawBytes);
+
+            bool needsResize = img.Width > MaxSide || img.Height > MaxSide;
+            bool isLargeFile = rawBytes.Length > 1_500_000; // >1.5 MB
+
+            if (!needsResize && !isLargeFile)
+            {
+                // Small enough — return as-is with correct mime type
+                var ext = Path.GetExtension(filePath).ToLowerInvariant();
+                var mime = ext switch
+                {
+                    ".jpg" or ".jpeg" => "image/jpeg",
+                    ".png" => "image/png",
+                    ".webp" => "image/webp",
+                    _ => "image/png"
+                };
+                return (rawBytes, mime);
+            }
+
+            // Downscale if needed
+            if (needsResize)
+            {
+                double scale = Math.Min((double)MaxSide / img.Width, (double)MaxSide / img.Height);
+                int newW = (int)Math.Round(img.Width * scale);
+                int newH = (int)Math.Round(img.Height * scale);
+                img.Mutate(ctx => ctx.Resize(newW, newH, KnownResamplers.Lanczos3));
+                _logger.LogInformation("Downscaled reference image {Path}: {OldW}x{OldH} → {NewW}x{NewH}",
+                    filePath, img.Width, img.Height, newW, newH);
+            }
+
+            // Encode as JPEG for smaller payload
+            using var ms = new MemoryStream();
+            img.SaveAsJpeg(ms, new JpegEncoder { Quality = JpegQuality });
+            return (ms.ToArray(), "image/jpeg");
+        }
+        catch (Exception ex)
+        {
+            // If optimisation fails, return original bytes
+            _logger.LogWarning(ex, "Image optimisation failed for {Path}, using original", filePath);
+            var ext = Path.GetExtension(filePath).ToLowerInvariant();
+            var mime = ext switch
+            {
+                ".jpg" or ".jpeg" => "image/jpeg",
+                ".png" => "image/png",
+                ".webp" => "image/webp",
+                _ => "image/png"
+            };
+            return (rawBytes, mime);
+        }
     }
 }

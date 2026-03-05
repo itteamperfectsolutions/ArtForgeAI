@@ -1,5 +1,7 @@
 @inject IJSRuntime JS
 @inject IImageStorageService ImageStorage
+@inject IImageEnhancerService ImageEnhancer
+@inject IColorEnhancementService ColorEnhancer
 @inject ILogger<ImagePreviewModal> Logger
 
 @if (Generation is not null)
@@ -9,23 +11,33 @@
             <div class="preview-image-wrap">
                 <button class="preview-close" @onclick="Close">&#10005;</button>
                 <img class="preview-image @(_zoomed ? "zoomed" : "")"
-                     src="@ImageStorage.GetWebPath(Generation.LocalImagePath ?? "")"
+                     src="@($"{ImageStorage.GetWebPath(Generation.LocalImagePath ?? "")}?v={_imgVersion}")"
                      alt="Preview"
                      @onclick="ToggleZoom" />
             </div>
             <div class="preview-details">
-                @if (!string.IsNullOrEmpty(Generation.EnhancedPrompt))
+                <div style="display:flex; align-items:center; gap:0.75rem; margin-bottom:0.5rem;">
+                    <span style="font-size: 0.8rem; color: var(--text-muted);">
+                        @Generation.ImageSize &middot; @Generation.CreatedAt.ToString("MMMM d, yyyy h:mm tt")
+                    </span>
+                    <button class="preview-prompt-toggle" @onclick="() => _showPrompt = !_showPrompt">
+                        @(_showPrompt ? "Hide Prompt" : "Show Prompt")
+                    </button>
+                </div>
+                @if (_showPrompt)
                 {
-                    <div class="prompt-text">
-                        <strong>Enhanced prompt:</strong> @Generation.EnhancedPrompt
+                    <div class="preview-prompt-panel">
+                        @if (!string.IsNullOrEmpty(Generation.EnhancedPrompt))
+                        {
+                            <div class="prompt-text" style="margin-bottom:0.5rem;">
+                                <strong>Enhanced prompt:</strong> @Generation.EnhancedPrompt
+                            </div>
+                        }
+                        <div class="prompt-text" style="margin-bottom:0;">
+                            <strong>Original:</strong> @Generation.OriginalPrompt
+                        </div>
                     </div>
                 }
-                <div class="prompt-text">
-                    <strong>Original:</strong> @Generation.OriginalPrompt
-                </div>
-                <div style="font-size: 0.8rem; color: var(--text-muted); margin-bottom: 1rem;">
-                    @Generation.ImageSize &middot; @Generation.CreatedAt.ToString("MMMM d, yyyy h:mm tt")
-                </div>
                 <div class="preview-actions">
                     <button class="btn-secondary" @onclick="DownloadPng">
                         &#11015; PNG
@@ -33,10 +45,43 @@
                     <button class="btn-secondary" @onclick="DownloadJpg">
                         &#11015; JPG
                     </button>
+                    @if (ImageEnhancer.IsAvailable)
+                    {
+                        <button class="btn-enhance" @onclick="EnhanceImage" disabled="@_isEnhancing">
+                            @if (_isEnhancing)
+                            {
+                                <span>Enhancing...</span>
+                            }
+                            else
+                            {
+                                <span>&#9889; Enhance 4x</span>
+                            }
+                        </button>
+                    }
+                    @*@if (ColorEnhancer.IsAvailable)
+                    {
+                        <button class="btn-color-enhance" @onclick="ColorEnhanceImage" disabled="@_isColorEnhancing">
+                            @if (_isColorEnhancing)
+                            {
+                                <span>Enhancing...</span>
+                            }
+                            else
+                            {
+                                <span>&#127912; Enhance Colors</span>
+                            }
+                        </button>
+                    }*@
                     <button class="btn-danger" @onclick="RequestDelete">
                         &#128465; Delete
                     </button>
                 </div>
+                @if (_isEnhancing)
+                {
+                    <div class="enhance-progress-bar">
+                        <div class="enhance-progress-fill" style="width: @(_enhanceProgress)%"></div>
+                        <span class="enhance-progress-text">@(_enhanceProgress)%</span>
+                    </div>
+                }
                 <div class="ai-disclaimer">
                     AI-generated image — minor variations in facial features, colours, and details may occur.
                 </div>
@@ -51,6 +96,11 @@
     [Parameter] public EventCallback<int> OnDelete { get; set; }
 
     private bool _zoomed;
+    private bool _showPrompt;
+    private bool _isEnhancing;
+    private int _enhanceProgress;
+    private bool _isColorEnhancing;
+    private long _imgVersion;
 
     private void ToggleZoom() => _zoomed = !_zoomed;
 
@@ -60,6 +110,9 @@
     private async Task Close()
     {
         _zoomed = false;
+        _showPrompt = false;
+        _isEnhancing = false;
+        _isColorEnhancing = false;
         await OnClose.InvokeAsync();
     }
 
@@ -76,6 +129,63 @@
         catch (Exception ex)
         {
             Logger.LogError(ex, "Image download failed");
+        }
+    }
+
+    private async Task EnhanceImage()
+    {
+        if (Generation?.LocalImagePath is null || _isEnhancing) return;
+
+        _isEnhancing = true;
+        _enhanceProgress = 0;
+        StateHasChanged();
+
+        try
+        {
+            var progress = new Progress<int>(pct =>
+            {
+                _enhanceProgress = pct;
+                InvokeAsync(StateHasChanged);
+            });
+
+            // Enhancer accepts web-relative paths and returns web-relative paths
+            var enhancedPath = await ImageEnhancer.EnhanceImageAsync(Generation.LocalImagePath, progress);
+            Generation.LocalImagePath = enhancedPath;
+            _imgVersion++;
+        }
+        catch (Exception ex)
+        {
+            Logger.LogError(ex, "Gallery image enhancement failed");
+        }
+        finally
+        {
+            _isEnhancing = false;
+            StateHasChanged();
+        }
+    }
+
+    private async Task ColorEnhanceImage()
+    {
+        if (Generation?.LocalImagePath is null || _isColorEnhancing) return;
+
+        _isColorEnhancing = true;
+        StateHasChanged();
+
+        try
+        {
+            // ColorEnhancer accepts web-relative paths and returns web-relative paths
+            var enhancedPath = await ColorEnhancer.EnhanceColorsAsync(Generation.LocalImagePath);
+            Generation.LocalImagePath = enhancedPath;
+            _imgVersion++;
+        }
+        catch (Exception ex)
+        {
+            Logger.LogError(ex, "Gallery image color enhancement failed");
+        }
+        finally
+        {
+            _isColorEnhancing = false;
+            StateHasChanged();
         }
     }
 

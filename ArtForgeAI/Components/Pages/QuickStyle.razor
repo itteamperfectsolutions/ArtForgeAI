@@ -1,5 +1,6 @@
 @page "/quick-style"
 @rendermode InteractiveServer
+@attribute [Authorize]
 @using SixLabors.ImageSharp
 @using SixLabors.ImageSharp.PixelFormats
 @using SixLabors.ImageSharp.Processing
@@ -7,20 +8,45 @@
 @inject IImageGenerationService ImageGenService
 @inject IImageStorageService ImageStorage
 @inject ICinematicProfileService CinematicProfile
+@inject IGeminiImageService GeminiService
+@inject IImageEnhancerService ImageEnhancer
+@inject IColorEnhancementService ColorEnhancer
 @inject IWebHostEnvironment Env
 @inject IJSRuntime JS
 @using System.Text
 @inject ILogger<QuickStyle> Logger
+@inject ISubscriptionService SubscriptionService
+@inject ICoinService CoinService
+@inject AuthenticationStateProvider AuthState
+@inject NavigationManager Nav
 
 <PageTitle>ArtForge AI - Quick Style</PageTitle>
 
 <div class="page-header">
     <h2>Quick Style</h2>
-    <p>Click any style to upload a photo and get a 20x30 print-ready result</p>
+    <p>Click any style to upload a photo and get a print-ready result</p>
+</div>
+
+<div class="qs-search-bar">
+    <span class="qs-search-icon">&#128269;</span>
+    <input type="text" class="qs-search-input" placeholder="Search styles..."
+           @bind="_searchQuery" @bind:event="oninput" />
+    @if (!string.IsNullOrEmpty(_searchQuery))
+    {
+        <button class="qs-search-clear" @onclick="() => _searchQuery = string.Empty">&times;</button>
+    }
 </div>
 
 @* ── Style grid is always visible ── *@
-@foreach (var group in _grouped)
+@{ var filtered = GetFilteredGroups(); }
+@if (filtered.Length == 0 && !string.IsNullOrEmpty(_searchQuery))
+{
+    <div class="qs-no-results">
+        <span>&#128269;</span>
+        <p>No styles found for "<strong>@_searchQuery</strong>"</p>
+    </div>
+}
+@foreach (var group in filtered)
 {
     <div class="qs-category-section">
         <div class="qs-category-header">@group.Key</div>
@@ -64,36 +90,36 @@
                 @if (_selectedStyle?.PromptTemplate.Contains("{{OCCASION}}") == true)
                 {
                     <div class="qs-field">
-                        <label>Occasion / Heading <span class="qs-required">*</span></label>
-                        <input type="text" @bind="_occasionText" placeholder="e.g. Happy Birthday, Happy Anniversary, Congratulations..." maxlength="60" />
+                        <label>Occasion / Heading <span class="qs-optional">(optional)</span></label>
+                        <input type="text" @bind="_occasionText" placeholder="e.g. Happy Birthday, Happy New Year, Congratulations..." maxlength="60" />
                     </div>
                 }
                 @if (_selectedStyle?.PromptTemplate.Contains("{{MESSAGE}}") == true)
                 {
                     <div class="qs-field">
                         <label>Personal Message <span class="qs-optional">(optional — auto-generated if blank)</span></label>
-                        <textarea @bind="_messageText" rows="3" placeholder="e.g. Happy Birthday, Olivia! Celebrate and enjoy!" maxlength="200"></textarea>
+                        <textarea @bind="_messageText" rows="3" placeholder="e.g. Happy New Year! Wishing you all the best!" maxlength="200"></textarea>
                     </div>
                 }
                 @if (_selectedStyle?.PromptTemplate.Contains("{{CALENDAR}}") == true)
                 {
                     <div class="qs-field">
-                        <label>Special Date <span class="qs-required">*</span></label>
+                        <label>Special Date <span class="qs-optional">(optional)</span></label>
                         <input type="date" @bind="_calendarDate" />
                     </div>
                 }
                 @if (_selectedStyle?.PromptTemplate.Contains("{{NUMBER}}") == true)
                 {
                     <div class="qs-field">
-                        <label>Number / Age <span class="qs-required">*</span></label>
+                        <label>Number / Age <span class="qs-optional">(optional)</span></label>
                         <input type="number" @bind="_numberValue" min="0" max="999" placeholder="e.g. 2, 5, 25..." />
                     </div>
                 }
                 @if (_selectedStyle?.PromptTemplate.Contains("{{DATE}}") == true)
                 {
                     <div class="qs-field">
-                        <label>Date <span class="qs-required">*</span></label>
-                        <input type="text" @bind="_dateText" placeholder="e.g. 26-07-2023" maxlength="30" />
+                        <label>Date <span class="qs-optional">(optional)</span></label>
+                        <input type="date" @bind="_datePickerValue" />
                     </div>
                 }
                 @if (!string.IsNullOrEmpty(_placeholderError))
@@ -104,6 +130,55 @@
             <div class="qs-modal-footer">
                 <button class="btn-primary-gradient" @onclick="ProcessWithPlaceholders">Generate</button>
                 <button class="btn-secondary" @onclick="CancelPlaceholders">&times; Cancel</button>
+            </div>
+        </div>
+    </div>
+}
+
+@* ── Silhouette Contour options modal ── *@
+@if (_pendingSilhouetteOptions)
+{
+    <div class="qs-modal-overlay">
+        <div class="qs-modal qs-placeholder-modal">
+            <div class="qs-modal-header">
+                <span>@_selectedStyle?.IconEmoji Silhouette Contour Options</span>
+                <button class="qs-modal-close" @onclick="CancelSilhouetteOptions">&times;</button>
+            </div>
+            <div class="qs-placeholder-body">
+                <div class="qs-field">
+                    <label>Face Orientation</label>
+                    <div class="qs-option-group">
+                        <label class="qs-option-card @(_silhouetteOrientation == "front" ? "qs-option-selected" : "")" @onclick='() => _silhouetteOrientation = "front"'>
+                            <span class="qs-option-icon">&#128100;</span>
+                            <span class="qs-option-label">Front</span>
+                            <span class="qs-option-desc">All facial elements outlined and visible</span>
+                        </label>
+                        <label class="qs-option-card @(_silhouetteOrientation == "side" ? "qs-option-selected" : "")" @onclick='() => _silhouetteOrientation = "side"'>
+                            <span class="qs-option-icon">&#128100;</span>
+                            <span class="qs-option-label">Side</span>
+                            <span class="qs-option-desc">Elegant profile silhouette view</span>
+                        </label>
+                    </div>
+                </div>
+                <div class="qs-field">
+                    <label>Body Type</label>
+                    <div class="qs-option-group">
+                        <label class="qs-option-card @(_silhouetteBodyType == "bust" ? "qs-option-selected" : "")" @onclick='() => _silhouetteBodyType = "bust"'>
+                            <span class="qs-option-icon">&#128372;</span>
+                            <span class="qs-option-label">Bust</span>
+                            <span class="qs-option-desc">Head, neck, and shoulders</span>
+                        </label>
+                        <label class="qs-option-card @(_silhouetteBodyType == "full" ? "qs-option-selected" : "")" @onclick='() => _silhouetteBodyType = "full"'>
+                            <span class="qs-option-icon">&#128694;</span>
+                            <span class="qs-option-label">Full Body</span>
+                            <span class="qs-option-desc">Complete figure outline</span>
+                        </label>
+                    </div>
+                </div>
+            </div>
+            <div class="qs-modal-footer">
+                <button class="btn-primary-gradient" @onclick="ProcessSilhouetteOptions">Generate</button>
+                <button class="btn-secondary" @onclick="CancelSilhouetteOptions">&times; Cancel</button>
             </div>
         </div>
     </div>
@@ -126,7 +201,7 @@
     <div class="qs-modal-overlay" @onclick="StartOver">
         <div class="qs-modal" @onclick:stopPropagation="true">
             <div class="qs-modal-header">
-                <span>@_selectedStyle?.IconEmoji @_selectedStyle?.Name — 20x30</span>
+                <span>@_selectedStyle?.IconEmoji @_selectedStyle?.Name</span>
                 <button class="qs-modal-close" @onclick="StartOver">&times;</button>
             </div>
             <div class="qs-modal-body">
@@ -134,14 +209,47 @@
                     <img src="/@_sourcePath" alt="Source" />
                 </div>
                 <div class="qs-modal-img-card">
-                    <img src="@(ImageStorage.GetWebPath(_result.LocalImagePath ?? ""))" alt="Result" />
+                    <img src="@($"{ImageStorage.GetWebPath(_result.LocalImagePath ?? "")}?v={_imgVersion}")" alt="Result" />
                 </div>
             </div>
             <div class="qs-modal-footer">
                 <button class="btn-primary-gradient" @onclick="DownloadPng">&#11015; Download PNG</button>
                 <button class="btn-secondary" @onclick="DownloadJpg">&#11015; Download JPG</button>
+                @if (ImageEnhancer.IsAvailable)
+                {
+                    <button class="btn-enhance" @onclick="EnhanceImage" disabled="@_isEnhancing">
+                        @if (_isEnhancing)
+                        {
+                            <span>Enhancing...</span>
+                        }
+                        else
+                        {
+                            <span>&#9889; Enhance 4x</span>
+                        }
+                    </button>
+                }
+                @*@if (ColorEnhancer.IsAvailable)
+                {
+                    <button class="btn-color-enhance" @onclick="ColorEnhanceImage" disabled="@_isColorEnhancing">
+                        @if (_isColorEnhancing)
+                        {
+                            <span>Enhancing...</span>
+                        }
+                        else
+                        {
+                            <span>&#127912; Enhance Colors</span>
+                        }
+                    </button>
+                }*@
                 <button class="btn-secondary" @onclick="StartOver">&times; Close</button>
             </div>
+            @if (_isEnhancing)
+            {
+                <div class="enhance-progress-bar">
+                    <div class="enhance-progress-fill" style="width: @(_enhanceProgress)%"></div>
+                    <span class="enhance-progress-text">@(_enhanceProgress)%</span>
+                </div>
+            }
             <div class="ai-disclaimer">
                 AI-generated image — minor variations in facial features, colours, and details may occur. For best results, try regenerating if needed.
             </div>
@@ -154,8 +262,13 @@
     private IGrouping<string, StylePreset>[] _grouped = [];
     private StylePreset? _selectedStyle;
     private string? _sourcePath;
+    private string _searchQuery = string.Empty;
     private GenerationResult? _result;
     private bool _isProcessing;
+    private bool _isEnhancing;
+    private int _enhanceProgress;
+    private bool _isColorEnhancing;
+    private long _imgVersion;
     private string? _error;
 
     // Placeholder text-input state
@@ -164,15 +277,49 @@
     private string _messageText = string.Empty;
     private DateTime? _calendarDate;
     private int? _numberValue;
-    private string _dateText = string.Empty;
+    private string _dateText = string.Empty; // kept for backward compat
+    private DateTime? _datePickerValue;
     private string? _placeholderError;
     private string _processingStatus = "";
     private CancellationTokenSource? _statusCts;
 
-    private static readonly string[] _categoryOrder = ["Artistic", "Fun", "Professional", "Abstract", "Mythological", "Regional", "PhotoCollage"];
+    // Silhouette Contour options
+    private bool _pendingSilhouetteOptions;
+    private string _silhouetteOrientation = "side"; // "front" or "side"
+    private string _silhouetteBodyType = "bust"; // "full" or "bust"
+
+    private static readonly string[] _categoryOrder = ["Artistic", "Fun", "Professional", "Abstract", "Mythological", "Regional", "PhotoCollage", "PhotoArts"];
+
+    private IGrouping<string, StylePreset>[] GetFilteredGroups()
+    {
+        if (string.IsNullOrWhiteSpace(_searchQuery))
+            return _grouped;
+
+        var query = _searchQuery.Trim();
+        return _styles
+            .Where(s => s.Name.Contains(query, StringComparison.OrdinalIgnoreCase)
+                     || s.Category.Contains(query, StringComparison.OrdinalIgnoreCase))
+            .GroupBy(s => s.Category)
+            .OrderBy(g => Array.IndexOf(_categoryOrder, g.Key) is var i && i < 0 ? 999 : i)
+            .ToArray();
+    }
 
     protected override async Task OnInitializedAsync()
     {
+        var authState = await AuthState.GetAuthenticationStateAsync();
+        if (!authState.User.IsInRole("SuperAdmin"))
+        {
+            var userIdStr = authState.User.FindFirstValue(ClaimTypes.NameIdentifier);
+            if (int.TryParse(userIdStr, out var uid))
+            {
+                if (!await SubscriptionService.HasFeatureAccessAsync(uid, FeatureAccess.QuickStyle))
+                {
+                    Nav.NavigateTo("/pricing", forceLoad: true);
+                    return;
+                }
+            }
+        }
+
         _styles = await StyleService.GetActivePresetsAsync();
         _grouped = _styles
             .GroupBy(s => s.Category)
@@ -186,34 +333,63 @@
     private string ReplacePlaceholders(string prompt)
     {
         var result = prompt;
-        var occasion = _occasionText.Trim();
+        var occasion = _occasionText?.Trim() ?? "";
 
-        result = result.Replace("{{OCCASION}}", occasion);
+        // OCCASION — if blank, tell AI to pick something fitting
+        if (!string.IsNullOrWhiteSpace(occasion))
+            result = result.Replace("{{OCCASION}}", occasion);
+        else
+            result = result.Replace("'{{OCCASION}}' in decorative script, then ", "")
+                           .Replace("{{OCCASION}}", "a fitting celebratory greeting");
 
+        // MESSAGE — if blank, auto-generate based on the style context
         if (!string.IsNullOrWhiteSpace(_messageText))
         {
             result = result.Replace("{{MESSAGE}}", _messageText.Trim());
         }
         else
         {
-            // Instruct the AI to auto-generate a fitting message for this occasion
+            // Determine the occasion context from the style name / occasion field
+            var ctx = !string.IsNullOrWhiteSpace(occasion) ? occasion
+                    : (_selectedStyle?.Name?.Contains("Birthday", StringComparison.OrdinalIgnoreCase) == true) ? "a birthday"
+                    : (_selectedStyle?.Name?.Contains("Wedding", StringComparison.OrdinalIgnoreCase) == true) ? "a wedding"
+                    : (_selectedStyle?.Name?.Contains("Mother", StringComparison.OrdinalIgnoreCase) == true) ? "Mother's Day"
+                    : "a celebration";
             result = result.Replace("{{MESSAGE}}",
-                $"Generate a short warm heartfelt message (2-3 lines) appropriate for the occasion: {occasion}");
+                $"Generate a short warm heartfelt message (2-3 lines) specifically for {ctx}. Do NOT mention any other festival, holiday, or event name.");
         }
 
+        // Prevent Gemini from adding unrelated festival/event text
+        result += " TEXT RESTRICTION: Display ONLY the text explicitly specified in this prompt. Do NOT add, invent, or display any other festival names, holiday greetings, event names, or seasonal references (e.g., no Holi, Diwali, Christmas, New Year, etc.) unless the prompt explicitly asks for it.";
+
+        // CALENDAR
         if (_calendarDate.HasValue)
         {
             result = result.Replace("{{CALENDAR}}", BuildCalendarDescription(_calendarDate.Value));
         }
 
+        // NUMBER — if blank, remove number references from prompt
         if (_numberValue.HasValue)
         {
             result = result.Replace("{{NUMBER}}", _numberValue.Value.ToString());
         }
-
-        if (!string.IsNullOrWhiteSpace(_dateText))
+        else
         {
-            result = result.Replace("{{DATE}}", _dateText.Trim());
+            result = result.Replace("Giant 3D number '{{NUMBER}}' fills 70-80% of canvas height, with the ENTIRE number surface filled by a mosaic of", "The canvas is filled with a mosaic of");
+            result = result.Replace("'{{NUMBER}}'", "");
+            result = result.Replace("{{NUMBER}}", "");
+        }
+
+        // DATE — use date picker if set, fall back to text, or omit
+        var dateStr = _datePickerValue?.ToString("dd-MM-yyyy") ?? _dateText?.Trim() ?? "";
+        if (!string.IsNullOrWhiteSpace(dateStr))
+        {
+            result = result.Replace("{{DATE}}", dateStr);
+        }
+        else
+        {
+            result = result.Replace(", then '{{DATE}}' smaller below", "");
+            result = result.Replace("{{DATE}}", "");
         }
 
         return result;
@@ -222,7 +398,7 @@
     private async Task HandleTileClick(InputFileChangeEventArgs e, StylePreset style)
     {
         var file = e.File;
-        if (file is null || file.Size > 10 * 1024 * 1024 || _isProcessing) return;
+        if (file is null || file.Size > 30 * 1024 * 1024 || _isProcessing) return;
 
         _selectedStyle = style;
         _error = null;
@@ -231,8 +407,18 @@
 
         try
         {
-            using var stream = file.OpenReadStream(10 * 1024 * 1024);
+            using var stream = file.OpenReadStream(30 * 1024 * 1024);
             _sourcePath = await ImageStorage.SaveUploadedFileAsync(stream, file.Name);
+
+            // If Silhouette Contour, show face/body options modal first
+            if (style.Name == "Silhouette Contour")
+            {
+                _silhouetteOrientation = "side";
+                _silhouetteBodyType = "bust";
+                _pendingSilhouetteOptions = true;
+                StateHasChanged();
+                return;
+            }
 
             // If the style has text placeholders, show input modal first
             if (HasPlaceholders(style))
@@ -242,13 +428,14 @@
                 _calendarDate = null;
                 _numberValue = null;
                 _dateText = string.Empty;
+                _datePickerValue = null;
                 _pendingPlaceholders = true;
                 StateHasChanged();
                 return;
             }
 
-            // Otherwise proceed immediately
-            await RunGeneration(style.EffectivePrompt);
+            // Otherwise proceed immediately (raw template, RunGeneration collates everything)
+            await RunGeneration(style.PromptTemplate);
         }
         catch (Exception ex)
         {
@@ -262,34 +449,16 @@
     {
         if (_selectedStyle is null || _sourcePath is null) return;
 
-        // Validate: Occasion is required
-        if (_selectedStyle.PromptTemplate.Contains("{{OCCASION}}") && string.IsNullOrWhiteSpace(_occasionText))
-        {
-            _placeholderError = "Please enter the occasion (e.g. Happy Birthday, Happy Anniversary).";
-            return;
-        }
-
+        // Calendar is the only truly required field (needs a date to draw the grid)
         if (_selectedStyle.PromptTemplate.Contains("{{CALENDAR}}") && !_calendarDate.HasValue)
         {
             _placeholderError = "Please select the special date for the calendar.";
             return;
         }
 
-        if (_selectedStyle.PromptTemplate.Contains("{{NUMBER}}") && !_numberValue.HasValue)
-        {
-            _placeholderError = "Please enter the number / age.";
-            return;
-        }
-
-        if (_selectedStyle.PromptTemplate.Contains("{{DATE}}") && string.IsNullOrWhiteSpace(_dateText))
-        {
-            _placeholderError = "Please enter the date (e.g. 26-07-2023).";
-            return;
-        }
-
         _placeholderError = null;
         _pendingPlaceholders = false;
-        var prompt = ReplacePlaceholders(_selectedStyle.EffectivePrompt);
+        var prompt = ReplacePlaceholders(_selectedStyle.PromptTemplate);
         await RunGeneration(prompt);
     }
 
@@ -301,8 +470,59 @@
         _sourcePath = null;
     }
 
+    private async Task ProcessSilhouetteOptions()
+    {
+        if (_selectedStyle is null || _sourcePath is null) return;
+        _pendingSilhouetteOptions = false;
+        var prompt = BuildSilhouettePrompt();
+        await RunGeneration(prompt);
+    }
+
+    private void CancelSilhouetteOptions()
+    {
+        _pendingSilhouetteOptions = false;
+        _selectedStyle = null;
+        _sourcePath = null;
+    }
+
+    private string BuildSilhouettePrompt()
+    {
+        var isFront = _silhouetteOrientation == "front";
+        var isFull = _silhouetteBodyType == "full";
+
+        if (isFront)
+        {
+            var bodyDesc = isFull
+                ? "Show the complete full-body figure from head to feet as open unfilled outlines. Include all body elements: head, torso, arms, hands, legs, feet, clothing details — all as outline strokes only."
+                : "Show the subject from head to upper chest/shoulders area (bust portrait) as open unfilled outlines.";
+
+            return $"Transform into a pure line art portrait in front-facing view. STRICT RULES: The ENTIRE image must consist of thin outline strokes ONLY. ABSOLUTELY NO filled areas, NO solid colors, NO shading, NO color blocks, NO gradients anywhere in the image — not on clothing, not on hair, not on skin, not on any element. Every single part of the subject must be rendered as open unfilled outlines only, like a coloring book page. Do NOT fill or color any clothing — jackets, shirts, dresses must be just outline edges. The subject faces DIRECTLY FORWARD toward the viewer. FRONT FACE DETAIL (CRITICAL): Since this is a front-facing view, render ALL facial elements with clear outline strokes — BOTH eyes with detailed iris outlines, pupils, and eyelashes; BOTH eyebrows with individual hair strokes; the full nose with bridge, tip, and nostrils from the front; BOTH lips with defined upper and lower lip contours; the full jawline and chin contour; BOTH ears visible. Hair rendered with flowing outline strokes showing volume and texture — no filled hair, just strand outlines. {bodyDesc} All lines in fine warm golden-brown or dark gold color on a soft pale cream or warm ivory flat matte background. At the bottom: ornate golden decorative filigree scrollwork — curling vine patterns, swirls, floral ornamental vector art as a decorative border. No trophy, no award, no glass, no pedestal, no 3D objects. Style: pure outline drawing, premium invitation line art.";
+        }
+        else
+        {
+            var bodyDesc = isFull
+                ? "Show the complete full-body figure from head to feet in side profile as open unfilled outlines. Include the full standing pose: head profile, torso, arms, hands, legs, feet — all as outline strokes only."
+                : "Neck, shoulders, and upper body as simple contour outlines.";
+
+            return $"Transform into a pure line art portrait in elegant side profile view. STRICT RULES: The ENTIRE image must consist of thin outline strokes ONLY. ABSOLUTELY NO filled areas, NO solid colors, NO shading, NO color blocks, NO gradients anywhere in the image — not on clothing, not on hair, not on skin, not on any element. Every single part of the subject — face, hair, neck, shoulders, body, clothing — must be rendered as open unfilled outlines only, like a coloring book page. Do NOT fill or color any clothing — jackets, shirts, dresses must be just outline edges. The subject shown in graceful side-facing profile. Face profile with clearly defined line features: eye with lashes, nose bridge and tip, lips, chin and jawline contour. Hair flowing with elegant sweeping line strokes — no filled hair, just strand outlines. {bodyDesc} All lines in fine warm golden-brown or dark gold color on a soft pale cream or warm ivory flat matte background. At the bottom: ornate golden decorative filigree scrollwork — curling vine patterns, swirls, floral ornamental vector art as a decorative border. No trophy, no award, no glass, no pedestal, no 3D objects. Style: pure outline drawing, premium invitation line art.";
+        }
+    }
+
     private async Task RunGeneration(string prompt)
     {
+        // Debit coins
+        var authState2 = await AuthState.GetAuthenticationStateAsync();
+        var uidStr = authState2.User.FindFirstValue(ClaimTypes.NameIdentifier);
+        if (int.TryParse(uidStr, out var userId) && !authState2.User.IsInRole("SuperAdmin"))
+        {
+            var cost = FeatureAccess.GetCost(FeatureAccess.QuickStyle);
+            if (!await CoinService.DebitCoinsAsync(userId, cost, CoinTransactionType.GenerationSpend, "Quick Style generation"))
+            {
+                _error = "Insufficient coins. Please purchase more coins.";
+                return;
+            }
+        }
+
         _isProcessing = true;
         _processingStatus = $"Analysing your photo for {_selectedStyle?.Name}...";
         _statusCts = new CancellationTokenSource();
@@ -314,11 +534,39 @@
         const int targetW = 1440;
         const int targetH = 2160;
 
-        // Append explicit 2:3 format instruction
-        prompt += " OUTPUT FORMAT: The final image MUST be in exact 2:3 portrait aspect ratio (like a 20x30 inch print). Do NOT output square or landscape images.";
+        // ── Build ONE clean collated prompt: FACE → STYLE → RULES → FORMAT ──
+        var sb = new System.Text.StringBuilder();
+        var category = _selectedStyle?.Category ?? "";
+        var isPhotoStyle = category is "PhotoArts" or "PhotoCollage";
 
-        // Append universal face/identity preservation instruction
-        prompt += " FACE & IDENTITY PRESERVATION (CRITICAL): Carefully analyse the source photo to determine the subject's GENDER, approximate AGE, SKIN TONE, and every facial detail. The generated image MUST match the source exactly — same gender, same age range, same complexion and skin undertone, same face shape, jawline, eye shape, eye colour, eyebrow thickness and arch, nose shape and size, lip shape and fullness, ear shape, hairline, hair colour, hair texture, and hairstyle. Preserve moles, dimples, facial hair, wrinkles, and any distinguishing facial marks. Do NOT alter, beautify, age, de-age, lighten, darken, or change any facial feature. The face in every panel/photo MUST be immediately recognisable as the SAME person from the source image — identical in every detail.";
+        // 1. Face preservation at the START (highest priority for Gemini)
+        sb.Append("FACE LOCK (HIGHEST PRIORITY — NON-NEGOTIABLE): The face of every person in the output MUST be a PHOTOREALISTIC, EXACT copy of their face from the source photo. This means: same face shape, same nose bridge and tip, same eye shape and color, same eyebrow thickness and arch, same lip shape and fullness, same jawline and chin, same skin tone and complexion, same facial hair, same moles, marks, and wrinkles. Do NOT alter, beautify, smooth, age, de-age, lighten, darken, slim, widen, or modify ANY facial feature in ANY way. Even if the style is artistic, cartoonish, or collage-based — the FACE itself must remain photorealistic and perfectly intact with all features clearly visible and sharp. Never generate blurred, smudged, sketch-like, or painterly faces. A viewer must instantly recognize the same person. ");
+
+        // 1b. Extra face rules for PhotoArts/PhotoCollage (multi-panel styles where faces get small)
+        if (isPhotoStyle)
+        {
+            sb.Append("MULTI-PANEL FACE TECHNIQUE (CRITICAL): This is a collage/multi-panel layout. Follow this process: " +
+                "(1) FIRST, study the source face carefully — memorize every facial feature at the highest detail level: exact eye shape, pupil color, nose bridge width, nostril shape, lip thickness, chin shape, cheekbone height, skin texture, every mole and mark. " +
+                "(2) SINGLE IDENTITY RULE: There is ONLY ONE person identity in this image — the person from the source photo. Every face in every panel is THIS SAME PERSON. Do NOT generate different-looking people across panels. If you drew the face in panel 1, panel 2's face must look like it was copy-pasted from panel 1 with only pose/angle changed. " +
+                "(3) For EVERY panel/frame, render the face at HIGH RESOLUTION first (as if generating a 512x512 portrait), then place it into the panel. Never generate faces smaller than 100x100 pixels in the final output. " +
+                "(4) FRAMING: Each panel must use CLOSE-UP or MEDIUM framing (head and shoulders, or waist-up). NEVER use full-body shots where the face becomes tiny. The face should occupy at least 25% of each panel's area. " +
+                "(5) ALL facial features must be individually distinguishable in every panel: both eyes with visible pupils and iris color, a defined nose with nostrils, distinct lips with shape, visible eyebrows with correct thickness. " +
+                "(6) The HERO/main panel should show the face at the LARGEST size — at least 40% of the panel height. " +
+                "(7) Use MAXIMUM 4-5 panels with faces. Additional space should be decorative elements, text, flowers, or scenery — NOT more tiny face panels. " +
+                "(8) CONSISTENCY CHECK: Before finalizing, verify that if you cover the body/clothing in each panel, the face alone would identify it as the same person in every single panel. " +
+                "(9) QUALITY TEST: If you zoom into any panel and cannot clearly see eyes, nose, and mouth as separate distinct features, that face is TOO SMALL — crop tighter or remove that panel. ");
+        }
+
+        // 2. Style instructions (the actual creative prompt)
+        sb.Append(prompt);
+
+        // 3. Gender adaptation + person count + multi-panel rules
+        sb.Append(" RULES: Detect the subject's gender from the source photo and adapt all attire, jewelry, and styling accordingly — use saree/lehenga for women, dhoti/sherwani/kurta for men, or age-appropriate alternatives for children. Show ONLY the exact number of people from the source photo — no extra people. If multiple panels/scenes, each panel must be a completely different scene, pose, outfit, angle, and setting. CRITICAL: In every panel or frame, the face must have clear, sharp, photorealistic facial features — eyes, nose, mouth, and jawline must all be clearly defined and recognizable. Never leave faces blank, blurry, or stylized beyond recognition.");
+
+        // 4. Quality and format
+        sb.Append(" OUTPUT: Highest quality, photorealistic detail, exact 2:3 portrait aspect ratio.");
+
+        prompt = sb.ToString();
 
         try
         {
@@ -341,6 +589,16 @@
                 }
             }
 
+            // Build reference image list — add pre-rendered calendar as 2nd image if needed
+            var refPaths = new List<string> { _sourcePath! };
+            bool hasCalendarRef = false;
+            if (_calendarDate.HasValue && _selectedStyle?.PromptTemplate.Contains("{{CALENDAR}}") == true)
+            {
+                var calPath = await CalendarImageGenerator.GenerateAndSaveAsync(_calendarDate.Value, Env.WebRootPath);
+                refPaths.Add(calPath);
+                hasCalendarRef = true;
+            }
+
             var request = new GenerationRequest
             {
                 Prompt = prompt,
@@ -348,16 +606,41 @@
                 Height = targetH,
                 SizeName = "20x30",
                 EnhancePrompt = false,
-                ReferenceImagePaths = [_sourcePath!],
-                Provider = ImageProvider.Gemini
+                ReferenceImagePaths = refPaths,
+                Provider = ImageProvider.Gemini,
+                SkipMultiImageComposition = hasCalendarRef
             };
 
             _result = await ImageGenService.GenerateImageAsync(request);
+
+            if (_result is null)
+            {
+                _error = "Image generation returned no result. Please try again.";
+                return;
+            }
 
             if (_result.Success)
             {
                 await UpdateStatus("Perfecting the final composition...");
                 await EnforceAspectRatio(targetW, targetH);
+
+                // Auto-enhance PhotoArts/PhotoCollage for sharper face details
+                if (isPhotoStyle && _result.LocalImagePath is not null && ImageEnhancer.IsAvailable)
+                {
+                    try
+                    {
+                        await UpdateStatus("Enhancing face details...");
+                        var enhancedPath = await ImageEnhancer.EnhanceImageAsync(
+                            _result.LocalImagePath,
+                            new Progress<int>(pct => { }));
+                        _result.LocalImagePath = enhancedPath;
+                        Logger.LogInformation("Auto-enhanced PhotoArts/PhotoCollage result for sharper faces");
+                    }
+                    catch (Exception enhEx)
+                    {
+                        Logger.LogWarning(enhEx, "Auto-enhancement failed for PhotoArts style, using original");
+                    }
+                }
             }
             else
             {
@@ -517,42 +800,70 @@
         }
     }
 
+    private async Task EnhanceImage()
+    {
+        if (_result?.LocalImagePath is null || _isEnhancing) return;
+
+        _isEnhancing = true;
+        _enhanceProgress = 0;
+        StateHasChanged();
+
+        try
+        {
+            var progress = new Progress<int>(pct =>
+            {
+                _enhanceProgress = pct;
+                InvokeAsync(StateHasChanged);
+            });
+
+            var enhancedPath = await ImageEnhancer.EnhanceImageAsync(_result.LocalImagePath, progress);
+            _result.LocalImagePath = enhancedPath;
+            _imgVersion++;
+        }
+        catch (Exception ex)
+        {
+            Logger.LogError(ex, "Quick style enhancement failed");
+            _error = "Enhancement failed. Please try again.";
+        }
+        finally
+        {
+            _isEnhancing = false;
+            StateHasChanged();
+        }
+    }
+
+    private async Task ColorEnhanceImage()
+    {
+        if (_result?.LocalImagePath is null || _isColorEnhancing) return;
+
+        _isColorEnhancing = true;
+        StateHasChanged();
+
+        try
+        {
+            var enhancedPath = await ColorEnhancer.EnhanceColorsAsync(_result.LocalImagePath);
+            _result.LocalImagePath = enhancedPath;
+            _imgVersion++;
+        }
+        catch (Exception ex)
+        {
+            Logger.LogError(ex, "Quick style color enhancement failed");
+            _error = "Color enhancement failed. Please try again.";
+        }
+        finally
+        {
+            _isColorEnhancing = false;
+            StateHasChanged();
+        }
+    }
+
     private string BuildCalendarDescription(DateTime date)
     {
         var monthName = date.ToString("MMMM").ToUpper();
         var year = date.Year;
-        var firstDay = new DateTime(year, date.Month, 1);
-        var daysInMonth = DateTime.DaysInMonth(year, date.Month);
-        var startDow = (int)firstDay.DayOfWeek; // 0=Sun
-
-        var sb = new StringBuilder();
-        sb.Append($"A clean CALENDAR GRID for {monthName} {year}. ");
-        sb.Append("White text on the dark background. ");
-        sb.Append($"Month name '{monthName} {year}' in bold uppercase above the grid. ");
-        sb.Append("Days of the week header row: SUN  MON  TUE  WED  THU  FRI  SAT. ");
-        sb.Append("Date number rows: ");
-
-        int dayNum = 1;
-        for (int week = 0; dayNum <= daysInMonth; week++)
-        {
-            var cells = new List<string>();
-            for (int dow = 0; dow < 7; dow++)
-            {
-                if ((week == 0 && dow < startDow) || dayNum > daysInMonth)
-                    cells.Add("blank");
-                else
-                {
-                    if (dayNum == date.Day)
-                        cells.Add($"[{dayNum} with a small RED HEART background]");
-                    else
-                        cells.Add(dayNum.ToString());
-                    dayNum++;
-                }
-            }
-            sb.Append($"Row {week + 1}: {string.Join(", ", cells)}. ");
-        }
-
-        sb.Append($"IMPORTANT: The date number {date.Day} MUST have a small red heart icon or red heart-shaped background behind it to mark the special day. All other dates are plain.");
-        return sb.ToString();
+        // Reference Image 2 is the pre-rendered pixel-perfect calendar
+        return $"A calendar grid for {monthName} {year} with the date {date.Day} marked with a red circle. " +
+               $"IMPORTANT: Use Reference Image 2 as the EXACT calendar layout — copy the day positions, numbers, and grid EXACTLY as shown. " +
+               $"Do NOT rearrange or guess the day positions — the reference image has the correct calendar.";
     }
 }

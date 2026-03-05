@@ -1,5 +1,6 @@
 @page "/passport-photo"
 @rendermode InteractiveServer
+@attribute [Authorize]
 @using SixLabors.ImageSharp
 @using SixLabors.ImageSharp.PixelFormats
 @using SixLabors.ImageSharp.Processing
@@ -10,20 +11,26 @@
 @inject IWebHostEnvironment Env
 @inject ILogger<PassportPhoto> Logger
 @inject OnnxBgRemovalService BgRemoval
+@inject ISubscriptionService SubscriptionService
+@inject ICoinService CoinService
+@inject AuthenticationStateProvider AuthState
+@inject NavigationManager Nav
+@inject IImageEnhancerService ImageEnhancer
+@inject IColorEnhancementService ColorEnhancer
 @implements IDisposable
 
 <PageTitle>ArtForge AI - Passport Photo</PageTitle>
 
-<div class="page-header" style="margin-bottom: 0.75rem;">
-    <h2 style="font-size:1.5rem;">Passport Photo</h2>
-    <p style="font-size:0.9rem;">Upload a photo to instantly generate a print-ready passport sheet</p>
+<div class="page-header page-header-lg">
+    <h2>Passport Photo</h2>
+    <p>Upload a photo to instantly generate a print-ready passport sheet</p>
 </div>
 
 <div class="create-layout">
     @* ── Left column ── *@
     <div class="create-left">
         <div class="card">
-            <div class="card-body" style="padding: 1rem 1.5rem;">
+            <div class="card-body">
 
                 @* Upload / Crop area *@
                 <div class="mb-3">
@@ -226,7 +233,40 @@
                     <button class="btn-secondary" style="font-size: 0.85rem; padding: 0.4rem 0.85rem;" @onclick="DownloadPassportJpg">
                         Download Photo JPG
                     </button>
+                    @if (ImageEnhancer.IsAvailable)
+                    {
+                        <button class="btn-enhance" @onclick="EnhanceAndDownload" disabled="@(_isEnhancing || _isProcessing)">
+                            @if (_isEnhancing)
+                            {
+                                <span>Enhancing...</span>
+                            }
+                            else
+                            {
+                                <span>&#9889; Enhance 4x</span>
+                            }
+                        </button>
+                    }
+                    @*@if (ColorEnhancer.IsAvailable)
+                    {
+                        <button class="btn-color-enhance" @onclick="ColorEnhanceAndDownload" disabled="@(_isColorEnhancing || _isProcessing)">
+                            @if (_isColorEnhancing)
+                            {
+                                <span>Enhancing...</span>
+                            }
+                            else
+                            {
+                                <span>&#127912; Enhance Colors</span>
+                            }
+                        </button>
+                    }*@
                 </div>
+                @if (_isEnhancing)
+                {
+                    <div class="enhance-progress-bar">
+                        <div class="enhance-progress-fill" style="width: @(_enhanceProgress)%"></div>
+                        <span class="enhance-progress-text">@(_enhanceProgress)%</span>
+                    </div>
+                }
             </div>
         }
     </div>
@@ -248,6 +288,9 @@
     private string? _uploadedPath;
     private bool _isUploading;
     private bool _isProcessing;
+    private bool _isEnhancing;
+    private int _enhanceProgress;
+    private bool _isColorEnhancing;
     private string _processingStatus = "";
     private string? _errorMessage;
 
@@ -296,9 +339,23 @@
 
     // ── Lifecycle ──
 
-    protected override void OnInitialized()
+    protected override async Task OnInitializedAsync()
     {
         RecalcGrid();
+
+        var authState = await AuthState.GetAuthenticationStateAsync();
+        if (!authState.User.IsInRole("SuperAdmin"))
+        {
+            var userIdStr = authState.User.FindFirstValue(System.Security.Claims.ClaimTypes.NameIdentifier);
+            if (int.TryParse(userIdStr, out var uid))
+            {
+                if (!await SubscriptionService.HasFeatureAccessAsync(uid, ArtForgeAI.Models.FeatureAccess.PassportPhoto))
+                {
+                    Nav.NavigateTo("/pricing", forceLoad: true);
+                    return;
+                }
+            }
+        }
     }
 
     public void Dispose()
@@ -313,6 +370,20 @@
         _isUploading = true;
         _errorMessage = null;
         StateHasChanged();
+
+        var authStateC = await AuthState.GetAuthenticationStateAsync();
+        var uidStrC = authStateC.User.FindFirstValue(System.Security.Claims.ClaimTypes.NameIdentifier);
+        if (int.TryParse(uidStrC, out var userIdC) && !authStateC.User.IsInRole("SuperAdmin"))
+        {
+            var cost = ArtForgeAI.Models.FeatureAccess.GetCost("PassportPhoto");
+            if (!await CoinService.DebitCoinsAsync(userIdC, cost, ArtForgeAI.Models.CoinTransactionType.GenerationSpend, "Passport Photo generation"))
+            {
+                _errorMessage = "Insufficient coins. Please top up to continue.";
+                _isUploading = false;
+                StateHasChanged();
+                return;
+            }
+        }
 
         try
         {
@@ -708,6 +779,99 @@
 
     private string ResolveFullPath(string webRelativePath) =>
         System.IO.Path.Combine(Env.WebRootPath, webRelativePath.Replace("/", System.IO.Path.DirectorySeparatorChar.ToString()));
+
+    // ── Enhancement ──
+
+    private async Task EnhanceAndDownload()
+    {
+        if (!_sheetReady || _isEnhancing) return;
+
+        _isEnhancing = true;
+        _enhanceProgress = 0;
+        _errorMessage = null;
+        StateHasChanged();
+
+        try
+        {
+            var dataUrl = await JS.InvokeAsync<string>("passportPhoto.exportPng");
+            if (string.IsNullOrEmpty(dataUrl)) return;
+
+            var base64 = dataUrl.Substring(dataUrl.IndexOf(",") + 1);
+            var imageBytes = Convert.FromBase64String(base64);
+
+            var outputDir = Path.Combine(Env.WebRootPath, "generated");
+            Directory.CreateDirectory(outputDir);
+            var tempPath = Path.Combine(outputDir, $"passport_temp_{Guid.NewGuid():N}.png");
+            await File.WriteAllBytesAsync(tempPath, imageBytes);
+
+            var progress = new Progress<int>(pct =>
+            {
+                _enhanceProgress = pct;
+                InvokeAsync(StateHasChanged);
+            });
+
+            var enhancedPath = await ImageEnhancer.EnhanceImageAsync(tempPath, progress);
+            var enhancedFullPath = Path.IsPathRooted(enhancedPath) ? enhancedPath : Path.Combine(Env.WebRootPath, enhancedPath.Replace('/', Path.DirectorySeparatorChar));
+            var enhancedBytes = await File.ReadAllBytesAsync(enhancedFullPath);
+            var enhancedBase64 = Convert.ToBase64String(enhancedBytes);
+            var fileName = $"passport_sheet_4x_{DateTime.Now:yyyyMMdd_HHmmss}.png";
+            await JS.InvokeVoidAsync("downloadFileFromBytes", fileName, "image/png", enhancedBase64);
+
+            try { File.Delete(tempPath); } catch { }
+        }
+        catch (Exception ex)
+        {
+            Logger.LogError(ex, "Passport photo 4x enhance failed");
+            _errorMessage = "Enhancement failed. Please try again.";
+        }
+        finally
+        {
+            _isEnhancing = false;
+            StateHasChanged();
+        }
+    }
+
+    private async Task ColorEnhanceAndDownload()
+    {
+        if (!_sheetReady || _isColorEnhancing) return;
+
+        _isColorEnhancing = true;
+        _errorMessage = null;
+        StateHasChanged();
+
+        try
+        {
+            var dataUrl = await JS.InvokeAsync<string>("passportPhoto.exportPng");
+            if (string.IsNullOrEmpty(dataUrl)) return;
+
+            var base64 = dataUrl.Substring(dataUrl.IndexOf(",") + 1);
+            var imageBytes = Convert.FromBase64String(base64);
+
+            var outputDir = Path.Combine(Env.WebRootPath, "generated");
+            Directory.CreateDirectory(outputDir);
+            var tempPath = Path.Combine(outputDir, $"passport_temp_{Guid.NewGuid():N}.png");
+            await File.WriteAllBytesAsync(tempPath, imageBytes);
+
+            var enhancedPath = await ColorEnhancer.EnhanceColorsAsync(tempPath);
+            var enhancedFullPath = Path.IsPathRooted(enhancedPath) ? enhancedPath : Path.Combine(Env.WebRootPath, enhancedPath.Replace('/', Path.DirectorySeparatorChar));
+            var enhancedBytes = await File.ReadAllBytesAsync(enhancedFullPath);
+            var enhancedBase64 = Convert.ToBase64String(enhancedBytes);
+            var fileName = $"passport_sheet_color_{DateTime.Now:yyyyMMdd_HHmmss}.png";
+            await JS.InvokeVoidAsync("downloadFileFromBytes", fileName, "image/png", enhancedBase64);
+
+            try { File.Delete(tempPath); } catch { }
+        }
+        catch (Exception ex)
+        {
+            Logger.LogError(ex, "Passport photo color enhance failed");
+            _errorMessage = "Color enhancement failed. Please try again.";
+        }
+        finally
+        {
+            _isColorEnhancing = false;
+            StateHasChanged();
+        }
+    }
 
     // ── Downloads (client-side via JS canvas export) ──
 

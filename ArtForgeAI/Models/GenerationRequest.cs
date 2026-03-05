@@ -15,4 +15,12 @@ public class GenerationRequest
 
     public bool HasReferenceImages => ReferenceImagePaths.Count > 0;
     public bool ForceCloudProvider { get; set; }
+
+    /// <summary>
+    /// When true, skip the auto-prepended "Combine subjects from all N images" text
+    /// for multi-image requests. Used when extra images are layout references (e.g. calendar),
+    /// not additional subjects to merge.
+    /// </summary>
+    public bool SkipMultiImageComposition { get; set; }
+    public string UserId { get; set; } = "default";
 }

@@ -1,0 +1,531 @@
+@page "/admin"
+@rendermode InteractiveServer
+@attribute [Authorize(Roles = "SuperAdmin")]
+@inject IAuthService AuthService
+@inject IAdminAnalyticsService AnalyticsService
+@inject IStylePresetService StylePresetService
+@inject IImageSizeMasterService ImageSizeService
+
+<PageTitle>ArtForge AI - Admin Dashboard</PageTitle>
+
+<div class="page-header">
+    <h2>Admin Dashboard</h2>
+    <p>Manage users, presets, and monitor platform activity</p>
+</div>
+
+@* ── Tab bar ── *@
+<div class="admin-tabs">
+    <button class="admin-tab @(_activeTab == "overview" ? "active" : "")"
+            @onclick='() => _activeTab = "overview"'>
+        &#128202; Overview
+    </button>
+    <button class="admin-tab @(_activeTab == "users" ? "active" : "")"
+            @onclick='() => _activeTab = "users"'>
+        &#128101; Users
+    </button>
+    <button class="admin-tab @(_activeTab == "styles" ? "active" : "")"
+            @onclick='() => _activeTab = "styles"'>
+        &#127912; Style Presets
+    </button>
+    <button class="admin-tab @(_activeTab == "sizes" ? "active" : "")"
+            @onclick='() => _activeTab = "sizes"'>
+        &#128208; Image Sizes
+    </button>
+    <button class="admin-tab @(_activeTab == "payments" ? "active" : "")"
+            @onclick='() => _activeTab = "payments"'>
+        &#128179; Payments
+    </button>
+    <button class="admin-tab @(_activeTab == "subscriptions" ? "active" : "")"
+            @onclick='() => _activeTab = "subscriptions"'>
+        &#11088; Subscriptions
+    </button>
+    <button class="admin-tab @(_activeTab == "coins" ? "active" : "")"
+            @onclick='() => _activeTab = "coins"'>
+        &#127902; Coins
+    </button>
+</div>
+
+@if (_isLoading)
+{
+    <div style="text-align: center; padding: 3rem;">
+        <div class="loading-spinner"></div>
+        <p style="margin-top: 1rem; color: var(--text-secondary);">Loading dashboard data...</p>
+    </div>
+}
+else
+{
+    @* ═══════════ Overview Tab ═══════════ *@
+    @if (_activeTab == "overview")
+    {
+        <div class="stat-cards">
+            <div class="stat-card">
+                <div class="stat-value">@(_stats?.TotalUsers ?? 0)</div>
+                <div class="stat-label">Total Users</div>
+            </div>
+            <div class="stat-card">
+                <div class="stat-value">@(_stats?.ActiveToday ?? 0)</div>
+                <div class="stat-label">Active Today</div>
+            </div>
+            <div class="stat-card">
+                <div class="stat-value">@(_stats?.TotalGenerations ?? 0)</div>
+                <div class="stat-label">Total Generations</div>
+            </div>
+            <div class="stat-card">
+                <div class="stat-value">@(_stats?.GenerationsToday ?? 0)</div>
+                <div class="stat-label">Generations Today</div>
+            </div>
+            <div class="stat-card">
+                <div class="stat-value">@(_stats?.ActiveStylePresets ?? 0)</div>
+                <div class="stat-label">Active Style Presets</div>
+            </div>
+            <div class="stat-card">
+                <div class="stat-value">@(_stats?.ActiveImageSizes ?? 0)</div>
+                <div class="stat-label">Active Image Sizes</div>
+            </div>
+            <div class="stat-card">
+                <div class="stat-value">&#8377;@((_stats?.TotalRevenue ?? 0).ToString("N0"))</div>
+                <div class="stat-label">Total Revenue</div>
+            </div>
+            <div class="stat-card">
+                <div class="stat-value">&#8377;@((_stats?.RevenueThisMonth ?? 0).ToString("N0"))</div>
+                <div class="stat-label">Revenue This Month</div>
+            </div>
+            <div class="stat-card">
+                <div class="stat-value">@(_stats?.ActiveSubscriptions ?? 0)</div>
+                <div class="stat-label">Active Subscriptions</div>
+            </div>
+        </div>
+
+        @* ── Daily Generation Trends ── *@
+        @if (_dailyStats is not null && _dailyStats.Count > 0)
+        {
+            <div class="card" style="margin-top: 1.5rem;">
+                <div class="card-body">
+                    <h3 style="margin-bottom: 1rem;">Daily Generation Trends (Last 30 Days)</h3>
+                    <div class="chart-bars">
+                        @{
+                            var maxCount = _dailyStats.Max(s => s.Count);
+                            if (maxCount == 0) maxCount = 1;
+                        }
+                        @foreach (var stat in _dailyStats)
+                        {
+                            var heightPct = (int)((double)stat.Count / maxCount * 100);
+                            <div class="chart-bar" title="@stat.Date: @stat.Count generations" style="height: @(heightPct)%;">
+                                <span class="chart-bar-label">@stat.Count</span>
+                            </div>
+                        }
+                    </div>
+                    <div class="chart-bars-x-axis">
+                        @foreach (var stat in _dailyStats)
+                        {
+                            <span>@(stat.Date.Length >= 5 ? stat.Date[5..] : stat.Date)</span>
+                        }
+                    </div>
+                </div>
+            </div>
+        }
+    }
+
+    @* ═══════════ Users Tab ═══════════ *@
+    @if (_activeTab == "users")
+    {
+        <div class="card" style="margin-top: 1rem;">
+            <div class="card-body" style="overflow-x: auto;">
+                <table class="admin-table">
+                    <thead>
+                        <tr>
+                            <th>Avatar</th>
+                            <th>Name</th>
+                            <th>Email</th>
+                            <th>Role</th>
+                            <th>Active</th>
+                            <th>Created</th>
+                            <th>Last Login</th>
+                            <th>Actions</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        @if (_users is not null)
+                        {
+                            @foreach (var user in _users)
+                            {
+                                <tr>
+                                    <td>
+                                        @if (!string.IsNullOrEmpty(user.AvatarUrl))
+                                        {
+                                            <img src="@user.AvatarUrl" alt="@user.DisplayName" class="admin-avatar" referrerpolicy="no-referrer" />
+                                        }
+                                        else
+                                        {
+                                            <div class="admin-avatar-placeholder">@(user.DisplayName.Length > 0 ? user.DisplayName[0].ToString().ToUpper() : "?")</div>
+                                        }
+                                    </td>
+                                    <td>@user.DisplayName</td>
+                                    <td>@user.Email</td>
+                                    <td>
+                                        <span class="@(user.Role == AppRole.SuperAdmin ? "role-badge-admin" : "role-badge-user")">
+                                            @user.Role
+                                        </span>
+                                    </td>
+                                    <td>
+                                        <span style="color: @(user.IsActive ? "var(--success, #22c55e)" : "var(--danger, #ef4444)");">
+                                            @(user.IsActive ? "Active" : "Inactive")
+                                        </span>
+                                    </td>
+                                    <td>@user.CreatedAt.ToString("yyyy-MM-dd")</td>
+                                    <td>@user.LastLoginAt.ToString("yyyy-MM-dd HH:mm")</td>
+                                    <td class="admin-actions">
+                                        <button class="btn-secondary btn-sm"
+                                                @onclick="() => ToggleUserRole(user)"
+                                                disabled="@_isProcessing">
+                                            @(user.Role == AppRole.SuperAdmin ? "Set User" : "Set Admin")
+                                        </button>
+                                        <button class="btn-secondary btn-sm"
+                                                @onclick="() => ToggleUserActive(user)"
+                                                disabled="@_isProcessing"
+                                                style="@(!user.IsActive ? "border-color: var(--success, #22c55e); color: var(--success, #22c55e);" : "border-color: var(--danger, #ef4444); color: var(--danger, #ef4444);")">
+                                            @(user.IsActive ? "Deactivate" : "Activate")
+                                        </button>
+                                    </td>
+                                </tr>
+                            }
+                        }
+                    </tbody>
+                </table>
+            </div>
+        </div>
+    }
+
+    @* ═══════════ Style Presets Tab ═══════════ *@
+    @if (_activeTab == "styles")
+    {
+        <div class="card" style="margin-top: 1rem;">
+            <div class="card-body" style="overflow-x: auto;">
+                <table class="admin-table">
+                    <thead>
+                        <tr>
+                            <th>Name</th>
+                            <th>Category</th>
+                            <th>Active</th>
+                            <th>Sort Order</th>
+                            <th>Actions</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        @if (_stylePresets is not null)
+                        {
+                            @foreach (var preset in _stylePresets)
+                            {
+                                <tr>
+                                    <td>@preset.Name</td>
+                                    <td>@preset.Category</td>
+                                    <td>
+                                        <span style="color: @(preset.IsActive ? "var(--success, #22c55e)" : "var(--danger, #ef4444)");">
+                                            @(preset.IsActive ? "Active" : "Inactive")
+                                        </span>
+                                    </td>
+                                    <td>@preset.SortOrder</td>
+                                    <td>
+                                        <button class="btn-secondary btn-sm"
+                                                @onclick="() => ToggleStylePresetActive(preset)"
+                                                disabled="@_isProcessing">
+                                            @(preset.IsActive ? "Deactivate" : "Activate")
+                                        </button>
+                                    </td>
+                                </tr>
+                            }
+                        }
+                    </tbody>
+                </table>
+            </div>
+        </div>
+    }
+
+    @* ═══════════ Image Sizes Tab ═══════════ *@
+    @if (_activeTab == "sizes")
+    {
+        <div class="card" style="margin-top: 1rem;">
+            <div class="card-body" style="overflow-x: auto;">
+                <table class="admin-table">
+                    <thead>
+                        <tr>
+                            <th>Name</th>
+                            <th>Dimensions</th>
+                            <th>Unit</th>
+                            <th>Active</th>
+                            <th>Actions</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        @if (_imageSizes is not null)
+                        {
+                            @foreach (var size in _imageSizes)
+                            {
+                                <tr>
+                                    <td>@size.Name</td>
+                                    <td>@size.Width x @size.Height</td>
+                                    <td>@size.Unit</td>
+                                    <td>
+                                        <span style="color: @(size.IsActive ? "var(--success, #22c55e)" : "var(--danger, #ef4444)");">
+                                            @(size.IsActive ? "Active" : "Inactive")
+                                        </span>
+                                    </td>
+                                    <td>
+                                        <button class="btn-secondary btn-sm"
+                                                @onclick="() => ToggleImageSizeActive(size)"
+                                                disabled="@_isProcessing">
+                                            @(size.IsActive ? "Deactivate" : "Activate")
+                                        </button>
+                                    </td>
+                                </tr>
+                            }
+                        }
+                    </tbody>
+                </table>
+            </div>
+        </div>
+    }
+
+    @* ═══════════ Payments Tab ═══════════ *@
+    @if (_activeTab == "payments")
+    {
+        <div class="card" style="margin-top: 1rem;">
+            <div class="card-body" style="overflow-x: auto;">
+                <h3 style="margin-bottom: 1rem;">Recent Payments</h3>
+                <table class="admin-table">
+                    <thead>
+                        <tr>
+                            <th>ID</th>
+                            <th>User</th>
+                            <th>Purpose</th>
+                            <th>Amount</th>
+                            <th>Status</th>
+                            <th>Date</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        @if (_recentPayments is not null)
+                        {
+                            @foreach (var p in _recentPayments)
+                            {
+                                <tr>
+                                    <td>@p.PaymentId</td>
+                                    <td>@p.UserName</td>
+                                    <td>@p.Purpose</td>
+                                    <td>&#8377;@p.Amount.ToString("N2")</td>
+                                    <td>
+                                        <span style="color: @(p.Status == "Captured" ? "var(--success, #22c55e)" : p.Status == "Failed" ? "var(--danger, #ef4444)" : "var(--text-muted)");">
+                                            @p.Status
+                                        </span>
+                                    </td>
+                                    <td>@p.CreatedAt.ToString("yyyy-MM-dd HH:mm")</td>
+                                </tr>
+                            }
+                        }
+                    </tbody>
+                </table>
+            </div>
+        </div>
+    }
+
+    @* ═══════════ Subscriptions Tab ═══════════ *@
+    @if (_activeTab == "subscriptions")
+    {
+        <div class="stat-cards" style="margin-top: 1rem;">
+            <div class="stat-card">
+                <div class="stat-value">@(_stats?.TotalSubscriptions ?? 0)</div>
+                <div class="stat-label">Total Subscriptions</div>
+            </div>
+            <div class="stat-card">
+                <div class="stat-value">@(_stats?.ActiveSubscriptions ?? 0)</div>
+                <div class="stat-label">Active Now</div>
+            </div>
+        </div>
+        @if (_subscriptionBreakdown is not null && _subscriptionBreakdown.Count > 0)
+        {
+            <div class="card" style="margin-top: 1rem;">
+                <div class="card-body">
+                    <h3 style="margin-bottom: 1rem;">Plan Distribution</h3>
+                    @foreach (var kv in _subscriptionBreakdown)
+                    {
+                        <div style="display:flex;justify-content:space-between;padding:0.4rem 0;border-bottom:1px solid var(--border-color);font-size:0.85rem;">
+                            <span>@kv.Key</span>
+                            <span style="font-weight:600;">@kv.Value users</span>
+                        </div>
+                    }
+                </div>
+            </div>
+        }
+    }
+
+    @* ═══════════ Coins Tab ═══════════ *@
+    @if (_activeTab == "coins")
+    {
+        <div class="stat-cards" style="margin-top: 1rem;">
+            <div class="stat-card">
+                <div class="stat-value">@(_stats?.TotalCoinsPurchased ?? 0)</div>
+                <div class="stat-label">Total Coins Credited</div>
+            </div>
+            <div class="stat-card">
+                <div class="stat-value">@(_stats?.TotalCoinsSpent ?? 0)</div>
+                <div class="stat-label">Total Coins Spent</div>
+            </div>
+        </div>
+    }
+}
+
+@code {
+    private string _activeTab = "overview";
+    private bool _isLoading = true;
+    private bool _isProcessing;
+
+    // Overview data
+    private AdminDashboardStats? _stats;
+    private List<DailyGenerationStat>? _dailyStats;
+
+    // Users data
+    private List<AppUser>? _users;
+
+    // Style Presets data
+    private List<StylePreset>? _stylePresets;
+
+    // Image Sizes data
+    private List<ImageSizeMaster>? _imageSizes;
+
+    // Payment & subscription data
+    private List<RecentPaymentStat>? _recentPayments;
+    private Dictionary<string, int>? _subscriptionBreakdown;
+
+    protected override async Task OnInitializedAsync()
+    {
+        await LoadAllDataAsync();
+    }
+
+    private async Task LoadAllDataAsync()
+    {
+        _isLoading = true;
+        StateHasChanged();
+
+        try
+        {
+            var statsTask = AnalyticsService.GetDashboardStatsAsync();
+            var dailyTask = AnalyticsService.GetGenerationStatsAsync(30);
+            var usersTask = AuthService.GetAllUsersAsync();
+            var stylesTask = StylePresetService.GetAllAsync();
+            var sizesTask = ImageSizeService.GetAllAsync();
+
+            await Task.WhenAll(statsTask, dailyTask, usersTask, stylesTask, sizesTask);
+
+            _stats = statsTask.Result;
+            _dailyStats = dailyTask.Result;
+            _users = usersTask.Result;
+            _stylePresets = stylesTask.Result;
+            _imageSizes = sizesTask.Result;
+
+            var paymentsTask = AnalyticsService.GetRecentPaymentsAsync();
+            var subBreakdownTask = AnalyticsService.GetSubscriptionBreakdownAsync();
+            await Task.WhenAll(paymentsTask, subBreakdownTask);
+            _recentPayments = paymentsTask.Result;
+            _subscriptionBreakdown = subBreakdownTask.Result;
+        }
+        catch
+        {
+            // Silently handle - data will show as empty/zero
+        }
+        finally
+        {
+            _isLoading = false;
+            StateHasChanged();
+        }
+    }
+
+    private async Task ToggleUserRole(AppUser user)
+    {
+        if (_isProcessing) return;
+        _isProcessing = true;
+        StateHasChanged();
+
+        try
+        {
+            var newRole = user.Role == AppRole.SuperAdmin ? AppRole.User : AppRole.SuperAdmin;
+            await AuthService.UpdateUserRoleAsync(user.Id, newRole);
+            user.Role = newRole;
+        }
+        catch
+        {
+            // Silently handle
+        }
+        finally
+        {
+            _isProcessing = false;
+            StateHasChanged();
+        }
+    }
+
+    private async Task ToggleUserActive(AppUser user)
+    {
+        if (_isProcessing) return;
+        _isProcessing = true;
+        StateHasChanged();
+
+        try
+        {
+            var newStatus = !user.IsActive;
+            await AuthService.SetUserActiveStatusAsync(user.Id, newStatus);
+            user.IsActive = newStatus;
+        }
+        catch
+        {
+            // Silently handle
+        }
+        finally
+        {
+            _isProcessing = false;
+            StateHasChanged();
+        }
+    }
+
+    private async Task ToggleStylePresetActive(StylePreset preset)
+    {
+        if (_isProcessing) return;
+        _isProcessing = true;
+        StateHasChanged();
+
+        try
+        {
+            preset.IsActive = !preset.IsActive;
+            await StylePresetService.UpdateAsync(preset);
+        }
+        catch
+        {
+            preset.IsActive = !preset.IsActive; // Revert on failure
+        }
+        finally
+        {
+            _isProcessing = false;
+            StateHasChanged();
+        }
+    }
+
+    private async Task ToggleImageSizeActive(ImageSizeMaster size)
+    {
+        if (_isProcessing) return;
+        _isProcessing = true;
+        StateHasChanged();
+
+        try
+        {
+            size.IsActive = !size.IsActive;
+            await ImageSizeService.UpdateAsync(size);
+        }
+        catch
+        {
+            size.IsActive = !size.IsActive; // Revert on failure
+        }
+        finally
+        {
+            _isProcessing = false;
+            StateHasChanged();
+        }
+    }
+}

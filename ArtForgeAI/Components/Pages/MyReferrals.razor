@@ -1,0 +1,138 @@
+@page "/referrals"
+@rendermode InteractiveServer
+@attribute [Authorize]
+@inject IReferralService ReferralService
+@inject AuthenticationStateProvider AuthState
+@inject IJSRuntime JS
+@inject NavigationManager Nav
+
+<PageTitle>ArtForge AI - My Referrals</PageTitle>
+
+<div class="page-header">
+    <h2>My Referrals</h2>
+    <p>Invite friends and earn coins! You get 15 coins, they get 10 coins.</p>
+</div>
+
+@if (_loading)
+{
+    <div style="text-align:center;padding:3rem;">
+        <div class="loading-spinner"></div>
+    </div>
+}
+else
+{
+    @* ── Referral Code Card ── *@
+    <div class="referral-code-card">
+        <div class="referral-code-label">Your Referral Code</div>
+        <div class="referral-code-value">@_referralCode</div>
+        <div class="referral-code-actions">
+            <button class="btn-primary-gradient btn-sm" @onclick="CopyCode">
+                @(_copied ? "Copied!" : "Copy Code")
+            </button>
+            <button class="btn-secondary btn-sm" @onclick="ShareCode">
+                Share Link
+            </button>
+        </div>
+        <div class="referral-link" style="margin-top:0.5rem;font-size:0.75rem;color:var(--text-muted);word-break:break-all;">
+            @GetReferralLink()
+        </div>
+    </div>
+
+    @* ── Stats ── *@
+    <div class="stat-cards" style="margin-top:1.5rem;">
+        <div class="stat-card">
+            <div class="stat-value">@_stats.TotalReferrals</div>
+            <div class="stat-label">Total Referrals</div>
+        </div>
+        <div class="stat-card">
+            <div class="stat-value">@_stats.TotalCoinsEarned</div>
+            <div class="stat-label">Coins Earned</div>
+        </div>
+    </div>
+
+    @* ── Recent Referrals ── *@
+    @if (_stats.RecentReferrals.Count > 0)
+    {
+        <div class="card" style="margin-top:1.5rem;">
+            <div class="card-body">
+                <h3 style="margin-bottom:1rem;">Recent Referrals</h3>
+                <div class="referral-list">
+                    @foreach (var r in _stats.RecentReferrals)
+                    {
+                        <div class="referral-item">
+                            <div>
+                                <span style="font-weight:500;">User #@r.RefereeUserId</span>
+                                <span style="color:var(--text-muted);font-size:0.75rem;margin-left:0.5rem;">
+                                    @r.CreatedAt.ToString("MMM dd, yyyy")
+                                </span>
+                            </div>
+                            <span class="@(r.IsRewarded ? "tx-credit" : "")" style="font-weight:600;">
+                                @(r.IsRewarded ? $"+{r.ReferrerBonusCoins} coins" : "Pending")
+                            </span>
+                        </div>
+                    }
+                </div>
+            </div>
+        </div>
+    }
+}
+
+@code {
+    private bool _loading = true;
+    private string _referralCode = "";
+    private bool _copied;
+    private ReferralStats _stats = new();
+
+    protected override async Task OnInitializedAsync()
+    {
+        try
+        {
+            var userId = await GetUserIdAsync();
+            if (userId > 0)
+            {
+                _referralCode = await ReferralService.GetOrCreateReferralCodeAsync(userId);
+                _stats = await ReferralService.GetReferralStatsAsync(userId);
+            }
+        }
+        catch { }
+        finally { _loading = false; }
+    }
+
+    private string GetReferralLink()
+    {
+        var baseUrl = Nav.BaseUri.TrimEnd('/');
+        return $"{baseUrl}/login?ref={_referralCode}";
+    }
+
+    private async Task CopyCode()
+    {
+        await JS.InvokeVoidAsync("navigator.clipboard.writeText", GetReferralLink());
+        _copied = true;
+        StateHasChanged();
+        await Task.Delay(2000);
+        _copied = false;
+        StateHasChanged();
+    }
+
+    private async Task ShareCode()
+    {
+        var link = GetReferralLink();
+        var text = $"Join ArtForge AI and get 10 free coins! Use my referral link: {link}";
+        try
+        {
+            await JS.InvokeVoidAsync("navigator.share", new { title = "ArtForge AI Referral", text, url = link });
+        }
+        catch
+        {
+            // Fallback to copy
+            await CopyCode();
+        }
+    }
+
+    private async Task<int> GetUserIdAsync()
+    {
+        var authState = await AuthState.GetAuthenticationStateAsync();
+        var idStr = authState.User.FindFirstValue(System.Security.Claims.ClaimTypes.NameIdentifier);
+        return int.TryParse(idStr, out var id) ? id : 0;
+    }
+}

@@ -1,5 +1,6 @@
 @page "/settings"
 @rendermode InteractiveServer
+@attribute [Authorize]
 @using SixLabors.ImageSharp
 @using SixLabors.ImageSharp.PixelFormats
 @using SixLabors.ImageSharp.Processing
@@ -12,6 +13,10 @@
 @inject IWebHostEnvironment Env
 @inject IJSRuntime JS
 @inject ILogger<Settings> Logger
+@inject ISubscriptionService SubscriptionService
+@inject ICoinService CoinService
+@inject AuthenticationStateProvider AuthState
+@inject NavigationManager Nav
 
 <PageTitle>ArtForge AI - Settings</PageTitle>
 
@@ -258,6 +263,16 @@
                 </button>
             </div>
 
+            <div class="qs-search-bar" style="margin-top:0.5rem;">
+                <span class="qs-search-icon">&#128269;</span>
+                <input type="text" class="qs-search-input" placeholder="Search styles..."
+                       @bind="_styleSearchQuery" @bind:event="oninput" />
+                @if (!string.IsNullOrEmpty(_styleSearchQuery))
+                {
+                    <button class="qs-search-clear" @onclick="() => _styleSearchQuery = string.Empty">&times;</button>
+                }
+            </div>
+
             @if (_batchGenerating)
             {
                 <div style="margin-bottom:0.75rem;">
@@ -372,7 +387,7 @@
             @if (_styleSubTab == "active")
             {
                 @* ── Active styles view ── *@
-                var activeStyles = _allStyles.Where(s => s.IsActive).ToList();
+                var activeStyles = FilterStyles(_allStyles.Where(s => s.IsActive)).ToList();
                 var pendingStyles = activeStyles.Where(s => string.IsNullOrEmpty(s.ThumbnailPath)).ToList();
                 var completedStyles = activeStyles.Where(s => !string.IsNullOrEmpty(s.ThumbnailPath)).ToList();
                 var groupedCompleted = completedStyles
@@ -561,6 +576,14 @@
                 }
             }
 
+            @if (activeStyles.Count == 0 && !string.IsNullOrEmpty(_styleSearchQuery))
+            {
+                <div class="qs-no-results">
+                    <span>&#128269;</span>
+                    <p>No active styles match "<strong>@_styleSearchQuery</strong>"</p>
+                </div>
+            }
+
             @if (!string.IsNullOrEmpty(_thumbnailMessage))
             {
                 <div style="margin-top: 0.5rem; color: var(--accent-primary); font-size: 0.82rem;">
@@ -573,7 +596,7 @@
             @if (_styleSubTab == "inactive")
             {
                 @* ── Inactive styles view — same compact card format as active tab ── *@
-                var inactiveStyles = _allStyles.Where(s => !s.IsActive).ToList();
+                var inactiveStyles = FilterStyles(_allStyles.Where(s => !s.IsActive)).ToList();
                 var inactivePending = inactiveStyles.Where(s => string.IsNullOrEmpty(s.ThumbnailPath)).ToList();
                 var inactiveCompleted = inactiveStyles.Where(s => !string.IsNullOrEmpty(s.ThumbnailPath)).ToList();
                 var groupedInactive = inactiveCompleted
@@ -584,8 +607,8 @@
                 @if (inactiveStyles.Count == 0)
                 {
                     <div class="right-panel-empty" style="margin-top:0.5rem;">
-                        <div class="empty-icon">&#10003;</div>
-                        <p>All styles are currently active</p>
+                        <div class="empty-icon">@(string.IsNullOrEmpty(_styleSearchQuery) ? "&#10003;" : "&#128269;")</div>
+                        <p>@(string.IsNullOrEmpty(_styleSearchQuery) ? "All styles are currently active" : $"No inactive styles match \"{_styleSearchQuery}\"")</p>
                     </div>
                 }
                 else
@@ -903,6 +926,8 @@
 }
 
 @code {
+    [CascadingParameter] private Task<AuthenticationState>? _authStateCascade { get; set; }
+    private string _userId = "default";
     private string _activeTab = "general";
     private string _styleSubTab = "active";
     private UserPreference _prefs = new();
@@ -917,7 +942,19 @@
     // Style presets
     private List<StylePreset> _allStyles = [];
     private string? _styleMessage;
+    private string _styleSearchQuery = string.Empty;
     private static readonly string[] _categoryOrder = ["Artistic", "Fun", "Professional", "Abstract", "Mythological", "Regional", "PhotoCollage", "PhotoArts", "Cartoon Characters", "Super Heroes", "Anime & Gaming", "K-Culture"];
+
+    private IEnumerable<StylePreset> FilterStyles(IEnumerable<StylePreset> styles)
+    {
+        if (string.IsNullOrWhiteSpace(_styleSearchQuery))
+            return styles;
+        var q = _styleSearchQuery.Trim();
+        return styles.Where(s => s.Name.Contains(q, StringComparison.OrdinalIgnoreCase)
+                              || s.Category.Contains(q, StringComparison.OrdinalIgnoreCase)
+                              || (!string.IsNullOrEmpty(s.Description) && s.Description.Contains(q, StringComparison.OrdinalIgnoreCase)));
+    }
+
     private int? _generatingThumbnailId;
     private string? _thumbnailMessage;
 
@@ -989,7 +1026,26 @@
 
     protected override async Task OnInitializedAsync()
     {
-        _prefs = await HistoryService.GetUserPreferencesAsync();
+        var authState = await AuthState.GetAuthenticationStateAsync();
+        if (!authState.User.IsInRole("SuperAdmin"))
+        {
+            var userIdStr = authState.User.FindFirstValue(System.Security.Claims.ClaimTypes.NameIdentifier);
+            if (int.TryParse(userIdStr, out var uid))
+            {
+                if (!await SubscriptionService.HasFeatureAccessAsync(uid, ArtForgeAI.Models.FeatureAccess.Settings))
+                {
+                    Nav.NavigateTo("/pricing", forceLoad: true);
+                    return;
+                }
+            }
+        }
+
+        if (_authStateCascade is not null)
+        {
+            var state = await _authStateCascade;
+            _userId = state.User.FindFirstValue(ClaimTypes.NameIdentifier) ?? "default";
+        }
+        _prefs = await HistoryService.GetUserPreferencesAsync(userId: _userId);
         await LoadSizes();
         await LoadStyles();
     }
@@ -1022,6 +1078,7 @@
 
         try
         {
+            _prefs.UserId = _userId;
             await HistoryService.SaveUserPreferencesAsync(_prefs);
             await ApplyTheme();
             _message = "Settings saved successfully!";

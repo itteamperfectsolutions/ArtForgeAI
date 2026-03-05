@@ -1,13 +1,19 @@
 @page "/gallery"
 @rendermode InteractiveServer
+@attribute [Authorize]
 @inject IGenerationHistoryService HistoryService
 @inject ILogger<Gallery> Logger
+@inject ISubscriptionService SubscriptionService
+@inject ICoinService CoinService
+@inject AuthenticationStateProvider AuthState
+@inject NavigationManager Nav
+@inject IAuthService AuthService
 
 <PageTitle>ArtForge AI - Gallery</PageTitle>
 
 <div class="page-header">
     <h2>Gallery</h2>
-    <p>Your generation history</p>
+    <p>@(_isSuperAdmin ? "All generation history" : "Your generation history")</p>
 </div>
 
 @if (_loading)
@@ -49,6 +55,9 @@ else
 <Toast @ref="_toast" />
 
 @code {
+    [CascadingParameter] private Task<AuthenticationState>? _authStateCascade { get; set; }
+    private string _userId = "default";
+    private bool _isSuperAdmin;
     private List<ImageGeneration> _generations = new();
     private ImageGeneration? _selectedGeneration;
     private bool _loading = true;
@@ -59,6 +68,25 @@ else
 
     protected override async Task OnInitializedAsync()
     {
+        var authState = await AuthState.GetAuthenticationStateAsync();
+        var userIdStr = authState.User.FindFirstValue(System.Security.Claims.ClaimTypes.NameIdentifier);
+
+        if (int.TryParse(userIdStr, out var uid))
+        {
+            var dbUser = await AuthService.GetUserByIdAsync(uid);
+            _isSuperAdmin = dbUser?.Role == ArtForgeAI.Models.AppRole.SuperAdmin;
+
+            if (!_isSuperAdmin)
+            {
+                if (!await SubscriptionService.HasFeatureAccessAsync(uid, ArtForgeAI.Models.FeatureAccess.Gallery))
+                {
+                    Nav.NavigateTo("/pricing", forceLoad: true);
+                    return;
+                }
+            }
+        }
+
+        _userId = userIdStr ?? "default";
         try
         {
             await LoadGenerations();
@@ -75,9 +103,18 @@ else
         _page = 1;
         try
         {
-            _generations = await HistoryService.GetHistoryAsync(page: _page, pageSize: PageSize);
-            var total = await HistoryService.GetTotalCountAsync();
-            _hasMore = total > _generations.Count;
+            if (_isSuperAdmin)
+            {
+                _generations = await HistoryService.GetAllHistoryAsync(page: _page, pageSize: PageSize);
+                var total = await HistoryService.GetAllTotalCountAsync();
+                _hasMore = total > _generations.Count;
+            }
+            else
+            {
+                _generations = await HistoryService.GetHistoryAsync(userId: _userId, page: _page, pageSize: PageSize);
+                var total = await HistoryService.GetTotalCountAsync(userId: _userId);
+                _hasMore = total > _generations.Count;
+            }
         }
         catch (Exception ex)
         {
@@ -93,10 +130,20 @@ else
     {
         try
         {
-            var more = await HistoryService.GetHistoryAsync(page: _page + 1, pageSize: PageSize);
+            List<ImageGeneration> more;
+            int total;
+            if (_isSuperAdmin)
+            {
+                more = await HistoryService.GetAllHistoryAsync(page: _page + 1, pageSize: PageSize);
+                total = await HistoryService.GetAllTotalCountAsync();
+            }
+            else
+            {
+                more = await HistoryService.GetHistoryAsync(userId: _userId, page: _page + 1, pageSize: PageSize);
+                total = await HistoryService.GetTotalCountAsync(userId: _userId);
+            }
             _generations.AddRange(more);
             _page++;
-            var total = await HistoryService.GetTotalCountAsync();
             _hasMore = total > _generations.Count;
         }
         catch (Exception ex)

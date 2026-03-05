@@ -1,9 +1,14 @@
 @page "/image-viewer"
 @rendermode InteractiveServer
+@attribute [Authorize]
 @using ArtForgeAI.Services
 @inject IJSRuntime JS
 @inject RemoveBgService RemoveBg
 @inject ILogger<ImageViewer> Logger
+@inject ISubscriptionService SubscriptionService
+@inject ICoinService CoinService
+@inject AuthenticationStateProvider AuthState
+@inject NavigationManager Nav
 @implements IDisposable
 
 <PageTitle>Image Viewer - ArtForge AI</PageTitle>
@@ -215,6 +220,23 @@
     private bool _canvasInitialized;
 
     private int MarginPx => (int)Math.Round(_marginMm * _dpi / 25.4);
+
+    protected override async Task OnInitializedAsync()
+    {
+        var authState = await AuthState.GetAuthenticationStateAsync();
+        if (!authState.User.IsInRole("SuperAdmin"))
+        {
+            var userIdStr = authState.User.FindFirstValue(System.Security.Claims.ClaimTypes.NameIdentifier);
+            if (int.TryParse(userIdStr, out var uid))
+            {
+                if (!await SubscriptionService.HasFeatureAccessAsync(uid, ArtForgeAI.Models.FeatureAccess.ImageViewer))
+                {
+                    Nav.NavigateTo("/pricing", forceLoad: true);
+                    return;
+                }
+            }
+        }
+    }
 
     private async Task OnFileSelected(InputFileChangeEventArgs e)
     {

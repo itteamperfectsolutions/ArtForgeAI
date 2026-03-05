@@ -1,27 +1,35 @@
 @page "/photo-size-expand"
 @rendermode InteractiveServer
+@attribute [Authorize]
 @using SixLabors.ImageSharp
 @using SixLabors.ImageSharp.PixelFormats
+@using SixLabors.ImageSharp.Processing
 @using ArtForgeAI.Models
 @inject PhotoExpandService ExpandService
 @inject IImageStorageService ImageStorage
 @inject IJSRuntime JS
 @inject IWebHostEnvironment Env
 @inject ILogger<PhotoSizeExpand> Logger
+@inject IImageEnhancerService ImageEnhancer
+@inject IColorEnhancementService ColorEnhancer
+@inject ISubscriptionService SubscriptionService
+@inject ICoinService CoinService
+@inject AuthenticationStateProvider AuthState
+@inject NavigationManager Nav
 @implements IDisposable
 
 <PageTitle>ArtForge AI - Photo Expand</PageTitle>
 
-<div class="page-header" style="margin-bottom: 0.75rem;">
-    <h2 style="font-size:1.5rem;">Photo Size Expand</h2>
-    <p style="font-size:0.9rem;">Expand a photo to a larger print size — AI fills the extended areas</p>
+<div class="page-header page-header-lg">
+    <h2>Photo Size Expand</h2>
+    <p>Expand a photo to a larger print size — AI fills the extended areas</p>
 </div>
 
 <div class="create-layout">
     @* ── Left column: controls ── *@
     <div class="create-left">
         <div class="card">
-            <div class="card-body" style="padding: 1rem 1.5rem;">
+            <div class="card-body">
 
                 @* Upload area *@
                 <div class="mb-3">
@@ -50,7 +58,7 @@
                         <label class="upload-area upload-area-compact @(_isUploading ? "disabled" : "")">
                             <span class="upload-icon">&#128247;</span>
                             <span>Upload a photo to expand</span>
-                            <span style="font-size: 0.7rem; color: var(--text-muted); margin-left: 0.5rem;">JPG, PNG up to 10MB</span>
+                            <span style="font-size: 0.7rem; color: var(--text-muted); margin-left: 0.5rem;">JPG, PNG up to 50MB</span>
                             <InputFile OnChange="HandleFileUpload" accept=".jpg,.jpeg,.png,.webp" style="display:none"
                                        disabled="@(_isProcessing || _isUploading)" />
                         </label>
@@ -227,11 +235,44 @@
                             @onclick="DownloadJpg">
                         Download JPG (300 DPI)
                     </button>
+                    @if (ImageEnhancer.IsAvailable)
+                    {
+                        <button class="btn-enhance" @onclick="EnhanceImage" disabled="@_isEnhancing">
+                            @if (_isEnhancing)
+                            {
+                                <span>Enhancing...</span>
+                            }
+                            else
+                            {
+                                <span>&#9889; Enhance 4x</span>
+                            }
+                        </button>
+                    }
+                    @*@if (ColorEnhancer.IsAvailable)
+                    {
+                        <button class="btn-color-enhance" @onclick="ColorEnhanceImage" disabled="@_isColorEnhancing">
+                            @if (_isColorEnhancing)
+                            {
+                                <span>Enhancing...</span>
+                            }
+                            else
+                            {
+                                <span>&#127912; Enhance Colors</span>
+                            }
+                        </button>
+                    }*@
                     <button class="btn-secondary" style="font-size: 0.85rem; padding: 0.4rem 0.85rem;"
                             @onclick="Regenerate">
                         &#128260; Regenerate
                     </button>
                 </div>
+                @if (_isEnhancing)
+                {
+                    <div class="enhance-progress-bar">
+                        <div class="enhance-progress-fill" style="width: @(_enhanceProgress)%"></div>
+                        <span class="enhance-progress-text">@(_enhanceProgress)%</span>
+                    </div>
+                }
             }
         </div>
     </div>
@@ -276,7 +317,7 @@
     private bool _landscape;
 
     // Position
-    private string _selectedPosition = "Auto";
+    private string _selectedPosition = "Center";
     private double _posX = 0.5;
     private double _posY = 0.5;
 
@@ -294,9 +335,15 @@
     private bool _resultReady;
     private byte[]? _resultBytes;
     private string? _resultDataUrl;
+    private string? _resultFilePath; // server-side path for enhance
     private int _resultW;
     private int _resultH;
     private int _resultWrapPx;
+
+    // Enhancement
+    private bool _isEnhancing;
+    private int _enhanceProgress;
+    private bool _isColorEnhancing;
 
     // Position presets
     private record PositionPreset(string Name, double X, double Y);
@@ -313,6 +360,23 @@
     private bool CanExpand => _uploadedBytes != null && _selectedTarget != null && !_isProcessing;
 
     // ── Lifecycle ──
+
+    protected override async Task OnInitializedAsync()
+    {
+        var authState = await AuthState.GetAuthenticationStateAsync();
+        if (!authState.User.IsInRole("SuperAdmin"))
+        {
+            var userIdStr = authState.User.FindFirstValue(System.Security.Claims.ClaimTypes.NameIdentifier);
+            if (int.TryParse(userIdStr, out var uid))
+            {
+                if (!await SubscriptionService.HasFeatureAccessAsync(uid, ArtForgeAI.Models.FeatureAccess.PhotoExpand))
+                {
+                    Nav.NavigateTo("/pricing", forceLoad: true);
+                    return;
+                }
+            }
+        }
+    }
 
     public void Dispose()
     {
@@ -333,20 +397,36 @@
         try
         {
             var file = e.File;
-            if (file.Size > 10 * 1024 * 1024)
+            if (file.Size > 50 * 1024 * 1024)
             {
-                _errorMessage = "File size must be under 10MB.";
+                _errorMessage = "File size must be under 50MB.";
                 return;
             }
 
             using var ms = new MemoryStream();
-            await file.OpenReadStream(10 * 1024 * 1024).CopyToAsync(ms);
+            await file.OpenReadStream(50 * 1024 * 1024).CopyToAsync(ms);
             _uploadedBytes = ms.ToArray();
 
             // Detect dimensions — these ARE the source size
             using var img = Image.Load<Rgba32>(_uploadedBytes);
             _detectedW = img.Width;
             _detectedH = img.Height;
+
+            // Downscale very large uploads to keep memory manageable
+            // 8000px max side is still excellent quality for any print size
+            const int maxWorkingSide = 8000;
+            if (_detectedW > maxWorkingSide || _detectedH > maxWorkingSide)
+            {
+                double downScale = Math.Min((double)maxWorkingSide / _detectedW, (double)maxWorkingSide / _detectedH);
+                int newW = (int)Math.Round(_detectedW * downScale);
+                int newH = (int)Math.Round(_detectedH * downScale);
+                img.Mutate(ctx => ctx.Resize(newW, newH, KnownResamplers.Lanczos3));
+                using var resizedMs = new MemoryStream();
+                img.SaveAsPng(resizedMs);
+                _uploadedBytes = resizedMs.ToArray();
+                _detectedW = newW;
+                _detectedH = newH;
+            }
 
             // Normalize to portrait for comparison (short side × long side)
             int shortSide = Math.Min(_detectedW, _detectedH);
@@ -373,9 +453,20 @@
                 _selectedTarget = PhotoExpandConfig.Presets.FirstOrDefault(p => p.TotalPixels > _sourceTotalPixels);
             }
 
-            // Build data URL for thumbnail
-            var ext = file.Name.EndsWith(".png", StringComparison.OrdinalIgnoreCase) ? "png" : "jpeg";
-            _imageDataUrl = $"data:image/{ext};base64," + Convert.ToBase64String(_uploadedBytes);
+            // Build a small thumbnail for preview (max 600px) to keep DOM lightweight
+            using var thumbImg = Image.Load<Rgba32>(_uploadedBytes);
+            const int maxThumb = 600;
+            if (thumbImg.Width > maxThumb || thumbImg.Height > maxThumb)
+            {
+                double thumbScale = Math.Min((double)maxThumb / thumbImg.Width, (double)maxThumb / thumbImg.Height);
+                thumbImg.Mutate(ctx => ctx.Resize(
+                    (int)Math.Round(thumbImg.Width * thumbScale),
+                    (int)Math.Round(thumbImg.Height * thumbScale),
+                    KnownResamplers.Lanczos3));
+            }
+            using var thumbMs = new MemoryStream();
+            thumbImg.SaveAsJpeg(thumbMs, new SixLabors.ImageSharp.Formats.Jpeg.JpegEncoder { Quality = 85 });
+            _imageDataUrl = "data:image/jpeg;base64," + Convert.ToBase64String(thumbMs.ToArray());
 
             // Detect orientation from image
             _landscape = _detectedW > _detectedH;
@@ -540,6 +631,21 @@
         _processingStatus = "Preparing...";
         StateHasChanged();
 
+        var authStateC = await AuthState.GetAuthenticationStateAsync();
+        var uidStrC = authStateC.User.FindFirstValue(System.Security.Claims.ClaimTypes.NameIdentifier);
+        if (int.TryParse(uidStrC, out var userIdC) && !authStateC.User.IsInRole("SuperAdmin"))
+        {
+            var cost = ArtForgeAI.Models.FeatureAccess.GetCost("PhotoExpand");
+            if (!await CoinService.DebitCoinsAsync(userIdC, cost, ArtForgeAI.Models.CoinTransactionType.GenerationSpend, "Photo Expand generation"))
+            {
+                _errorMessage = "Insufficient coins. Please top up to continue.";
+                _isProcessing = false;
+                _processingStatus = "";
+                StateHasChanged();
+                return;
+            }
+        }
+
         try
         {
             // Get current position: auto-calculated or from JS drag
@@ -590,6 +696,7 @@
             _resultW = result.ResultWidthPx;
             _resultH = result.ResultHeightPx;
             _resultWrapPx = result.WrapPx;
+            _resultFilePath = result.ResultPath;
             _resultDataUrl = "data:image/png;base64," + Convert.ToBase64String(_resultBytes!);
             _resultReady = true;
 
@@ -644,6 +751,78 @@
         StateHasChanged();
         await UpdatePreview();
         await ExpandWithAI();
+    }
+
+    // ── Enhancement ──
+
+    private async Task EnhanceImage()
+    {
+        if (_resultFilePath is null || _isEnhancing) return;
+
+        _isEnhancing = true;
+        _enhanceProgress = 0;
+        _errorMessage = null;
+        StateHasChanged();
+
+        try
+        {
+            var progress = new Progress<int>(pct =>
+            {
+                _enhanceProgress = pct;
+                InvokeAsync(StateHasChanged);
+            });
+
+            var enhancedPath = await ImageEnhancer.EnhanceImageAsync(_resultFilePath, progress);
+            _resultFilePath = enhancedPath;
+
+            // Reload result bytes and data URL from the enhanced file
+            var fullPath = Path.Combine(Env.WebRootPath, enhancedPath.Replace('/', Path.DirectorySeparatorChar));
+            _resultBytes = await File.ReadAllBytesAsync(fullPath);
+            using var img = Image.Load<Rgba32>(_resultBytes);
+            _resultW = img.Width;
+            _resultH = img.Height;
+            _resultDataUrl = "data:image/png;base64," + Convert.ToBase64String(_resultBytes);
+        }
+        catch (Exception ex)
+        {
+            Logger.LogError(ex, "Photo expand enhancement failed");
+            _errorMessage = "Enhancement failed. Please try again.";
+        }
+        finally
+        {
+            _isEnhancing = false;
+            StateHasChanged();
+        }
+    }
+
+    private async Task ColorEnhanceImage()
+    {
+        if (_resultFilePath is null || _isColorEnhancing) return;
+
+        _isColorEnhancing = true;
+        _errorMessage = null;
+        StateHasChanged();
+
+        try
+        {
+            var enhancedPath = await ColorEnhancer.EnhanceColorsAsync(_resultFilePath);
+            _resultFilePath = enhancedPath;
+
+            // Reload result bytes and data URL from the enhanced file
+            var fullPath = Path.Combine(Env.WebRootPath, enhancedPath.Replace('/', Path.DirectorySeparatorChar));
+            _resultBytes = await File.ReadAllBytesAsync(fullPath);
+            _resultDataUrl = "data:image/png;base64," + Convert.ToBase64String(_resultBytes);
+        }
+        catch (Exception ex)
+        {
+            Logger.LogError(ex, "Photo expand color enhancement failed");
+            _errorMessage = "Color enhancement failed. Please try again.";
+        }
+        finally
+        {
+            _isColorEnhancing = false;
+            StateHasChanged();
+        }
     }
 
     // ── Helpers ──

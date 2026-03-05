@@ -4,7 +4,14 @@ namespace ArtForgeAI.Models;
 
 public class StylePreset
 {
-    public const string FacialIdentitySuffix = " Preserve biometric facial identity exactly as in the original image without modification. CRITICAL PERSON COUNT RULE: You MUST include ONLY the exact number of people visible in the source photo. If the source image has 1 person, the output MUST show only 1 person — do NOT add extra people, partners, or companions. If the source has 2 people, show exactly 2 people. Match the source image person count precisely. CRITICAL: If this image contains multiple panels, photos, or scenes — every single panel MUST depict a COMPLETELY DIFFERENT scene, pose, outfit, camera angle, and setting. No two panels should look similar or use the same composition. Each panel must tell a distinctly different moment or story.";
+    public const string FacialIdentitySuffix =
+        " CRITICAL FACIAL IDENTITY RULES: " +
+        "1) FACE PRESERVATION: Recreate the EXACT facial features from the reference photo — same face shape, eye shape, eye color, nose structure, lip shape, jawline, skin tone, eyebrow shape, and all distinguishing facial marks (moles, dimples, scars). The face must be unmistakably the same person. " +
+        "2) EXPRESSION LOCK: Keep the EXACT SAME facial expression as in the reference photo — same smile/neutral/serious look, same eye openness, same mouth position. Do NOT change, exaggerate, or stylize the expression in any way. " +
+        "3) HAIR & FEATURES: Preserve exact hair color, hairstyle, length, and texture from the reference. Keep facial hair (beard, mustache) exactly as shown. " +
+        "4) STYLE APPLICATION: Apply the requested artistic style (painting technique, color palette, textures, lighting, background) to the ENTIRE image including the face, but the underlying facial geometry, proportions, and expression must remain identical to the source photo. The style is a visual filter over the real identity, not a reimagining of the face. " +
+        "5) PERSON COUNT: Show ONLY the exact number of people from the source photo — no extra people added. " +
+        "6) MULTI-PANEL: If multiple panels/scenes, each panel must show a completely different scene, pose, outfit, angle, and setting, but the face identity and expression in each panel must match the reference photo exactly.";
 
     public int Id { get; set; }
 

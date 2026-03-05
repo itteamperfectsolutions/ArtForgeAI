@@ -1,7 +1,13 @@
+using System.Security.Claims;
 using System.Threading.RateLimiting;
 using ArtForgeAI.Components;
 using ArtForgeAI.Data;
+using ArtForgeAI.Models;
 using ArtForgeAI.Services;
+using Microsoft.AspNetCore.Authentication;
+using Microsoft.AspNetCore.Authentication.Cookies;
+using Microsoft.AspNetCore.Authentication.Google;
+using Microsoft.AspNetCore.Components.Authorization;
 using Microsoft.AspNetCore.RateLimiting;
 using Microsoft.EntityFrameworkCore;
 
@@ -85,18 +91,122 @@ builder.Services.AddScoped<IFaceCorrectionService, FaceCorrectionService>();
 builder.Services.AddScoped<IFormalAttireService, FormalAttireService>();
 builder.Services.AddScoped<PhotoExpandService>();
 
-// Rate limiting: 100 requests per minute per IP
+// ── Coin, Subscription, Referral & Payment services ──
+builder.Services.AddScoped<ICoinService, CoinService>();
+builder.Services.AddScoped<ISubscriptionService, SubscriptionService>();
+builder.Services.AddScoped<IReferralService, ReferralService>();
+builder.Services.Configure<RazorpayOptions>(
+    builder.Configuration.GetSection(RazorpayOptions.SectionName));
+builder.Services.AddHttpClient<IRazorpayService, RazorpayService>(client =>
+{
+    client.Timeout = TimeSpan.FromSeconds(30);
+});
+
+// Authentication — Cookie + Google OAuth
+var googleClientId = builder.Configuration["Authentication:Google:ClientId"] ?? "";
+var googleClientSecret = builder.Configuration["Authentication:Google:ClientSecret"] ?? "";
+var googleConfigured = !string.IsNullOrEmpty(googleClientId) && !string.IsNullOrEmpty(googleClientSecret);
+
+var authBuilder = builder.Services.AddAuthentication(options =>
+{
+    options.DefaultScheme = CookieAuthenticationDefaults.AuthenticationScheme;
+    if (googleConfigured)
+        options.DefaultChallengeScheme = GoogleDefaults.AuthenticationScheme;
+})
+.AddCookie(options =>
+{
+    options.LoginPath = "/login";
+    options.ExpireTimeSpan = TimeSpan.FromDays(30);
+    options.SlidingExpiration = true;
+    options.Cookie.HttpOnly = true;
+    options.Cookie.SameSite = SameSiteMode.Lax;
+    options.Events.OnValidatePrincipal = async context =>
+    {
+        var userIdStr = context.Principal?.FindFirstValue(ClaimTypes.NameIdentifier);
+        // Skip if NameIdentifier is not our DB integer ID
+        // (e.g. during OAuth flow the Google ID is a long string)
+        if (!int.TryParse(userIdStr, out var uid))
+            return;
+
+        var dbFactory = context.HttpContext.RequestServices
+            .GetRequiredService<IDbContextFactory<AppDbContext>>();
+        await using var db = await dbFactory.CreateDbContextAsync();
+        var dbUser = await db.AppUsers.FindAsync(uid);
+        if (dbUser == null || !dbUser.IsActive)
+        {
+            context.RejectPrincipal();
+            await context.HttpContext.SignOutAsync(CookieAuthenticationDefaults.AuthenticationScheme);
+            return;
+        }
+
+        // Refresh role claim from DB (fixes stale cookie)
+        var identity = context.Principal!.Identity as ClaimsIdentity;
+        if (identity != null)
+        {
+            var existing = identity.FindFirst(ClaimTypes.Role);
+            if (existing != null) identity.RemoveClaim(existing);
+            identity.AddClaim(new Claim(ClaimTypes.Role, dbUser.Role.ToString()));
+        }
+    };
+});
+
+if (googleConfigured)
+{
+    authBuilder.AddGoogle(options =>
+    {
+        options.ClientId = googleClientId;
+        options.ClientSecret = googleClientSecret;
+        options.CallbackPath = "/signin-google";
+        options.Scope.Add("email");
+        options.Scope.Add("profile");
+    });
+}
+
+builder.Services.AddAuthorization(options =>
+{
+    options.AddPolicy("SuperAdmin", policy => policy.RequireRole("SuperAdmin"));
+});
+
+builder.Services.AddCascadingAuthenticationState();
+builder.Services.AddScoped<AuthenticationStateProvider, RevalidatingAuthStateProvider>();
+builder.Services.AddScoped<IAuthService, AuthService>();
+builder.Services.AddScoped<IAdminAnalyticsService, AdminAnalyticsService>();
+
+// Rate limiting: apply only to API/page endpoints, not static files or Blazor SignalR
 builder.Services.AddRateLimiter(options =>
 {
     options.RejectionStatusCode = StatusCodes.Status429TooManyRequests;
     options.GlobalLimiter = PartitionedRateLimiter.Create<HttpContext, string>(context =>
-        RateLimitPartition.GetFixedWindowLimiter(
+    {
+        var path = context.Request.Path.Value ?? "";
+        // Skip rate limiting for static files, Blazor framework, and SignalR
+        if (path.StartsWith("/_blazor") ||
+            path.StartsWith("/_framework") ||
+            path.StartsWith("/_content") ||
+            path.StartsWith("/css") ||
+            path.StartsWith("/js") ||
+            path.StartsWith("/images") ||
+            path.StartsWith("/downloads") ||
+            path.StartsWith("/favicon") ||
+            path.EndsWith(".css") ||
+            path.EndsWith(".js") ||
+            path.EndsWith(".png") ||
+            path.EndsWith(".jpg") ||
+            path.EndsWith(".ico") ||
+            path.EndsWith(".woff") ||
+            path.EndsWith(".woff2"))
+        {
+            return RateLimitPartition.GetNoLimiter("static");
+        }
+
+        return RateLimitPartition.GetFixedWindowLimiter(
             partitionKey: context.Connection.RemoteIpAddress?.ToString() ?? "unknown",
             factory: _ => new FixedWindowRateLimiterOptions
             {
-                PermitLimit = 100,
+                PermitLimit = 300,
                 Window = TimeSpan.FromMinutes(1)
-            }));
+            });
+    });
 });
 
 var app = builder.Build();
@@ -106,6 +216,205 @@ using (var scope = app.Services.CreateScope())
 {
     var db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
     await db.Database.EnsureCreatedAsync();
+
+    // Create AppUsers table for authentication
+    try
+    {
+        await db.Database.ExecuteSqlRawAsync(@"
+            IF NOT EXISTS (SELECT * FROM sys.tables WHERE name = 'AppUsers')
+            CREATE TABLE AppUsers (
+                Id INT IDENTITY(1,1) PRIMARY KEY,
+                GoogleId NVARCHAR(100) NOT NULL,
+                Email NVARCHAR(200) NOT NULL,
+                DisplayName NVARCHAR(200) NOT NULL DEFAULT '',
+                AvatarUrl NVARCHAR(500) NULL,
+                Role INT NOT NULL DEFAULT 0,
+                IsActive BIT NOT NULL DEFAULT 1,
+                CreatedAt DATETIME2 NOT NULL DEFAULT SYSUTCDATETIME(),
+                LastLoginAt DATETIME2 NOT NULL DEFAULT SYSUTCDATETIME(),
+                CONSTRAINT UQ_AppUsers_GoogleId UNIQUE (GoogleId),
+                CONSTRAINT UQ_AppUsers_Email UNIQUE (Email)
+            )");
+    }
+    catch (Exception ex)
+    {
+        app.Logger.LogWarning(ex, "AppUsers table creation failed (non-fatal)");
+    }
+
+    // Add new columns to AppUsers for coin/subscription features
+    try
+    {
+        await db.Database.ExecuteSqlRawAsync(@"
+            IF NOT EXISTS (SELECT * FROM sys.columns WHERE object_id = OBJECT_ID('AppUsers') AND name = 'CoinBalance')
+                ALTER TABLE AppUsers ADD CoinBalance INT NOT NULL DEFAULT 0;
+            IF NOT EXISTS (SELECT * FROM sys.columns WHERE object_id = OBJECT_ID('AppUsers') AND name = 'ActiveSubscriptionId')
+                ALTER TABLE AppUsers ADD ActiveSubscriptionId INT NULL;
+            IF NOT EXISTS (SELECT * FROM sys.columns WHERE object_id = OBJECT_ID('AppUsers') AND name = 'ReferralCode')
+                ALTER TABLE AppUsers ADD ReferralCode NVARCHAR(20) NULL;
+            IF NOT EXISTS (SELECT * FROM sys.columns WHERE object_id = OBJECT_ID('AppUsers') AND name = 'ReferredByUserId')
+                ALTER TABLE AppUsers ADD ReferredByUserId INT NULL;
+            IF NOT EXISTS (SELECT * FROM sys.columns WHERE object_id = OBJECT_ID('AppUsers') AND name = 'LastDailyLoginReward')
+                ALTER TABLE AppUsers ADD LastDailyLoginReward DATETIME2 NULL;");
+    }
+    catch (Exception ex)
+    {
+        app.Logger.LogWarning(ex, "AppUsers new columns failed (non-fatal)");
+    }
+
+    // Create SubscriptionPlans table
+    try
+    {
+        await db.Database.ExecuteSqlRawAsync(@"
+            IF NOT EXISTS (SELECT * FROM sys.tables WHERE name = 'SubscriptionPlans')
+            BEGIN
+                CREATE TABLE SubscriptionPlans (
+                    Id INT IDENTITY(1,1) PRIMARY KEY,
+                    Name NVARCHAR(50) NOT NULL,
+                    PriceInr DECIMAL(10,2) NOT NULL DEFAULT 0,
+                    GstAmount DECIMAL(10,2) NOT NULL DEFAULT 0,
+                    TotalPriceInr DECIMAL(10,2) NOT NULL DEFAULT 0,
+                    MonthlyCoins INT NOT NULL DEFAULT 0,
+                    DurationDays INT NOT NULL DEFAULT 30,
+                    AllowedFeatures NVARCHAR(500) NOT NULL DEFAULT '',
+                    IsActive BIT NOT NULL DEFAULT 1,
+                    SortOrder INT NOT NULL DEFAULT 0
+                );
+                SET IDENTITY_INSERT SubscriptionPlans ON;
+                INSERT INTO SubscriptionPlans (Id, Name, PriceInr, GstAmount, TotalPriceInr, MonthlyCoins, DurationDays, AllowedFeatures, IsActive, SortOrder) VALUES
+                    (1, 'Free',       0,    0,      0,       5,   30, 'QuickStyle', 1, 1),
+                    (2, 'Starter',  199,   35.82, 234.82,   50,  30, 'QuickStyle,Home,StyleTransfer,Gallery', 1, 2),
+                    (3, 'Pro',      499,   89.82, 588.82,  150,  30, 'QuickStyle,Home,StyleTransfer,Gallery,MosaicPoster,PassportPhoto,ImageViewer,Settings', 1, 3),
+                    (4, 'Enterprise', 999, 179.82, 1178.82, 500, 30, 'QuickStyle,Home,StyleTransfer,Gallery,MosaicPoster,PassportPhoto,ImageViewer,Settings,PhotoExpand,GangSheet,ShapeCutSheet', 1, 4);
+                SET IDENTITY_INSERT SubscriptionPlans OFF;
+            END");
+    }
+    catch (Exception ex)
+    {
+        app.Logger.LogWarning(ex, "SubscriptionPlans table creation failed (non-fatal)");
+    }
+
+    // Create UserSubscriptions table
+    try
+    {
+        await db.Database.ExecuteSqlRawAsync(@"
+            IF NOT EXISTS (SELECT * FROM sys.tables WHERE name = 'UserSubscriptions')
+            CREATE TABLE UserSubscriptions (
+                Id INT IDENTITY(1,1) PRIMARY KEY,
+                UserId INT NOT NULL,
+                PlanId INT NOT NULL,
+                Status INT NOT NULL DEFAULT 0,
+                StartDate DATETIME2 NOT NULL DEFAULT SYSUTCDATETIME(),
+                EndDate DATETIME2 NOT NULL,
+                AutoRenew BIT NOT NULL DEFAULT 1,
+                RazorpaySubscriptionId NVARCHAR(100) NULL,
+                CreatedAt DATETIME2 NOT NULL DEFAULT SYSUTCDATETIME()
+            )");
+    }
+    catch (Exception ex)
+    {
+        app.Logger.LogWarning(ex, "UserSubscriptions table creation failed (non-fatal)");
+    }
+
+    // Create CoinTransactions table
+    try
+    {
+        await db.Database.ExecuteSqlRawAsync(@"
+            IF NOT EXISTS (SELECT * FROM sys.tables WHERE name = 'CoinTransactions')
+            CREATE TABLE CoinTransactions (
+                Id INT IDENTITY(1,1) PRIMARY KEY,
+                UserId INT NOT NULL,
+                Type INT NOT NULL DEFAULT 0,
+                Amount INT NOT NULL DEFAULT 0,
+                BalanceAfter INT NOT NULL DEFAULT 0,
+                Description NVARCHAR(200) NULL,
+                ReferenceId NVARCHAR(100) NULL,
+                CreatedAt DATETIME2 NOT NULL DEFAULT SYSUTCDATETIME()
+            )");
+    }
+    catch (Exception ex)
+    {
+        app.Logger.LogWarning(ex, "CoinTransactions table creation failed (non-fatal)");
+    }
+
+    // Create CoinPacks table
+    try
+    {
+        await db.Database.ExecuteSqlRawAsync(@"
+            IF NOT EXISTS (SELECT * FROM sys.tables WHERE name = 'CoinPacks')
+            BEGIN
+                CREATE TABLE CoinPacks (
+                    Id INT IDENTITY(1,1) PRIMARY KEY,
+                    Name NVARCHAR(50) NOT NULL,
+                    CoinAmount INT NOT NULL DEFAULT 0,
+                    BonusCoins INT NOT NULL DEFAULT 0,
+                    PriceInr DECIMAL(10,2) NOT NULL DEFAULT 0,
+                    GstAmount DECIMAL(10,2) NOT NULL DEFAULT 0,
+                    TotalPriceInr DECIMAL(10,2) NOT NULL DEFAULT 0,
+                    IsActive BIT NOT NULL DEFAULT 1,
+                    SortOrder INT NOT NULL DEFAULT 0
+                );
+                SET IDENTITY_INSERT CoinPacks ON;
+                INSERT INTO CoinPacks (Id, Name, CoinAmount, BonusCoins, PriceInr, GstAmount, TotalPriceInr, IsActive, SortOrder) VALUES
+                    (1, 'Starter',  50,    0,  49,   8.82,  57.82,  1, 1),
+                    (2, 'Value',   100,   20,  99,  17.82, 116.82,  1, 2),
+                    (3, 'Pro',     200,   80, 199,  35.82, 234.82,  1, 3),
+                    (4, 'Mega',    500,  300, 499,  89.82, 588.82,  1, 4);
+                SET IDENTITY_INSERT CoinPacks OFF;
+            END");
+    }
+    catch (Exception ex)
+    {
+        app.Logger.LogWarning(ex, "CoinPacks table creation failed (non-fatal)");
+    }
+
+    // Create Payments table
+    try
+    {
+        await db.Database.ExecuteSqlRawAsync(@"
+            IF NOT EXISTS (SELECT * FROM sys.tables WHERE name = 'Payments')
+            CREATE TABLE Payments (
+                Id INT IDENTITY(1,1) PRIMARY KEY,
+                UserId INT NOT NULL,
+                Purpose INT NOT NULL DEFAULT 0,
+                Status INT NOT NULL DEFAULT 0,
+                AmountInr DECIMAL(10,2) NOT NULL DEFAULT 0,
+                GstAmount DECIMAL(10,2) NOT NULL DEFAULT 0,
+                TotalAmountInr DECIMAL(10,2) NOT NULL DEFAULT 0,
+                RazorpayOrderId NVARCHAR(100) NULL,
+                RazorpayPaymentId NVARCHAR(100) NULL,
+                RazorpaySignature NVARCHAR(500) NULL,
+                CoinPackId INT NULL,
+                SubscriptionPlanId INT NULL,
+                FailureReason NVARCHAR(500) NULL,
+                CreatedAt DATETIME2 NOT NULL DEFAULT SYSUTCDATETIME(),
+                CompletedAt DATETIME2 NULL
+            )");
+    }
+    catch (Exception ex)
+    {
+        app.Logger.LogWarning(ex, "Payments table creation failed (non-fatal)");
+    }
+
+    // Create Referrals table
+    try
+    {
+        await db.Database.ExecuteSqlRawAsync(@"
+            IF NOT EXISTS (SELECT * FROM sys.tables WHERE name = 'Referrals')
+            CREATE TABLE Referrals (
+                Id INT IDENTITY(1,1) PRIMARY KEY,
+                ReferrerUserId INT NOT NULL,
+                RefereeUserId INT NOT NULL,
+                ReferrerBonusCoins INT NOT NULL DEFAULT 15,
+                RefereeBonusCoins INT NOT NULL DEFAULT 10,
+                IsRewarded BIT NOT NULL DEFAULT 0,
+                CreatedAt DATETIME2 NOT NULL DEFAULT SYSUTCDATETIME(),
+                CONSTRAINT UQ_Referrals_Referee UNIQUE (RefereeUserId)
+            )");
+    }
+    catch (Exception ex)
+    {
+        app.Logger.LogWarning(ex, "Referrals table creation failed (non-fatal)");
+    }
 
     // Create DeletedStyleSeeds tracking table — records styles the user explicitly deleted
     // so that seed logic never re-inserts them on restart
@@ -257,7 +566,7 @@ using (var scope = app.Services.CreateScope())
                 ('Nirmal Painting', 'Nirmal art gold-leaf painting tradition', 'Transform into Nirmal painting style from Telangana. Rich gold-leaf background with detailed figures and landscapes. Warm palette of deep reds, greens, and gold. Soft shading technique with luminous glow effect. Hindu mythological and nature themes. Deccan miniature painting influence with ornate decorative borders. Museum-quality traditional art.', 'Regional', N'🖌️', '#C62828', 1, 31),
                 ('Tirupati Golden', 'Tirumala temple golden divine aesthetic', 'Transform into a divine golden temple art style inspired by Tirumala Tirupati. Radiant gold leaf background with sacred aura. Rich ornamental details — temple gopuram carvings, lotus motifs, divine halo effects. Warm golden-amber light suffusing the entire composition. Sacred, devotional, majestic atmosphere. Traditional South Indian temple art aesthetic.', 'Regional', N'🛕', '#FFD600', 1, 32),
                 ('Lepakshi Mural', 'Vijayanagara-era Lepakshi temple fresco', 'Transform into Lepakshi temple mural painting style from Andhra Pradesh. Vijayanagara-era fresco aesthetic with earth pigments — red ochre, yellow, black, white on plaster texture. Large graceful figures with elongated eyes and ornate jewelry. Mythological narrative scenes with architectural framing. Ancient wall painting quality with subtle aging patina.', 'Regional', N'🏛️', '#E65100', 1, 33),
-                ('Bathukamma', 'Telangana Bathukamma floral festival art', 'Transform into a vibrant Bathukamma festival art style from Telangana. Conical floral tower composition using bright marigold orange, celosia pink, lotus magenta, and tangechi yellow. Circular mandala arrangement of flower layers. Festival celebration energy with women in colorful sarees. Joyful, sacred feminine energy. Vibrant folk art with floral abundance.', 'Regional', N'🌺', '#E91E63', 1, 34),
+                ('Bathukamma', 'Telangana Bathukamma floral festival art', 'Transform into a vibrant Bathukamma festival art style from Telangana. Conical floral tower composition using bright marigold orange, celosia pink, lotus magenta, and tangechi yellow. Circular mandala arrangement of flower layers. Festival celebration energy with people in colorful traditional attire — sarees, dhotis, or kurtas. Joyful, sacred festive energy. Vibrant folk art with floral abundance.', 'Regional', N'🌺', '#E91E63', 1, 34),
                 ('Bonalu Festival', 'Vibrant Bonalu festival celebration style', 'Transform into vibrant Bonalu festival art style from Telangana. Rich vermillion red and turmeric yellow dominant palette. Decorated bonam pots with elaborate kolam designs. Festive energy with procession celebration mood. Traditional folk art elements — mirror work, rangoli borders, goddess Mahankali motifs. Bold, energetic, devotional folk art quality.', 'Regional', N'🪔', '#F44336', 1, 35),
                 ('Kuchipudi Dance', 'Classical Kuchipudi dance-pose art', 'Transform into classical Kuchipudi dance art style from Andhra Pradesh. Graceful bharatanatyam-adjacent pose with expressive mudra hand gestures. Rich silk costume details in jewel tones. Traditional temple jewelry — gold jhumkas, maang tikka, waist belt. Dynamic frozen-motion capture with flowing fabric. Bronze sculpture-like quality with warm dramatic stage lighting.', 'Regional', N'💃', '#AD1457', 1, 36),
                 ('Sankranti Rangoli', 'Makar Sankranti muggu/rangoli patterns', 'Transform into Sankranti muggu rangoli art style from Andhra Pradesh. White rice flour pattern on earthy red ground. Intricate geometric kolam with dot-grid symmetry — lotus flowers, peacocks, and sun motifs. Clean precise mathematical line patterns radiating outward. Festival morning freshness. Traditional South Indian floor art with vibrant color-filled sections.', 'Regional', N'🌀', '#FF6F00', 1, 37),
@@ -266,8 +575,8 @@ using (var scope = app.Services.CreateScope())
                 ('Mangalagiri Fabric', 'Mangalagiri handloom cotton weave texture', 'Transform into Mangalagiri handloom textile art style from Andhra Pradesh. Fine cotton weave texture with characteristic nizam border pattern in gold zari. Clean geometric stripes and checks in natural cotton white with vibrant accent colors — mango yellow, parrot green, temple red. Crisp handloom quality with visible warp-weft structure. Elegant simplicity.', 'Regional', N'👘', '#2E7D32', 1, 40),
                 ('Etikoppaka Lacquer', 'Etikoppaka lacquer-turned toy art', 'Transform into Etikoppaka lacquer toy art style from Andhra Pradesh. Bright vegetable-dye colors — lac red, turmeric yellow, indigo blue, leaf green. Smooth turned-wood rounded forms with concentric ring patterns. Glossy lacquer finish with warm wood undertones. Playful folk craft aesthetic with simplified charming proportions. Traditional lathe-turned toy quality.', 'Regional', N'🎎', '#EF6C00', 1, 41),
                 ('Godavari Landscape', 'River Godavari natural scenic painting', 'Transform into a scenic River Godavari landscape painting. Lush tropical South Indian riverbank with coconut palms and paddy fields. Warm golden morning light reflecting on wide river waters. Traditional fishing boats and papyrus reeds. Rich green foliage with misty hills in background. Peaceful rural Andhra Pradesh atmosphere. Impressionistic plein-air painting quality.', 'Regional', N'🌊', '#00838F', 1, 42),
-                ('Perini Warrior', 'Perini Sivatandavam warrior dance art', 'Transform into Perini Sivatandavam warrior dance art style from Telangana. Powerful masculine dance pose with dramatic warrior energy. Bronze sculpture aesthetic with dynamic frozen motion. Traditional warrior costume with ankle bells and dhoti. Kakatiya dynasty era aesthetic. Deep dramatic lighting emphasizing muscular form and fierce expression. Ancient temple relief sculpture quality.', 'Regional', N'⚔️', '#4E342E', 1, 43),
-                ('Dharmavaram Silk', 'Dharmavaram pattu saree rich silk art', 'Transform into luxurious Dharmavaram pattu silk saree art style. Rich handwoven silk with heavy gold zari brocade borders. Deep jewel colors — temple red, royal purple, peacock blue with contrasting pallu. Intricate traditional motifs — temple towers, mango buttas, peacock designs in metallic gold. Lustrous silk sheen with dramatic drape folds. Bridal elegance quality.', 'Regional', N'🥻', '#880E4F', 1, 44),
+                ('Perini Warrior', 'Perini Sivatandavam warrior dance art', 'Transform into Perini Sivatandavam warrior dance art style from Telangana. Powerful warrior dance pose with dramatic energy. Bronze sculpture aesthetic with dynamic frozen motion. Traditional warrior costume — dhoti, angavastra, or battle attire as appropriate. Kakatiya dynasty era aesthetic. Deep dramatic lighting emphasizing dynamic form and fierce expression. Ancient temple relief sculpture quality.', 'Regional', N'⚔️', '#4E342E', 1, 43),
+                ('Dharmavaram Silk', 'Dharmavaram pattu silk rich textile art', 'Transform into luxurious Dharmavaram pattu silk textile art style. Rich handwoven silk with heavy gold zari brocade borders. Deep jewel colors — temple red, royal purple, peacock blue with contrasting pallu. Traditional attire — saree, dhoti, veshti, or pattu as appropriate to the subject. Intricate traditional motifs — temple towers, mango buttas, peacock designs in metallic gold. Lustrous silk sheen with dramatic drape folds. Ceremonial elegance quality.', 'Regional', N'🥻', '#880E4F', 1, 44),
                 ('Deccan Miniature', 'Deccan school miniature painting style', 'Transform into Deccan school miniature painting style. Deccani-Mughal fusion aesthetic with rich palette — gold, deep green, lapis blue, coral. Detailed figure painting with ornate costumes and architecture. Flat perspective with decorative floral borders. Persian-influenced faces with Indian features. Golconda and Hyderabad court painting tradition. Manuscript illumination quality.', 'Regional', N'🎴', '#5D4037', 1, 45),
                 ('Araku Valley Nature', 'Araku Valley tribal nature landscape', 'Transform into Araku Valley tribal nature art style from Andhra Pradesh. Lush Eastern Ghats coffee plantation landscape with misty blue-green mountains. Tribal Dhimsa dance silhouettes and Borra Caves rock formations. Rich verdant palette with morning mist atmosphere. Indigenous tribal geometric patterns as decorative border elements. Serene hill-station landscape with waterfall elements.', 'Regional', N'🏔️', '#1B5E20', 1, 46);
             END");
@@ -275,6 +584,29 @@ using (var scope = app.Services.CreateScope())
     catch (Exception ex)
     {
         app.Logger.LogWarning(ex, "Regional StylePresets seeding failed (non-fatal)");
+    }
+
+    // ── Gender-neutral prompt updates for existing regional/artistic styles ──
+    try
+    {
+        await db.Database.ExecuteSqlRawAsync(@"
+            UPDATE StylePresets SET PromptTemplate = N'Transform into a vibrant Bathukamma festival art style from Telangana. Conical floral tower composition using bright marigold orange, celosia pink, lotus magenta, and tangechi yellow. Circular mandala arrangement of flower layers. Festival celebration energy with people in colorful traditional attire — sarees, dhotis, or kurtas. Joyful, sacred festive energy. Vibrant folk art with floral abundance.' WHERE Name = N'Bathukamma';
+
+            UPDATE StylePresets SET PromptTemplate = N'Transform into Perini Sivatandavam warrior dance art style from Telangana. Powerful warrior dance pose with dramatic energy. Bronze sculpture aesthetic with dynamic frozen motion. Traditional warrior costume — dhoti, angavastra, or battle attire as appropriate. Kakatiya dynasty era aesthetic. Deep dramatic lighting emphasizing dynamic form and fierce expression. Ancient temple relief sculpture quality.' WHERE Name = N'Perini Warrior';
+
+            UPDATE StylePresets SET PromptTemplate = N'Transform into luxurious Dharmavaram pattu silk textile art style. Rich handwoven silk with heavy gold zari brocade borders. Deep jewel colors — temple red, royal purple, peacock blue with contrasting pallu. Traditional attire — saree, dhoti, veshti, or pattu as appropriate to the subject. Intricate traditional motifs — temple towers, mango buttas, peacock designs in metallic gold. Lustrous silk sheen with dramatic drape folds. Ceremonial elegance quality.',
+                Description = N'Dharmavaram pattu silk rich textile art' WHERE Name = N'Dharmavaram Silk';
+
+            UPDATE StylePresets SET PromptTemplate = N'Transform into a vintage 1960s-70s Bollywood glamour portrait. Classic golden-era Hindi cinema aesthetic with soft-focus dreamy lens quality. Subject in elegant traditional attire — silk saree, sherwani, kurta-pajama, or salwar suit as appropriate to their gender. Rich jewel-tone colors — deep red, royal blue, emerald, gold accents. Traditional Indian jewelry appropriate to gender. Soft studio lighting with warm amber key light and gentle fill. Hand-tinted photograph quality with slight color saturation. Lush painted backdrop of a Mughal garden or palatial interior. Golden-era Bollywood elegance. Romantic, graceful, timelessly beautiful Indian cinema.' WHERE Name = N'Retro Bollywood Saree';
+
+            UPDATE StylePresets SET PromptTemplate = N'Transform into a classical Indian oil painting in the style of Raja Ravi Varma. European academic realism blended with Indian aesthetic sensibility. Rich saturated oil colors with luminous skin tones and smooth blending. Subject in traditional Indian attire — silk saree, dhoti, angavastram, or royal robes as appropriate to their gender. Ornate jewelry and classical drapery. Warm golden lighting with soft shadows. Lush Indian botanical background — tropical flowers, temple architecture, or palatial interiors. Museum-quality Indian fine art masterpiece.' WHERE Name = N'Ravi Varma Oil';
+
+            UPDATE StylePresets SET PromptTemplate = N'Transform into the iconic Bapu Bomma illustration style of legendary Telugu artist Bapu. Distinctive clean precise ink linework with elegant flowing contours. Beautiful rounded faces with large expressive almond-shaped eyes, delicate pointed chins, and gentle smiles. Slender graceful figures with classical Indian poses and expressive hand gestures. Traditional South Indian attire — flowing silk saree, dhoti, or kurta with intricate border patterns. Jasmine flowers, temple jewelry. Soft pastel coloring with warm skin tones — peach, cream, and golden hues. Minimal uncluttered backgrounds with subtle floral or nature motifs. The unmistakable Bapu aesthetic — grace, beauty, and cultural elegance of Telugu tradition. Calendar art and Telugu cinema poster illustration quality.' WHERE Name = N'Bapu Bomma';
+        ");
+    }
+    catch (Exception ex)
+    {
+        app.Logger.LogWarning(ex, "Gender-neutral prompt updates failed (non-fatal)");
     }
 
     // Seed trending 2025-2026 style presets (guarded individually by Name)
@@ -323,7 +655,7 @@ using (var scope = app.Services.CreateScope())
             IF NOT EXISTS (SELECT 1 FROM StylePresets WHERE Name = 'Retro Bollywood Saree')
                 INSERT INTO StylePresets (Name, Description, PromptTemplate, Category, IconEmoji, AccentColor, IsActive, SortOrder) VALUES
                 ('Retro Bollywood Saree', 'Vintage 1960s-70s Bollywood glamour portrait',
-                 'Transform into a vintage 1960s-70s Bollywood glamour portrait. Classic golden-era Hindi cinema aesthetic with soft-focus dreamy lens quality. Subject draped in an elegant silk saree with rich jewel-tone colors — deep red, royal blue, emerald, gold border. Traditional Indian jewelry — heavy gold necklace, jhumka earrings, maang tikka, glass bangles. Soft studio lighting with warm amber key light and gentle fill. Hand-tinted photograph quality with slight color saturation. Lush painted backdrop of a Mughal garden or palatial interior. Madhubala and Waheeda Rehman era elegance. Romantic, graceful, timelessly beautiful Indian cinema.',
+                 'Transform into a vintage 1960s-70s Bollywood glamour portrait. Classic golden-era Hindi cinema aesthetic with soft-focus dreamy lens quality. Subject in elegant traditional attire — silk saree, sherwani, kurta-pajama, or salwar suit as appropriate to their gender. Rich jewel-tone colors — deep red, royal blue, emerald, gold accents. Traditional Indian jewelry appropriate to gender. Soft studio lighting with warm amber key light and gentle fill. Hand-tinted photograph quality with slight color saturation. Lush painted backdrop of a Mughal garden or palatial interior. Golden-era Bollywood elegance. Romantic, graceful, timelessly beautiful Indian cinema.',
                  'Artistic', N'🥻', '#FF6F00', 1, 54);
 
             -- ============================================================
@@ -922,11 +1254,11 @@ using (var scope = app.Services.CreateScope())
     // ── Seed 3 birthday calendar/double-exposure PhotoCollage styles ──
     try
     {
-        const string darkBirthdayCalendarPrompt = "DO NOT reproduce the source photo. Generate a BRAND NEW DARK BIRTHDAY CALENDAR COLLAGE on a vertical 2:3 portrait canvas. Use the person from the source photo — preserve their EXACT face, hair, and appearance in every panel. LAYOUT: The canvas has a DARK BLACK/DEEP CHARCOAL BACKGROUND with a subtle vignette. RIGHT SIDE (55-60% width): A single large HERO PHOTOGRAPH of the subject — the person in a stylish outfit, outdoors in a colourful or scenic setting (urban street, garden, park). Natural warm lighting with a slight cinematic colour grade. The subject should be looking towards the camera with a warm, confident expression. This photo extends from the top to about 75% of the canvas height. The photo has slightly rounded corners and a thin dark border separating it from the background. LEFT SIDE (35-40% width): 4-5 SMALLER POLAROID-STYLE PHOTOS stacked vertically, each slightly tilted at casual angles (2-6 degrees) with thick white instant-photo borders. Each polaroid shows a COMPLETELY DIFFERENT moment or pose: Polaroid 1 (top): the subject laughing joyfully, candid moment, bright outdoor light. Polaroid 2: a close-up portrait with a playful or thoughtful expression, soft bokeh background. Polaroid 3: the subject in a different outfit, three-quarter body, dynamic pose. Polaroid 4: an artistic shot — the subject from behind or side angle, interesting lighting. Polaroid 5 (bottom, optional): a full-body shot, confident stance, vibrant background. Each polaroid casts a subtle drop shadow on the dark background. BOTTOM-LEFT AREA: {{CALENDAR}} BOTTOM-RIGHT AREA: Elegant calligraphy text reading 'Happy Birthday' in warm white or cream script font with subtle glow. Below that, '{{MESSAGE}}' in a large beautiful decorative calligraphy script — warm gold or cream colour. Small ornamental flourishes or sparkles around the text. COLOUR PALETTE: deep black/charcoal background, warm natural tones in photos, white polaroid borders, cream/gold text. Overall mood: stylish, modern, celebratory dark birthday collage.";
+        const string darkBirthdayCalendarPrompt = "DO NOT reproduce the source photo. Generate a BRAND NEW DARK BIRTHDAY CALENDAR COLLAGE on a vertical 2:3 portrait canvas. Use the person from the source photo — preserve their EXACT face, hair, and appearance in every panel. IMPORTANT: Every polaroid and the hero photo must show the SAME person with IDENTICAL facial features — same eyes, nose, mouth, jawline. Do NOT generate different-looking faces across panels. LAYOUT: The canvas has a DARK BLACK/DEEP CHARCOAL BACKGROUND with a subtle vignette. RIGHT SIDE (55-60% width): A single large HERO PHOTOGRAPH of the subject — the person in a stylish outfit, outdoors in a colourful or scenic setting (urban street, garden, park). Natural warm lighting with a slight cinematic colour grade. The subject should be looking towards the camera with a warm, confident expression. This photo extends from the top to about 75% of the canvas height. The photo has slightly rounded corners and a thin dark border separating it from the background. LEFT SIDE (35-40% width): 4-5 SMALLER POLAROID-STYLE PHOTOS stacked vertically, each slightly tilted at casual angles (2-6 degrees) with thick white instant-photo borders. Each polaroid shows a COMPLETELY DIFFERENT moment or pose but the SAME PERSON with identical face: Polaroid 1 (top): the subject laughing joyfully, candid moment, bright outdoor light. Polaroid 2: a close-up portrait with a playful or thoughtful expression, soft bokeh background. Polaroid 3: the subject in a different outfit, three-quarter body, dynamic pose. Polaroid 4: an artistic shot — the subject from behind or side angle, interesting lighting. Each polaroid casts a subtle drop shadow on the dark background. BOTTOM-LEFT AREA: {{CALENDAR}} BOTTOM-RIGHT AREA: Elegant calligraphy text reading 'Happy Birthday' in warm white or cream script font with subtle glow. Below that, '{{MESSAGE}}' in a large beautiful decorative calligraphy script — warm gold or cream colour. Small ornamental flourishes or sparkles around the text. TEXT RESTRICTION: Show ONLY the exact text specified above ('Happy Birthday' and the message). Do NOT add any other festival name, greeting, or event text anywhere in the image. COLOUR PALETTE: deep black/charcoal background, warm natural tones in photos, white polaroid borders, cream/gold text. Overall mood: stylish, modern, celebratory dark birthday collage.";
 
-        const string birthdayGridCalendarPrompt = "DO NOT reproduce the source photo. Generate a BRAND NEW BIRTHDAY GRID CALENDAR COLLAGE on a vertical 2:3 portrait canvas. Use the person from the source photo — preserve their EXACT face, hair, and appearance in every panel. BACKGROUND: Solid BLACK background with tiny scattered golden sparkle/star effects across the entire canvas for a festive look. TOP AREA (25% of canvas): {{CALENDAR}} The calendar should use white text on the dark background with clean modern typography. MIDDLE AREA (50% of canvas): A MOSAIC GRID of 8-10 photographs arranged in a dynamic grid layout with varying sizes — mix of square and rectangular frames. Some photos are larger (feature shots) and some smaller (accent shots). Thin white gaps (2-3px) separate each photo. The grid is asymmetric and visually interesting. Photo variety: Photo 1 (large, top-left): close-up portrait of the subject with a joyful smile, warm lighting. Photo 2 (medium): the subject in a stylish outfit, three-quarter pose, urban or studio background. Photo 3 (small square): candid laughing moment. Photo 4 (medium): the subject outdoors in golden-hour light, dreamy bokeh. Photo 5 (large, centre): the subject in an elegant outfit, full body, confident pose. Photo 6 (small): artistic close-up — profile view or detail shot. Photo 7 (medium): playful pose with props or in a fun setting. Photo 8 (small): a different outfit, lifestyle shot. Each photo has warm vibrant colour grading. CENTRE TEXT AREA (between photo rows): A decorative text block with a warm heartfelt birthday wish — '{{OCCASION}}' in elegant italic script, cream or soft gold colour, 2-3 lines. Small decorative emoji-style elements (hearts, stars, sparkles) scattered around the text. BOTTOM AREA (20% of canvas): Large bold text 'Happy Birthday' in a beautiful display font — warm white or cream with subtle glow effect. Below it: '{{MESSAGE}}' in elegant calligraphy script — soft pink or gold. Small decorative butterflies and floral sprigs on either side of the text — delicate, pastel pink and white. COLOUR PALETTE: black background, golden sparkles, warm photo tones, cream/gold text, soft pink accents. Overall mood: festive, glamorous, modern birthday celebration.";
+        const string birthdayGridCalendarPrompt = "DO NOT reproduce the source photo. Generate a BRAND NEW BIRTHDAY GRID CALENDAR COLLAGE on a vertical 2:3 portrait canvas. Use the person from the source photo — preserve their EXACT face, hair, and appearance in every panel. IMPORTANT: Every photo in the grid must show the SAME person with IDENTICAL facial features — same eyes, nose, mouth, jawline. Do NOT generate different-looking faces across panels. BACKGROUND: Solid BLACK background with tiny scattered golden sparkle/star effects across the entire canvas for a festive look. TOP AREA (25% of canvas): {{CALENDAR}} The calendar should use white text on the dark background with clean modern typography. MIDDLE AREA (50% of canvas): A MOSAIC GRID of 6-8 photographs arranged in a dynamic grid layout with varying sizes — mix of square and rectangular frames. Some photos are larger (feature shots) and some smaller (accent shots). Thin white gaps (2-3px) separate each photo. The grid is asymmetric and visually interesting. Every photo must show the face large enough that all features are clearly visible. Photo variety: Photo 1 (large, top-left): close-up portrait of the subject with a joyful smile, warm lighting. Photo 2 (medium): the subject in a stylish outfit, three-quarter pose, urban or studio background. Photo 3 (small square): candid laughing moment, face clearly visible. Photo 4 (medium): the subject outdoors in golden-hour light, dreamy bokeh. Photo 5 (large, centre): the subject in an elegant outfit, waist-up, confident pose. Photo 6 (small): artistic close-up — profile view or detail shot. Photo 7 (medium): playful pose with props or in a fun setting. Photo 8 (small): a different outfit, lifestyle shot. Each photo has warm vibrant colour grading. CENTRE TEXT AREA (between photo rows): A decorative text block with a warm heartfelt birthday wish — '{{OCCASION}}' in elegant italic script, cream or soft gold colour, 2-3 lines. Small decorative emoji-style elements (hearts, stars, sparkles) scattered around the text. BOTTOM AREA (20% of canvas): Large bold text 'Happy Birthday' in a beautiful display font — warm white or cream with subtle glow effect. Below it: '{{MESSAGE}}' in elegant calligraphy script — soft pink or gold. Small decorative butterflies and floral sprigs on either side of the text — delicate, pastel pink and white. TEXT RESTRICTION: Show ONLY the exact text specified above ('Happy Birthday', the occasion, and the message). Do NOT add any other festival name, greeting, or event text anywhere in the image. COLOUR PALETTE: black background, golden sparkles, warm photo tones, cream/gold text, soft pink accents. Overall mood: festive, glamorous, modern birthday celebration.";
 
-        const string birthdayDoubleExposurePrompt = "DO NOT reproduce the source photo. Generate a BRAND NEW CINEMATIC BIRTHDAY POSTER on a vertical 2:3 portrait canvas. Use the person from the source photo — preserve their EXACT face, hair, and appearance. This should look like a dramatic CINEMATIC POSTER for a birthday celebration. LAYOUT — TOP HALF (55-60% of canvas): A dramatic DOUBLE EXPOSURE / OVERLAY effect. A large, softly DESATURATED close-up of the subject's face and upper body — rendered in muted GREY/SILVER monochrome tones, large scale, filling the upper portion. The image is semi-transparent and dreamlike, blending into the dark background. Show multiple angles or a mirrored/reflected version of the face creating a symmetrical artistic composition. The edges fade and dissolve into soft mist, light particles, or gentle bokeh effects. BOTTOM HALF (40-45% of canvas): A VIVID FULL-COLOUR photograph of the subject — in a smart casual or elegant outfit (blazer, dress, sharp shirt). Standing or posed confidently with warm natural lighting. This photo is crisp, vibrant, and saturated with warm golden-brown tones — dramatically contrasting with the grey overlay above. The subject is shown from approximately waist up. TRANSITION between top and bottom: Smooth gradient dissolve — the grey monochrome top fades gradually into the vivid colour bottom. No hard dividing line. Soft light particles and gentle bokeh orbs (warm gold) float across the transition zone. TEXT ELEMENTS — UPPER-CENTRE (overlaying the double exposure): 'HAPPY BIRTHDAY' in clean uppercase serif or sans-serif font — warm white or soft cream, medium size, elegant spacing. BOTTOM AREA (below or overlaying the colour photo): '{{MESSAGE}}' in large flowing calligraphy script — sage green, warm olive, or soft gold colour. Beautiful decorative flourishes extending from the text. COLOUR PALETTE: grey/silver monochrome (top), warm golden-brown (bottom colour photo), sage green or olive text accents. The contrast between desaturated and vivid is the key visual feature. Overall mood: cinematic, artistic, modern birthday celebration poster.";
+        const string birthdayDoubleExposurePrompt = "DO NOT reproduce the source photo. Generate a BRAND NEW CINEMATIC BIRTHDAY POSTER on a vertical 2:3 portrait canvas. Use the person from the source photo — preserve their EXACT face, hair, and appearance. Both the monochrome overlay and the colour portrait must show the SAME person with IDENTICAL facial features. This should look like a dramatic CINEMATIC POSTER for a birthday celebration. LAYOUT — TOP HALF (55-60% of canvas): A dramatic DOUBLE EXPOSURE / OVERLAY effect. A large, softly DESATURATED close-up of the subject's face and upper body — rendered in muted GREY/SILVER monochrome tones, large scale, filling the upper portion. The image is semi-transparent and dreamlike, blending into the dark background. Show multiple angles or a mirrored/reflected version of the face creating a symmetrical artistic composition. The edges fade and dissolve into soft mist, light particles, or gentle bokeh effects. BOTTOM HALF (40-45% of canvas): A VIVID FULL-COLOUR photograph of the subject — in a smart casual or elegant outfit (blazer, dress, sharp shirt). Standing or posed confidently with warm natural lighting. This photo is crisp, vibrant, and saturated with warm golden-brown tones — dramatically contrasting with the grey overlay above. The subject is shown from approximately waist up. TRANSITION between top and bottom: Smooth gradient dissolve — the grey monochrome top fades gradually into the vivid colour bottom. No hard dividing line. Soft light particles and gentle bokeh orbs (warm gold) float across the transition zone. TEXT ELEMENTS — UPPER-CENTRE (overlaying the double exposure): 'HAPPY BIRTHDAY' in clean uppercase serif or sans-serif font — warm white or soft cream, medium size, elegant spacing. BOTTOM AREA (below or overlaying the colour photo): '{{MESSAGE}}' in large flowing calligraphy script — sage green, warm olive, or soft gold colour. Beautiful decorative flourishes extending from the text. TEXT RESTRICTION: Show ONLY the exact text specified above ('HAPPY BIRTHDAY' and the message). Do NOT add any other festival name, greeting, or event text anywhere in the image. COLOUR PALETTE: grey/silver monochrome (top), warm golden-brown (bottom colour photo), sage green or olive text accents. The contrast between desaturated and vivid is the key visual feature. Overall mood: cinematic, artistic, modern birthday celebration poster.";
 
         var birthdayCalendarStyles = new[]
         {
@@ -974,16 +1306,16 @@ using (var scope = app.Services.CreateScope())
     // ── Seed Number Template PhotoCollage style ──
     try
     {
-        const string numberTemplatePrompt = "DO NOT reproduce the source photo. Generate a BRAND NEW NUMBER PHOTO COLLAGE on a vertical 2:3 portrait canvas. Use the person from the source photo — preserve their EXACT face, hair, and appearance in every photo within the number. BACKGROUND: Clean soft LIGHT GREY or OFF-WHITE background with a very subtle gradient (slightly darker at the edges). Smooth, minimal, studio-style backdrop. CENTRE OF CANVAS: A GIANT number '{{NUMBER}}' rendered as a LARGE 3D NUMERAL that dominates the canvas (approximately 70-80% of canvas height). The number has a subtle 3D depth/thickness effect with soft shadows on the background — as if it's a physical standing object. CRITICAL — PHOTO COLLAGE INSIDE THE NUMBER: The entire surface of the number '{{NUMBER}}' is filled with a MOSAIC of 8-12 different photographs of the subject, arranged as a collage CLIPPED INSIDE the number shape. The photos should be tightly packed with thin white gaps (1-2px) between them, all contained within the outline of the digit(s). Photo variety inside the number: mix of close-up portraits (joyful smiles, laughing), three-quarter body shots (different outfits, playful poses), candid moments (playing, exploring, celebrating), and lifestyle shots. Each photo has warm natural lighting and vibrant colours. The photos are cropped to different rectangular sizes to fill the number shape completely — no empty space inside the digit. Outside the number outline, the background remains clean and minimal. TOP AREA (above the number): Elegant text '{{MESSAGE}}' in a beautiful flowing handwritten calligraphy script — dark charcoal or warm brown colour. This should be a personalized name or heading like 'Melissa Turned Two' or 'Aarav is 5'. BOTTOM AREA (below the number): Text 'Happy Birthday' in elegant decorative script — dark charcoal or warm gold. Below that, the date '{{DATE}}' in a clean refined sans-serif or serif font — slightly smaller, warm grey or gold colour. IMPORTANT: Do NOT repeat 'Happy Birthday' anywhere else in the image — it should appear ONLY ONCE in the bottom area. OVERALL STYLE: The final image should look like a professional birthday milestone poster — clean white/grey background with a stunning photo-filled number as the centrepiece. Soft drop shadow behind the number for depth. COLOUR PALETTE: light grey/white background, warm vibrant photos inside the number, dark charcoal or gold text.";
+        const string numberTemplatePrompt = "Generate a number photo collage poster on a 2:3 portrait canvas. Giant 3D number '{{NUMBER}}' fills 70-80% of canvas height, with the ENTIRE number surface filled by a mosaic of tightly packed photos of the EXACT same person from the source. CRITICAL: Every single photo inside the number must show the IDENTICAL person — same face shape, same nose, same eyes, same mustache/beard, same skin colour, same hair. Do NOT generate different people. All photos must be unmistakably the same individual just in different poses and angles. Thin white gaps between photos, clipped inside digit outline. Clean light grey background. Top: '{{MESSAGE}}' in elegant calligraphy. Bottom: '{{OCCASION}}' in decorative script, then '{{DATE}}' smaller below. Soft drop shadow, warm vibrant photos, dark charcoal or gold text.";
 
         await db.Database.ExecuteSqlRawAsync(@"
             IF NOT EXISTS (SELECT 1 FROM StylePresets WHERE Name = @p0)
                 INSERT INTO StylePresets (Name, Description, PromptTemplate, Category, IconEmoji, AccentColor, IsActive, SortOrder)
                 VALUES (@p0, @p1, @p2, N'PhotoCollage', @p3, @p4, 1, @p5)",
-            "Number Template", "Giant number filled with photo collage for birthday milestones", numberTemplatePrompt, "\U0001F522", "#9E9E9E", 177);
+            "Number Template", "Giant number filled with photo collage for any occasion", numberTemplatePrompt, "\U0001F522", "#9E9E9E", 177);
         await db.Database.ExecuteSqlRawAsync(@"
-            UPDATE StylePresets SET PromptTemplate = @p0 WHERE Name = @p1",
-            numberTemplatePrompt, "Number Template");
+            UPDATE StylePresets SET PromptTemplate = @p0, Description = @p2 WHERE Name = @p1",
+            numberTemplatePrompt, "Number Template", "Giant number filled with photo collage for any occasion");
     }
     catch (Exception ex)
     {
@@ -993,9 +1325,9 @@ using (var scope = app.Services.CreateScope())
     // ── Seed Trending styles ──
     try
     {
-        const string traditionalMakeupPrompt = "DO NOT reproduce the source photo. Generate a BRAND NEW TRADITIONAL MAKEUP PORTRAIT on a vertical 2:3 portrait canvas. Use the person from the source photo — preserve their EXACT face, facial bone structure, skin tone, eye shape, nose shape, lip shape, hair texture, and every facial detail with photorealistic accuracy. The person's gender, age, and ethnicity must remain exactly as in the source photo. SCENE: An intimate, candid close-up moment of the subject getting traditional ceremonial makeup applied. The subject is adorned in rich traditional Indian jewellery appropriate to their gender and age — ornate headpiece (maang tikka or forehead jewellery), delicate nose ring with chain (nath), layered gold necklaces, and fresh orange marigold garlands and white jasmine flowers woven into the hair. The subject's eyes are the focal point — large, expressive, beautifully lined with black kohl/kajal. Show a hand (from another person, partially out of frame with blurred foreground) carefully applying kajal or eyeliner to the subject's eye with a thin applicator brush. The subject gazes slightly upward with a serene, focused expression. LIGHTING: Warm golden ambient light — soft and intimate like candlelight or warm indoor lighting. Rich warm tones with deep shadows creating a moody, cinematic atmosphere. Shallow depth of field — the subject's face and eye area are tack-sharp while foreground elements (the hand applying makeup, flower garlands) are softly blurred creating beautiful bokeh. COLOUR PALETTE: warm golds, deep oranges from marigold flowers, rich royal blue from traditional silk fabric visible at the shoulder/drape area, deep blacks in the background, warm skin tones with golden highlights. The overall mood is intimate, sacred, ceremonial — like a precious moment of preparation before a traditional celebration. IMPORTANT: This must work for any person regardless of age or gender — adapt the jewellery and adornment style appropriately (e.g., simpler jewellery for children, masculine traditional ornaments for men). The face and all facial features MUST be an exact match to the source photo.";
+        const string traditionalMakeupPrompt = "DO NOT reproduce the source photo. Generate a BRAND NEW TRADITIONAL MAKEUP PORTRAIT on a vertical 2:3 portrait canvas. Preserve the subject's EXACT face, bone structure, skin tone, and every facial detail from the source photo. SCENE: Intimate candid close-up — the subject is being adorned for a traditional Indian ceremony. A hand (another person, partially out of frame, blurred foreground) carefully applies ceremonial marking to the subject's face. FOR WOMEN: kajal/kohl being lined on the eye, adorned with maang tikka, nath (nose chain), layered gold necklaces, fresh marigold and jasmine flowers in hair, rich silk drape at shoulder. FOR MEN: sandalwood tilak or vibhuti being applied on the forehead, adorned with gold chain, rudraksha mala, traditional turban or pagdi with brooch, silk angavastram/uttariyam at shoulder. FOR CHILDREN: age-appropriate simple tilak or bindi, small gold chain, fresh flower garland. EXPRESSION: Serene, focused, gazing slightly upward. LIGHTING: Warm golden candlelight-like ambient, moody cinematic atmosphere, shallow depth of field — face tack-sharp, foreground blurred with bokeh. PALETTE: warm golds, deep orange marigold, royal blue silk, deep black background.";
 
-        const string classicalDancePrompt = "DO NOT reproduce the source photo. Generate a BRAND NEW CLASSICAL DANCE PORTRAIT on a vertical 2:3 portrait canvas. Use the person from the source photo — preserve their EXACT face, facial bone structure, skin tone, eye shape, nose shape, lip shape, hair texture, and every facial detail with photorealistic accuracy. The person's gender, age, and ethnicity must remain exactly as in the source photo. SCENE: The subject is posed in a classical Indian dance stance (Bharatanatyam aramandi — a graceful half-seated position with knees bent outward). Both hands are held in expressive dance mudras (hand gestures) — fingers precisely positioned in Alapadma or Katakamukha mudra with elegant wrist angles. COSTUME: The subject wears a traditional classical dance costume — a rich red and gold Kanchipuram silk outfit with intricate gold zari border work. The costume includes a beautifully pleated fan-shaped fabric arrangement at the front (created from the saree pleats fanning out between the legs). A decorative gold waist belt (oddiyanam/ottiyanam) with ornate medallion designs. Gold armlets (vanki) on the upper arms, multiple gold bangles on both wrists, and ankle bells (ghungroo). JEWELLERY AND HAIR: Traditional temple jewellery — a layered gold necklace set with a choker and a longer chain with pendant, gold jhumka earrings, a decorative headpiece (surya/chandra on either side of the hair parting), and a tikka on the forehead. Hair styled in a classical dance bun adorned with a ring of fresh white jasmine flowers (gajra) and a decorative hair ornament. Traditional makeup with bold eyes — thick kajal, dramatic eye makeup, red bindi, and red alta/kumkum on the fingertips and feet soles. BACKGROUND: Deep dark teal-to-navy blue studio backdrop — smooth gradient, slightly lighter in the centre behind the subject creating a soft spotlight effect. Clean and elegant with no distracting elements. LIGHTING: Professional studio lighting — warm golden key light from the front-left illuminating the subject beautifully, with soft fill light to prevent harsh shadows. The gold jewellery and silk costume should shimmer and catch the light. COLOUR PALETTE: rich red and gold costume, warm golden skin tones, deep teal-navy background, white jasmine flowers, gleaming gold jewellery. IMPORTANT: This must work for any person regardless of age or gender — adapt the costume appropriately (e.g., dhoti-style for male dancers, simpler costume for children, age-appropriate styling). The face and all facial features MUST be an exact match to the source photo.";
+        const string classicalDancePrompt = "DO NOT reproduce the source photo. Generate a BRAND NEW CLASSICAL DANCE PORTRAIT on a vertical 2:3 portrait canvas. Preserve the subject's EXACT face, bone structure, skin tone, and every facial detail from the source photo. SCENE: Full-body Bharatanatyam aramandi pose (half-seated, knees bent outward), hands in expressive dance mudras (Alapadma or Katakamukha). FOR WOMEN: rich red and gold Kanchipuram silk costume with pleated fan-shaped front, gold oddiyanam waist belt, vanki armlets, bangles, ghungroo ankle bells, temple jewellery (choker, jhumka earrings, surya/chandra headpiece, forehead tikka), hair in classical bun with jasmine gajra, bold kajal eye makeup, red bindi, alta on fingertips and feet. FOR MEN: rich red and gold silk dhoti with pleated front drape, bare chest with gold-bordered angavastram across one shoulder, gold oddiyanam waist belt, vanki armlets, gold chain necklace, small gold ear studs, ghungroo ankle bells, vibhuti or tilak on forehead, alta on fingertips and feet, hair neatly styled or traditional male dancer headpiece. FOR CHILDREN: age-appropriate simplified version of the above based on gender. BACKGROUND: Deep teal-to-navy studio gradient, soft spotlight centre. LIGHTING: Professional warm golden key light from front-left, silk and gold shimmering. PALETTE: rich red-gold costume, warm skin tones, deep teal-navy background, gleaming gold.";
 
         await db.Database.ExecuteSqlRawAsync(@"
             IF NOT EXISTS (SELECT 1 FROM StylePresets WHERE Name = @p0)
@@ -1504,6 +1836,51 @@ using (var scope = app.Services.CreateScope())
                 (N'Vibrant Digital Oil', N'Vibrant digital oil painting with dramatic warm lighting',
                  N'A vibrant, expressive digital oil painting of [subject]. The art style features smooth, blended brushstrokes and high-gloss textures, with more suttled pinkish tone particularly on the skin and lips. Use a warm, dramatic lighting scheme with strong golden-orange highlights on one side of the face and deep purple or charcoal shadows in the background. The person has dark, voluminous, hair that blends softly into a textured, painterly backdrop. Focus on hyper-realistic details in the eyes and teeth while maintaining a buttery ''oil paint'' finish throughout the composition.',
                  N'PhotoArts', N'🌟', '#FF8F00', 1, 159);
+
+            IF NOT EXISTS (SELECT 1 FROM StylePresets WHERE Name = 'Chromatic Oil Portrait')
+                INSERT INTO StylePresets (Name, Description, PromptTemplate, Category, IconEmoji, AccentColor, IsActive, SortOrder) VALUES
+                (N'Chromatic Oil Portrait', N'Oil painting with vivid chromatic rainbow hair colors',
+                 N'Transform into a rich oil painting on canvas with thick impasto brushstrokes. Change hair color to vivid chromatic rainbow gradient — streaks of electric blue, magenta, violet, emerald green, and golden amber. Abstract teal and ochre painted background. Deep saturated colors, dramatic lighting.',
+                 N'PhotoArts', N'🌈', '#E040FB', 1, 160);
+
+            UPDATE StylePresets SET PromptTemplate = N'Transform into a rich oil painting on canvas with thick impasto brushstrokes. Change hair color to vivid chromatic rainbow gradient — streaks of electric blue, magenta, violet, emerald green, and golden amber. Abstract teal and ochre painted background. Deep saturated colors, dramatic lighting.'
+            WHERE Name = 'Chromatic Oil Portrait';
+
+            IF NOT EXISTS (SELECT 1 FROM StylePresets WHERE Name = 'Royal Oil Canvas')
+                INSERT INTO StylePresets (Name, Description, PromptTemplate, Category, IconEmoji, AccentColor, IsActive, SortOrder) VALUES
+                (N'Royal Oil Canvas', N'Rich royal oil painting for singles, couples & families of all ages',
+                 N'Transform into a classical Renaissance oil painting on canvas. Rich impasto brushstrokes, warm burnt sienna undertones, sfumato skin blending, thick paint texture on fabric and jewelry. Warm maroon-gold-amber gradient background with visible canvas weave. Dramatic Rembrandt side lighting. Museum-quality fine art.',
+                 N'PhotoArts', N'👑', '#FFD700', 1, 161);
+
+            UPDATE StylePresets SET PromptTemplate = N'Transform into a classical Renaissance oil painting on canvas. Rich impasto brushstrokes, warm burnt sienna undertones, sfumato skin blending, thick paint texture on fabric and jewelry. Warm maroon-gold-amber gradient background with visible canvas weave. Dramatic Rembrandt side lighting. Museum-quality fine art.'
+            WHERE Name = 'Royal Oil Canvas';
+
+            IF NOT EXISTS (SELECT 1 FROM StylePresets WHERE Name = 'Wedding Glam Oil')
+                INSERT INTO StylePresets (Name, Description, PromptTemplate, Category, IconEmoji, AccentColor, IsActive, SortOrder) VALUES
+                (N'Wedding Glam Oil', N'Premium digital smudge oil portrait with warm gradient backdrop',
+                 N'Transform into a polished digital smudge oil painting. Ultra-smooth buttery brushwork with silky blending. Hyper-vibrant saturated colors — intensify all reds, golds, greens. Smooth warm gradient background from olive-gold through amber to deep maroon-red. Soft warm golden studio lighting with luminous skin glow. Premium wedding portrait art.',
+                 N'PhotoArts', N'💍', '#E91E63', 1, 162);
+
+            UPDATE StylePresets SET PromptTemplate = N'Transform into a polished digital smudge oil painting. Ultra-smooth buttery brushwork with silky blending. Hyper-vibrant saturated colors — intensify all reds, golds, greens. Smooth warm gradient background from olive-gold through amber to deep maroon-red. Soft warm golden studio lighting with luminous skin glow. Premium wedding portrait art.'
+            WHERE Name = 'Wedding Glam Oil';
+
+            IF NOT EXISTS (SELECT 1 FROM StylePresets WHERE Name = 'Vivid Smudge Portrait')
+                INSERT INTO StylePresets (Name, Description, PromptTemplate, Category, IconEmoji, AccentColor, IsActive, SortOrder) VALUES
+                (N'Vivid Smudge Portrait', N'Vibrant digital smudge painting with colorful abstract backdrop',
+                 N'Transform into a vivid digital smudge oil painting. Visible smooth brushstrokes on every surface, glossy wet-paint sheen. Warm golden-peach skin tones with painterly glow. Abstract background of teal, ochre, dusty rose, and sage green color patches with loose brushstrokes. All colors hyper-vibrant and deeply saturated. Must look like a hand-painted artwork.',
+                 N'PhotoArts', N'🎭', '#26A69A', 1, 164);
+
+            UPDATE StylePresets SET PromptTemplate = N'Transform into a vivid digital smudge oil painting. Visible smooth brushstrokes on every surface, glossy wet-paint sheen. Warm golden-peach skin tones with painterly glow. Abstract background of teal, ochre, dusty rose, and sage green color patches with loose brushstrokes. All colors hyper-vibrant and deeply saturated. Must look like a hand-painted artwork.'
+            WHERE Name = 'Vivid Smudge Portrait';
+
+            IF NOT EXISTS (SELECT 1 FROM StylePresets WHERE Name = 'Dreamy Glow Oil')
+                INSERT INTO StylePresets (Name, Description, PromptTemplate, Category, IconEmoji, AccentColor, IsActive, SortOrder) VALUES
+                (N'Dreamy Glow Oil', N'Soft dreamy oil portrait with luminous skin glow and moody hues',
+                 N'Transform into a dreamy digital oil painting with soft ethereal glow. Luminous dewy skin with warm peach-rose undertones. Ultra-smooth blended brushwork. Moody background gradient of warm greys, dusty mauve, purple haze, and amber with dark vignette corners. Warm golden rim light creating halo on hair edges. Intensify all original colors.',
+                 N'PhotoArts', N'🌸', '#CE93D8', 1, 163);
+
+            UPDATE StylePresets SET PromptTemplate = N'Transform into a dreamy digital oil painting with soft ethereal glow. Luminous dewy skin with warm peach-rose undertones. Ultra-smooth blended brushwork. Moody background gradient of warm greys, dusty mauve, purple haze, and amber with dark vignette corners. Warm golden rim light creating halo on hair edges. Intensify all original colors.'
+            WHERE Name = 'Dreamy Glow Oil';
         ");
     }
     catch (Exception ex)
@@ -1556,21 +1933,146 @@ app.Use(async (context, next) =>
         headers["Strict-Transport-Security"] = "max-age=31536000; includeSubDomains";
     headers["Content-Security-Policy"] =
         "default-src 'self'; " +
-        "script-src 'self' 'unsafe-inline' 'unsafe-eval' https://cdn.jsdelivr.net; " +
+        "script-src 'self' 'unsafe-inline' 'unsafe-eval' https://cdn.jsdelivr.net https://checkout.razorpay.com; " +
         "style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; " +
         "font-src 'self' https://fonts.gstatic.com; " +
-        "img-src 'self' data: blob:; " +
-        "connect-src 'self' ws: wss: https://cdn.jsdelivr.net" +
+        "img-src 'self' data: blob: https://lh3.googleusercontent.com; " +
+        "connect-src 'self' ws: wss: https://cdn.jsdelivr.net https://accounts.google.com" +
             (app.Environment.IsDevelopment() ? " http://localhost:*" : "") + "; " +
+        "frame-src https://api.razorpay.com https://checkout.razorpay.com; " +
         "frame-ancestors 'none'";
     await next();
 });
 
-app.UseRateLimiter();
 app.UseStaticFiles();
+app.UseRateLimiter();
+app.UseAuthentication();
+app.UseAuthorization();
 app.UseAntiforgery();
+
+// ── Auth API endpoints (minimal API — Blazor Server can't set cookies via SignalR) ──
+app.MapGet("/api/auth/google-login", (HttpContext ctx, string? returnUrl, string? refCode) =>
+{
+    var redirectUri = "/api/auth/google-callback";
+    if (!string.IsNullOrEmpty(refCode))
+        redirectUri += $"?ref={Uri.EscapeDataString(refCode)}";
+    var props = new AuthenticationProperties { RedirectUri = redirectUri };
+    return Results.Challenge(props, [GoogleDefaults.AuthenticationScheme]);
+});
+
+app.MapGet("/api/auth/google-callback", async (HttpContext ctx, IAuthService authService, IConfiguration config) =>
+{
+    var result = await ctx.AuthenticateAsync(CookieAuthenticationDefaults.AuthenticationScheme);
+    if (!result.Succeeded)
+        return Results.Redirect("/login?error=Authentication+failed");
+
+    var googleId = result.Principal?.FindFirstValue(ClaimTypes.NameIdentifier) ?? "";
+    var email = result.Principal?.FindFirstValue(ClaimTypes.Email) ?? "";
+    var name = result.Principal?.FindFirstValue(ClaimTypes.Name) ?? "";
+    var avatar = result.Principal?.FindFirstValue("urn:google:picture")
+              ?? result.Principal?.Claims.FirstOrDefault(c => c.Type == "picture")?.Value;
+
+    if (string.IsNullOrEmpty(googleId))
+        return Results.Redirect("/login?error=Missing+Google+ID");
+
+    var superAdminEmail = config["SuperAdmin:Email"] ?? "";
+    var referralCode = ctx.Request.Query["ref"].FirstOrDefault();
+    var user = await authService.FindOrCreateUserAsync(googleId, email, name, avatar, superAdminEmail, referralCode);
+
+    if (!user.IsActive)
+        return Results.Redirect("/login?error=Account+deactivated");
+
+    // Build claims and sign in
+    var claims = new List<Claim>
+    {
+        new(ClaimTypes.NameIdentifier, user.Id.ToString()),
+        new(ClaimTypes.Email, user.Email),
+        new(ClaimTypes.Name, user.DisplayName),
+        new("avatar", user.AvatarUrl ?? ""),
+        new(ClaimTypes.Role, user.Role.ToString())
+    };
+    var identity = new ClaimsIdentity(claims, CookieAuthenticationDefaults.AuthenticationScheme);
+    var principal = new ClaimsPrincipal(identity);
+
+    await ctx.SignInAsync(CookieAuthenticationDefaults.AuthenticationScheme, principal,
+        new AuthenticationProperties { IsPersistent = true, ExpiresUtc = DateTimeOffset.UtcNow.AddDays(30) });
+
+    return Results.Redirect("/");
+});
+
+app.MapGet("/api/auth/logout", async (HttpContext ctx) =>
+{
+    await ctx.SignOutAsync(CookieAuthenticationDefaults.AuthenticationScheme);
+    return Results.Redirect("/login");
+});
+
+app.MapGet("/api/auth/user-info", (HttpContext ctx) =>
+{
+    if (ctx.User.Identity?.IsAuthenticated != true)
+        return Results.Json(new { authenticated = false });
+
+    return Results.Json(new
+    {
+        authenticated = true,
+        id = ctx.User.FindFirstValue(ClaimTypes.NameIdentifier),
+        email = ctx.User.FindFirstValue(ClaimTypes.Email),
+        name = ctx.User.FindFirstValue(ClaimTypes.Name),
+        avatar = ctx.User.FindFirstValue("avatar"),
+        role = ctx.User.FindFirstValue(ClaimTypes.Role)
+    });
+});
+
+// ── Payment API endpoints ──
+app.MapPost("/api/payment/create-order", async (HttpContext ctx, IRazorpayService razorpay) =>
+{
+    if (ctx.User.Identity?.IsAuthenticated != true)
+        return Results.Unauthorized();
+
+    var userIdStr = ctx.User.FindFirstValue(ClaimTypes.NameIdentifier);
+    if (!int.TryParse(userIdStr, out var userId))
+        return Results.BadRequest("Invalid user");
+
+    var body = await ctx.Request.ReadFromJsonAsync<CreateOrderRequest>();
+    if (body == null) return Results.BadRequest("Invalid request");
+
+    try
+    {
+        var result = await razorpay.CreateOrderAsync(userId, body.Purpose, body.CoinPackId, body.SubscriptionPlanId);
+        return Results.Ok(result);
+    }
+    catch (Exception ex)
+    {
+        return Results.BadRequest(new { error = ex.Message });
+    }
+});
+
+app.MapPost("/api/payment/verify", async (HttpContext ctx, IRazorpayService razorpay) =>
+{
+    if (ctx.User.Identity?.IsAuthenticated != true)
+        return Results.Unauthorized();
+
+    var body = await ctx.Request.ReadFromJsonAsync<VerifyPaymentRequest>();
+    if (body == null) return Results.BadRequest("Invalid request");
+
+    var success = await razorpay.CompletePaymentAsync(body.PaymentId, body.RazorpayPaymentId, body.RazorpaySignature);
+    return success ? Results.Ok(new { success = true }) : Results.BadRequest(new { error = "Payment verification failed" });
+});
+
+app.MapPost("/api/payment/webhook", async (HttpContext ctx, IRazorpayService razorpay) =>
+{
+    using var reader = new StreamReader(ctx.Request.Body);
+    var payload = await reader.ReadToEndAsync();
+    var signature = ctx.Request.Headers["X-Razorpay-Signature"].FirstOrDefault() ?? "";
+
+    await razorpay.HandleWebhookAsync(payload, signature);
+    return Results.Ok();
+}).AllowAnonymous();
 
 app.MapRazorComponents<App>()
     .AddInteractiveServerRenderMode();
 
 app.Run();
+
+// ── Request DTOs for payment endpoints ──
+public record CreateOrderRequest(ArtForgeAI.Models.PaymentPurpose Purpose, int? CoinPackId, int? SubscriptionPlanId);
+public record VerifyPaymentRequest(int PaymentId, string RazorpayPaymentId, string RazorpaySignature);
