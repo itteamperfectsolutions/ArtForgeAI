@@ -172,6 +172,15 @@ window.passportPhoto = (function () {
                 line.appendChild(lbl);
             }
         });
+
+        // Vertical center line (nose alignment)
+        var vLine = document.createElement("div");
+        vLine.style.cssText = "position:absolute;top:0;bottom:0;width:0;border-left:1px dashed rgba(255,100,100,0.5);pointer-events:none;left:50%;";
+        box.appendChild(vLine);
+        var vLbl = document.createElement("span");
+        vLbl.textContent = "Nose";
+        vLbl.style.cssText = "position:absolute;left:4px;bottom:4px;font-size:9px;font-family:monospace;color:rgba(255,100,100,0.6);pointer-events:none;";
+        vLine.appendChild(vLbl);
     }
 
     // ── Mouse handling ──
@@ -350,19 +359,28 @@ window.passportPhoto = (function () {
         var faceH = fBottomPx - fTopPx;
         var faceCX = (fLeftPx + fRightPx) / 2;
 
-        // Passport proportions: face ~55% of photo height, eyes at ~40% from top
-        var cropH = faceH / 0.55;
+        if (faceH < 5) return; // face too small, keep default crop
+
+        // Face should fill ~80% of passport photo height (user requirement, ICAO says 70-80%)
+        var cropH = faceH / 0.80;
         var cropW = cropH * PASSPORT_ASPECT;
 
-        // Position: eyes at 40% from top of crop box
-        var cropY = eyePx - cropH * 0.40;
+        // Ensure crop fits within the image
+        if (cropW > cropDisplayW) { cropW = cropDisplayW; cropH = cropW / PASSPORT_ASPECT; }
+        if (cropH > cropDisplayH) { cropH = cropDisplayH; cropW = cropH * PASSPORT_ASPECT; }
+
+        // Position: align eyes with ICAO eye zone center (~44% from top)
+        var eyeTargetFrac = (faceGrid.eyeMin + faceGrid.eyeMax) / 2;
+        var cropY = eyePx - cropH * eyeTargetFrac;
+
+        // Center horizontally on the face
         var cropX = faceCX - cropW / 2;
 
         // Clamp to image bounds
-        if (cropW > cropDisplayW) { cropW = cropDisplayW; cropH = cropW / PASSPORT_ASPECT; }
-        if (cropH > cropDisplayH) { cropH = cropDisplayH; cropW = cropH * PASSPORT_ASPECT; }
-        cropX = Math.max(0, Math.min(cropX, cropDisplayW - cropW));
-        cropY = Math.max(0, Math.min(cropY, cropDisplayH - cropH));
+        if (cropX < 0) cropX = 0;
+        if (cropY < 0) cropY = 0;
+        if (cropX + cropW > cropDisplayW) cropX = cropDisplayW - cropW;
+        if (cropY + cropH > cropDisplayH) cropY = cropDisplayH - cropH;
 
         cropState.x = cropX;
         cropState.y = cropY;
@@ -529,6 +547,11 @@ window.passportPhoto = (function () {
             selectable: false, evented: false,
         });
         canvas.add(oval);
+
+        // Vertical center line (nose alignment)
+        var noseColor = "rgba(255,100,100,0.5)";
+        addDashedLine(canvas, w / 2, 0, w / 2, h, noseColor);
+        addLabel(canvas, "Nose", w / 2 + 4, h * faceGrid.chinMax + 4, noseColor);
 
         addLabel(canvas, "Eyes", 4, h * faceGrid.eyeMin - 12, guideColor);
         addLabel(canvas, "Chin", 4, h * faceGrid.chinMin - 12, guideColor);

@@ -669,6 +669,9 @@ textarea.form-input {
     flex-direction: column;
     align-items: center;
     gap: 0.5rem;
+    overflow-y: auto;
+    scrollbar-width: thin;
+    scrollbar-color: var(--border-color) transparent;
 }
 
 /* ===== Right Panel ===== */
@@ -677,7 +680,7 @@ textarea.form-input {
     border: 1px solid var(--border-color);
     border-radius: var(--radius-sm);
     overflow: hidden;
-    flex: 1;
+    flex: none;
     width: 100%;
     display: flex;
     flex-direction: column;
@@ -5436,6 +5439,26 @@ select.form-input {
     align-items: center;
     gap: 0.15rem;
     flex-shrink: 0;
+}
+
+.gs-design-cutgap {
+    display: flex;
+    flex-direction: row;
+    align-items: center;
+    gap: 0.15rem;
+    flex-shrink: 0;
+    margin-left: 0.25rem;
+}
+
+.gs-mini-select {
+    font-size: 0.65rem;
+    padding: 1px 2px;
+    border: 1px solid var(--border-color);
+    border-radius: 3px;
+    background: var(--bg-secondary);
+    color: var(--text-primary);
+    cursor: pointer;
+    height: 20px;
 }
 
 .gs-qty-btn {

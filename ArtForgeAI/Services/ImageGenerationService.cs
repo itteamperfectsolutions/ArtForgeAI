@@ -160,7 +160,7 @@ public class ImageGenerationService : IImageGenerationService
         {
             _logger.LogError(ex, "Image generation failed with provider {Provider}", request.Provider);
 
-            var errorMsg = $"[{request.Provider}] {ex.Message}";
+            var errorMsg = ex.Message;
 
             try
             {
@@ -270,7 +270,7 @@ public class ImageGenerationService : IImageGenerationService
                 (geminiText, imageBytes) = await _geminiImageService.GenerateImageAsync(request.Prompt, request.Width, request.Height);
             }
 
-            enhancedPrompt = $"[Retry with original] {request.Prompt}";
+            enhancedPrompt = request.Prompt;
         }
 
         // geminiText contains the model name prefix e.g. "[gemini-3-pro-image-preview] ..."

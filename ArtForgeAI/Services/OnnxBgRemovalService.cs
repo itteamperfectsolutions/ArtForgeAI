@@ -77,11 +77,13 @@ public sealed class OnnxBgRemovalService : IDisposable
         }
     }
 
-    /// <summary>Result containing transparent PNG and subject bounding box (fractions 0-1).</summary>
+    /// <summary>Result containing transparent PNG, subject bounding box, and face bounds (fractions 0-1).</summary>
     public record BgRemovalResult(
         byte[] TransparentPngBytes,
         double SubjectTop, double SubjectBottom,
-        double SubjectLeft, double SubjectRight);
+        double SubjectLeft, double SubjectRight,
+        double FaceTop, double FaceBottom,
+        double FaceCenterX, double EyeLineY);
 
     /// <summary>
     /// Remove the background from an image.
@@ -122,6 +124,9 @@ public sealed class OnnxBgRemovalService : IDisposable
             // Extract subject bounding box from mask (fractions of image dimensions)
             var bounds = ExtractSubjectBounds(mask, origW, origH);
 
+            // Extract face-specific bounds by analyzing mask row widths
+            var face = ExtractFaceBounds(mask, origW, origH, bounds.top, bounds.bottom);
+
             // Apply mask as alpha channel
             ApplyMask(original, mask);
 
@@ -133,7 +138,9 @@ public sealed class OnnxBgRemovalService : IDisposable
             return new BgRemovalResult(
                 ms.ToArray(),
                 bounds.top, bounds.bottom,
-                bounds.left, bounds.right);
+                bounds.left, bounds.right,
+                face.faceTop, face.faceBottom,
+                face.faceCX, face.eyeLineY);
         });
     }
 
@@ -166,6 +173,59 @@ public sealed class OnnxBgRemovalService : IDisposable
             (double)maxY / height,
             (double)minX / width,
             (double)maxX / width);
+    }
+
+    /// <summary>
+    /// Estimate face bounds from the subject bounding box using anatomical proportions.
+    /// Head top = subject top (reliable from U-2-Net). Chin estimated from subject coverage.
+    /// Face center = subject horizontal center.
+    /// </summary>
+    private static (double faceTop, double faceBottom, double faceCX, double eyeLineY) ExtractFaceBounds(
+        float[,] mask, int width, int height, double subjectTop, double subjectBottom)
+    {
+        double subjectH = subjectBottom - subjectTop;
+        double subjectCX = 0.5; // default center
+
+        // Compute subject horizontal center from the mask
+        const float threshold = 0.5f;
+        int subTopRow = Math.Max(0, (int)(subjectTop * height));
+        int subBottomRow = Math.Min(height - 1, (int)(subjectBottom * height));
+        int minX = width, maxX = 0;
+        for (int y = subTopRow; y <= subBottomRow; y++)
+        {
+            for (int x = 0; x < width; x++)
+            {
+                if (mask[y, x] >= threshold)
+                {
+                    if (x < minX) minX = x;
+                    if (x > maxX) maxX = x;
+                }
+            }
+        }
+        if (maxX > minX)
+            subjectCX = ((double)minX + maxX) / 2.0 / width;
+
+        if (subjectH < 0.05)
+            return (subjectTop, subjectBottom, subjectCX, (subjectTop + subjectBottom) / 2.0);
+
+        // Estimate face height from how much of the image the subject covers.
+        // Human anatomy: head ≈ 1/7.5 of full body height.
+        // subjectH is the fraction of image the subject fills (0-1).
+        double faceRatio;
+        if (subjectH > 0.85)       faceRatio = 0.60;  // very close-up (head + neck/shoulders)
+        else if (subjectH > 0.70)  faceRatio = 0.45;  // head + upper body
+        else if (subjectH > 0.50)  faceRatio = 0.35;  // half body
+        else if (subjectH > 0.35)  faceRatio = 0.25;  // three-quarter body
+        else                        faceRatio = 0.15;  // full body
+
+        double faceTop = subjectTop;
+        double faceBottom = subjectTop + subjectH * faceRatio;
+        double faceH = faceBottom - faceTop;
+
+        // Eye line at ~45% from head top to chin (anatomical standard)
+        double eyeLineY = faceTop + faceH * 0.45;
+
+        return (faceTop, faceBottom, subjectCX, eyeLineY);
     }
 
     /// <summary>Preprocess: RGB normalized to [0,1] then standardized with ImageNet mean/std. NCHW layout.</summary>

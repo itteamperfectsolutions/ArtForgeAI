@@ -236,6 +236,9 @@
                     <button class="btn-secondary" style="font-size: 0.85rem; padding: 0.4rem 0.85rem;" @onclick="DownloadSheetPdf">
                         &#128196; PDF
                     </button>
+                    <button class="btn-secondary" style="font-size: 0.85rem; padding: 0.4rem 0.85rem;" @onclick="StartNew">
+                        &#10024; Start New
+                    </button>
                 </div>
             </div>
         }
@@ -621,6 +624,24 @@
         // The JS row-packing will handle it
         UpdateLayoutInfo();
         await RenderSheet();
+    }
+
+    // ── Start New ──
+
+    private async Task StartNew()
+    {
+        // Remove all designs
+        foreach (var d in _designs.ToList())
+        {
+            if (!string.IsNullOrEmpty(d.UploadedPath))
+                try { await ImageStorage.DeleteImageAsync(d.UploadedPath); } catch { }
+        }
+        _designs.Clear();
+        _sheetReady = false;
+        _errorMessage = null;
+        _layoutInfoText = "";
+        try { await JS.InvokeVoidAsync("gangSheet.dispose"); } catch { }
+        StateHasChanged();
     }
 
     // ── Remove design ──

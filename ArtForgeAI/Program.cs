@@ -90,6 +90,7 @@ builder.Services.AddScoped<IPassportPhotoService, PassportPhotoService>();
 builder.Services.AddScoped<IFaceCorrectionService, FaceCorrectionService>();
 builder.Services.AddScoped<IFormalAttireService, FormalAttireService>();
 builder.Services.AddScoped<PhotoExpandService>();
+builder.Services.AddScoped<TiledGeminiEnhanceService>();
 
 // ── Coin, Subscription, Referral & Payment services ──
 builder.Services.AddScoped<ICoinService, CoinService>();
@@ -431,6 +432,27 @@ using (var scope = app.Services.CreateScope())
         app.Logger.LogWarning(ex, "DeletedStyleSeeds table creation failed (non-fatal)");
     }
 
+    // ── Seed-version gate: skip heavy style seeding if already done ──
+    const int CURRENT_SEED_VERSION = 1;
+    var seedAlreadyDone = false;
+    try
+    {
+        await db.Database.ExecuteSqlRawAsync(@"
+            IF NOT EXISTS (SELECT * FROM sys.tables WHERE name = '__SeedVersion')
+            CREATE TABLE __SeedVersion (Version INT NOT NULL)");
+        var versionRows = await db.Database.SqlQueryRaw<int>(
+            "SELECT ISNULL(MAX(Version),0) AS [Value] FROM __SeedVersion").ToListAsync();
+        if (versionRows.Count > 0 && versionRows[0] >= CURRENT_SEED_VERSION)
+        {
+            seedAlreadyDone = true;
+            app.Logger.LogInformation("Style seed version {v} already applied — skipping seed queries.", versionRows[0]);
+        }
+    }
+    catch (Exception ex)
+    {
+        app.Logger.LogWarning(ex, "__SeedVersion check failed (non-fatal, will re-seed)");
+    }
+
     // EnsureCreated won't add new tables to an existing DB, so create ImageSizeMasters if missing
     try
     {
@@ -551,6 +573,20 @@ using (var scope = app.Services.CreateScope())
         app.Logger.LogWarning(ex, "StylePresets table creation failed (non-fatal)");
     }
 
+    // Add ThumbnailPath column to StylePresets if missing
+    try
+    {
+        await db.Database.ExecuteSqlRawAsync(@"
+            IF NOT EXISTS (SELECT * FROM sys.columns WHERE object_id = OBJECT_ID('StylePresets') AND name = 'ThumbnailPath')
+                ALTER TABLE StylePresets ADD ThumbnailPath NVARCHAR(500) NULL");
+    }
+    catch (Exception ex)
+    {
+        app.Logger.LogWarning(ex, "StylePresets ThumbnailPath column migration failed (non-fatal)");
+    }
+
+    if (!seedAlreadyDone)
+    {
     // Seed AP & Telangana regional style presets (auto-assigned IDs, guarded by Category)
     try
     {
@@ -1888,16 +1924,42 @@ using (var scope = app.Services.CreateScope())
         app.Logger.LogWarning(ex, "PhotoArts StylePresets seeding failed (non-fatal)");
     }
 
-    // Add ThumbnailPath column to StylePresets if missing
+    // ── Memorial Frame StylePresets ──
     try
     {
+        // First, delete old-format memorial presets so they get re-inserted with updated prompts
         await db.Database.ExecuteSqlRawAsync(@"
-            IF NOT EXISTS (SELECT * FROM sys.columns WHERE object_id = OBJECT_ID('StylePresets') AND name = 'ThumbnailPath')
-                ALTER TABLE StylePresets ADD ThumbnailPath NVARCHAR(500) NULL");
+            DELETE FROM StylePresets WHERE Category = N'Memorial'");
+
+        await db.Database.ExecuteSqlRawAsync(@"
+            IF NOT EXISTS (SELECT 1 FROM DeletedStyleSeeds WHERE Name = 'Floral Garland Memorial')
+                INSERT INTO StylePresets (Name, Description, PromptTemplate, Category, IconEmoji, AccentColor, IsActive, SortOrder) VALUES
+                (N'Floral Garland Memorial', N'Ornate floral garland memorial frame', N'Create a solemn and beautiful memorial photo frame. The reference photo person must be placed in the CENTER of the image inside a circular frame with a rich blue gradient background behind them (background removed, person only). The circular frame should have a golden border ring. Around the circular portrait: lush garlands of white jasmine, orange marigold, and red roses draped from the top forming an arch. Two ornate golden pillars on left and right. A glowing oil lamp (diya) at bottom center. Soft divine golden rays from behind the portrait. IMPORTANT: Leave the bottom 20% of the image COMPLETELY EMPTY with a plain dark background — NO text, NO letters, NO words, NO names, NO dates anywhere in the image. Background: deep maroon-to-black gradient. Mood: respectful, sacred, dignified. {{NAME}} {{DOB}} {{DOD}}', N'Memorial', N'🪷', '#8B0000', 1, 170);
+
+            IF NOT EXISTS (SELECT 1 FROM DeletedStyleSeeds WHERE Name = 'Temple Pillar Memorial')
+                INSERT INTO StylePresets (Name, Description, PromptTemplate, Category, IconEmoji, AccentColor, IsActive, SortOrder) VALUES
+                (N'Temple Pillar Memorial', N'Traditional temple-style memorial frame', N'Create a grand South Indian temple-style memorial photo frame. The reference photo person must be placed in the CENTER inside a circular frame with a deep royal blue gradient background behind them (background removed, person only). Golden ornate border ring around the circle. Frame design: two intricately carved stone temple pillars (gopuram style) on each side. An ornate arch (thoranam) at top with temple tower silhouette. Brass oil lamps on both sides at bottom with warm flames. Marigold and jasmine garlands across the top arch. IMPORTANT: Leave the bottom 20% of the image COMPLETELY EMPTY with a plain dark background — NO text, NO letters, NO words, NO names, NO dates anywhere in the image. Background: deep sacred saffron-to-dark-maroon gradient. Divine golden light aura. Mood: sacred, reverential. {{NAME}} {{DOB}} {{DOD}}', N'Memorial', N'🛕', '#B8860B', 1, 171);
+
+            IF NOT EXISTS (SELECT 1 FROM DeletedStyleSeeds WHERE Name = 'Lotus Divine Memorial')
+                INSERT INTO StylePresets (Name, Description, PromptTemplate, Category, IconEmoji, AccentColor, IsActive, SortOrder) VALUES
+                (N'Lotus Divine Memorial', N'Serene lotus and divine light memorial frame', N'Create a serene divine memorial photo frame with lotus theme. The reference photo person must be placed in the CENTER inside a circular frame with a soft purple-blue gradient background behind them (background removed, person only). Soft golden oval border ring. Frame design: beautiful pink and white lotus flowers around the portrait — large blooming lotuses at bottom, smaller buds along sides. Gentle water reflection at base. Soft divine white-golden light rays radiating from behind the portrait like a halo. Floating lotus petals. IMPORTANT: Leave the bottom 20% of the image COMPLETELY EMPTY with a plain dark background — NO text, NO letters, NO words, NO names, NO dates anywhere in the image. Background: gradient from heavenly white-gold at top to peaceful blue-purple at bottom. Mood: peaceful, divine, eternal rest. {{NAME}} {{DOB}} {{DOD}}', N'Memorial', N'🪷', '#4B0082', 1, 172);
+
+            IF NOT EXISTS (SELECT 1 FROM DeletedStyleSeeds WHERE Name = 'Marigold Tribute Memorial')
+                INSERT INTO StylePresets (Name, Description, PromptTemplate, Category, IconEmoji, AccentColor, IsActive, SortOrder) VALUES
+                (N'Marigold Tribute Memorial', N'Traditional marigold garland tribute frame', N'Create a traditional Indian memorial tribute photo frame with marigold theme. The reference photo person must be placed in the CENTER inside a circular frame with a deep blue gradient background behind them (background removed, person only). Golden decorative border ring. Frame design: abundant bright orange and yellow marigold garlands draped thickly around — heavy garlands across top, flowing down sides. Red and white rose accents. Traditional Indian memorial flower arrangement style. Brass incense holders with smoke wisps on either side. IMPORTANT: Leave the bottom 20% of the image COMPLETELY EMPTY with a plain dark background — NO text, NO letters, NO words, NO names, NO dates anywhere in the image. Background: rich dark green-to-black gradient. Fresh flower texture and warm lighting. Mood: heartfelt tribute. {{NAME}} {{DOB}} {{DOD}}', N'Memorial', N'🌼', '#FF8C00', 1, 173);
+
+            IF NOT EXISTS (SELECT 1 FROM DeletedStyleSeeds WHERE Name = 'Heavenly Light Memorial')
+                INSERT INTO StylePresets (Name, Description, PromptTemplate, Category, IconEmoji, AccentColor, IsActive, SortOrder) VALUES
+                (N'Heavenly Light Memorial', N'Spiritual heavenly light memorial frame', N'Create a spiritual heavenly memorial photo frame. The reference photo person must be placed in the CENTER inside a circular frame with a celestial blue-gold gradient background behind them (background removed, person only). Soft glowing golden border ring. Frame design: ethereal golden-white divine light beams radiating from behind the portrait. Soft golden and white clouds surrounding. Delicate white flowers (lilies and jasmine) at bottom. Golden stars and divine sparkles in the light rays. IMPORTANT: Leave the bottom 20% of the image COMPLETELY EMPTY with a plain dark background — NO text, NO letters, NO words, NO names, NO dates anywhere in the image. Background: gradient from golden-white center to deep royal blue at edges. Mood: celestial, peaceful, divine remembrance. {{NAME}} {{DOB}} {{DOD}}', N'Memorial', N'✨', '#FFD700', 1, 174);
+
+            IF NOT EXISTS (SELECT 1 FROM DeletedStyleSeeds WHERE Name = 'Royal Memorial Frame')
+                INSERT INTO StylePresets (Name, Description, PromptTemplate, Category, IconEmoji, AccentColor, IsActive, SortOrder) VALUES
+                (N'Royal Memorial Frame', N'Regal ornate memorial with velvet and gold', N'Create a regal distinguished memorial photo frame. The reference photo person must be placed in the CENTER inside a circular frame with a rich navy-blue gradient background behind them (background removed, person only). Thick ornate golden baroque border ring with scroll and leaf carvings. Frame design: deep royal red velvet curtains draped on both sides, tied with golden tassels. Ornate golden crown motif at top center. Rich golden filigree patterns on borders. Tall golden candelabras with candles on either side. Red and white roses at the base. IMPORTANT: Leave the bottom 20% of the image COMPLETELY EMPTY with a plain dark background — NO text, NO letters, NO words, NO names, NO dates anywhere in the image. Background: deep royal maroon-burgundy with damask pattern. Warm candlelight. Mood: distinguished, royal tribute. {{NAME}} {{DOB}} {{DOD}}', N'Memorial', N'👑', '#800020', 1, 175);
+        ");
     }
     catch (Exception ex)
     {
-        app.Logger.LogWarning(ex, "StylePresets ThumbnailPath column migration failed (non-fatal)");
+        app.Logger.LogWarning(ex, "Memorial StylePresets seeding failed (non-fatal)");
     }
 
     // Clean up: remove any seeded styles that the user previously deleted
@@ -1911,6 +1973,20 @@ using (var scope = app.Services.CreateScope())
     {
         app.Logger.LogWarning(ex, "Deleted style cleanup failed (non-fatal)");
     }
+
+    // Stamp seed version so we skip all this on next startup
+    try
+    {
+        await db.Database.ExecuteSqlRawAsync($@"
+            DELETE FROM __SeedVersion;
+            INSERT INTO __SeedVersion (Version) VALUES ({CURRENT_SEED_VERSION})");
+        app.Logger.LogInformation("Style seed version {v} stamped.", CURRENT_SEED_VERSION);
+    }
+    catch (Exception ex)
+    {
+        app.Logger.LogWarning(ex, "Seed version stamp failed (non-fatal)");
+    }
+    } // end if (!seedAlreadyDone)
 }
 
 // Configure the HTTP request pipeline.

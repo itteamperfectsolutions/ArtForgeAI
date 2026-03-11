@@ -42,13 +42,6 @@
 
     private record StepInfo(int Order, string Label);
 
-    private string GetModelName() => Provider switch
-    {
-        ImageProvider.Gemini => "Style Remix",
-        ImageProvider.Replicate => "FLUX",
-        _ => "DALL-E 3"
-    };
-
     private StepInfo[] GetSteps()
     {
         if (StepLabels is not null && StepLabels.Length > 0)
@@ -59,7 +52,7 @@
         var steps = new List<StepInfo>
         {
             new(1, "Enhancing your prompt with AI..."),
-            new(2, $"Generating image with {GetModelName()}..."),
+            new(2, "Generating image with AI..."),
             new(3, "Saving & optimizing...")
         };
 

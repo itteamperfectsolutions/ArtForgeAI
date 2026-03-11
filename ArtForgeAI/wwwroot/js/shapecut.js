@@ -511,8 +511,422 @@ window.shapeCut = (function () {
         return (r % 2 !== 0) ? bufB : bufA;
     }
 
+    // ══════════════════════════════════════════
+    // ── Marching Squares Contour Tracer ──
+    // ══════════════════════════════════════════
+
+    // Trace contour paths from a binary alpha mask using marching squares.
+    // Returns an array of polygons, each polygon is an array of {x, y} points.
+    function traceContours(imageData, w, h, threshold) {
+        threshold = threshold || 128;
+        var d = imageData.data;
+
+        // Build binary grid (1 = opaque, 0 = transparent) with 1px border of 0s
+        var gw = w + 1, gh = h + 1;
+        function sample(px, py) {
+            if (px < 0 || px >= w || py < 0 || py >= h) return 0;
+            return d[(py * w + px) * 4 + 3] >= threshold ? 1 : 0;
+        }
+
+        var visited = {};
+        var contours = [];
+
+        for (var cy = 0; cy < h; cy++) {
+            for (var cx = 0; cx < w; cx++) {
+                // Look for boundary: current pixel is solid, left neighbor is not
+                if (sample(cx, cy) === 1 && sample(cx - 1, cy) === 0) {
+                    var key = cx + "," + cy;
+                    if (visited[key]) continue;
+
+                    // Trace contour using Moore-Neighbor boundary tracing
+                    var contour = traceBoundary(cx, cy, w, h, sample, visited);
+                    if (contour && contour.length >= 3) {
+                        contours.push(contour);
+                    }
+                }
+            }
+        }
+
+        return contours;
+    }
+
+    function traceBoundary(startX, startY, w, h, sample, visited) {
+        // 8-connected Moore neighborhood boundary tracing
+        // Direction offsets: 0=E, 1=SE, 2=S, 3=SW, 4=W, 5=NW, 6=N, 7=NE
+        var dx = [1, 1, 0, -1, -1, -1, 0, 1];
+        var dy = [0, 1, 1, 1, 0, -1, -1, -1];
+
+        var contour = [];
+        var x = startX, y = startY;
+        var dir = 4; // start looking west (since we found boundary from left)
+        var maxSteps = w * h * 2;
+        var steps = 0;
+
+        do {
+            contour.push({ x: x, y: y });
+            visited[x + "," + y] = true;
+
+            // Find next boundary pixel
+            var startDir = (dir + 5) % 8; // backtrack: turn right from incoming direction
+            var found = false;
+
+            for (var i = 0; i < 8; i++) {
+                var d = (startDir + i) % 8;
+                var nx = x + dx[d];
+                var ny = y + dy[d];
+
+                if (nx >= 0 && nx < w && ny >= 0 && ny < h && sample(nx, ny) === 1) {
+                    dir = d;
+                    x = nx;
+                    y = ny;
+                    found = true;
+                    break;
+                }
+            }
+
+            if (!found) break;
+            steps++;
+        } while ((x !== startX || y !== startY) && steps < maxSteps);
+
+        return contour;
+    }
+
+    // Douglas-Peucker path simplification
+    function simplifyPath(points, tolerance) {
+        if (points.length <= 2) return points;
+        tolerance = tolerance || 1.5;
+
+        var sqTol = tolerance * tolerance;
+
+        function sqDistToSegment(p, a, b) {
+            var abx = b.x - a.x, aby = b.y - a.y;
+            var t = ((p.x - a.x) * abx + (p.y - a.y) * aby) / (abx * abx + aby * aby);
+            t = Math.max(0, Math.min(1, t));
+            var dx = p.x - (a.x + t * abx);
+            var dy = p.y - (a.y + t * aby);
+            return dx * dx + dy * dy;
+        }
+
+        function simplifyDP(pts, first, last, result) {
+            var maxDist = 0, index = 0;
+            for (var i = first + 1; i < last; i++) {
+                var dist = sqDistToSegment(pts[i], pts[first], pts[last]);
+                if (dist > maxDist) {
+                    maxDist = dist;
+                    index = i;
+                }
+            }
+            if (maxDist > sqTol) {
+                if (index - first > 1) simplifyDP(pts, first, index, result);
+                result.push(pts[index]);
+                if (last - index > 1) simplifyDP(pts, index, last, result);
+            }
+        }
+
+        var result = [points[0]];
+        simplifyDP(points, 0, points.length - 1, result);
+        result.push(points[points.length - 1]);
+        return result;
+    }
+
+    // Smooth a closed contour using Chaikin's corner-cutting algorithm
+    function smoothContour(points, iterations) {
+        iterations = iterations || 2;
+        var pts = points;
+        for (var iter = 0; iter < iterations; iter++) {
+            var smoothed = [];
+            var n = pts.length;
+            for (var i = 0; i < n; i++) {
+                var p0 = pts[i];
+                var p1 = pts[(i + 1) % n];
+                smoothed.push({ x: 0.75 * p0.x + 0.25 * p1.x, y: 0.75 * p0.y + 0.25 * p1.y });
+                smoothed.push({ x: 0.25 * p0.x + 0.75 * p1.x, y: 0.25 * p0.y + 0.75 * p1.y });
+            }
+            pts = smoothed;
+        }
+        return pts;
+    }
+
+    // Generate SVG cut contour from a design image
+    // Returns SVG string with vector cut paths at correct physical dimensions
+    function generateCutContourSVG(designDataUrl, distancePx, cornerRadiusPx) {
+        return new Promise(function (resolve) {
+            var img = new Image();
+            img.crossOrigin = "anonymous";
+            img.onload = function () {
+                var w = img.naturalWidth;
+                var h = img.naturalHeight;
+
+                // Step 1: Binary silhouette
+                var silCanvas = document.createElement("canvas");
+                silCanvas.width = w; silCanvas.height = h;
+                var silCtx = silCanvas.getContext("2d");
+                silCtx.drawImage(img, 0, 0);
+                makeSilhouette(silCtx, w, h);
+
+                // Step 2: Consolidate nearby elements then expand
+                var closeRadius = Math.max(distancePx, 10);
+                var consolidated = closeMask(silCanvas, w, h, closeRadius);
+                var expandedCanvas = expandMask(consolidated, w, h, distancePx + cornerRadiusPx);
+
+                // Step 3: Get pixel data and trace contours
+                var expCtx = expandedCanvas.getContext("2d");
+                var imageData = expCtx.getImageData(0, 0, w, h);
+                var contours = traceContours(imageData, w, h, 128);
+
+                // Step 4: Simplify and smooth contour paths
+                var svgPaths = [];
+                for (var i = 0; i < contours.length; i++) {
+                    var simplified = simplifyPath(contours[i], 2.0);
+                    var smoothed = smoothContour(simplified, 3);
+
+                    if (smoothed.length < 3) continue;
+
+                    // Build SVG path data
+                    var pathD = "M " + smoothed[0].x.toFixed(2) + " " + smoothed[0].y.toFixed(2);
+                    for (var j = 1; j < smoothed.length; j++) {
+                        pathD += " L " + smoothed[j].x.toFixed(2) + " " + smoothed[j].y.toFixed(2);
+                    }
+                    pathD += " Z";
+                    svgPaths.push(pathD);
+                }
+
+                // Step 5: Build SVG document
+                // Use physical dimensions: pixels / DPI = inches
+                var dpi = 300;
+                var widthIn = (w / dpi).toFixed(4);
+                var heightIn = (h / dpi).toFixed(4);
+
+                var svg = '<?xml version="1.0" encoding="UTF-8"?>\n';
+                svg += '<svg xmlns="http://www.w3.org/2000/svg" ';
+                svg += 'width="' + widthIn + 'in" height="' + heightIn + 'in" ';
+                svg += 'viewBox="0 0 ' + w + ' ' + h + '">\n';
+                for (var k = 0; k < svgPaths.length; k++) {
+                    svg += '  <path d="' + svgPaths[k] + '" fill="none" stroke="#000000" stroke-width="1" />\n';
+                }
+                svg += '</svg>';
+
+                resolve(svg);
+            };
+            img.onerror = function () { resolve(null); };
+            img.src = designDataUrl;
+        });
+    }
+
+    // Generate a full sheet SVG with multiple design cut contours placed in layout
+    function generateCutSheetSVG(designEntries, sheetW, sheetH) {
+        if (!designEntries || designEntries.length === 0) return Promise.resolve(null);
+
+        var tileList = buildTileList(designEntries);
+
+        // Collect all unique design URLs
+        var urls = [];
+        for (var j = 0; j < designEntries.length; j++) {
+            urls.push(designEntries[j].designUrl);
+        }
+
+        return loadImages(urls).then(function (imageMap) {
+            // For each unique design, generate contour paths
+            var contourPromises = [];
+            var contourMap = {};
+            var seen = {};
+
+            for (var i = 0; i < designEntries.length; i++) {
+                var entry = designEntries[i];
+                var key = entry.designUrl + "|" + (entry.cutGapPx || 15) + "|" + (entry.cornerRadiusPx || 20);
+                if (!seen[key]) {
+                    seen[key] = true;
+                    (function (k, dUrl, gap, cr) {
+                        contourPromises.push(
+                            generateContourPaths(dUrl, gap, cr).then(function (paths) {
+                                contourMap[k] = paths;
+                            })
+                        );
+                    })(key, entry.designUrl, entry.cutGapPx || 15, entry.cornerRadiusPx || 20);
+                }
+            }
+
+            return Promise.all(contourPromises).then(function () {
+                // Layout tiles and build SVG
+                var dpi = 300;
+                var widthIn = (sheetW / dpi).toFixed(4);
+                var heightIn = (sheetH / dpi).toFixed(4);
+
+                var svg = '<?xml version="1.0" encoding="UTF-8"?>\n';
+                svg += '<svg xmlns="http://www.w3.org/2000/svg" ';
+                svg += 'width="' + widthIn + 'in" height="' + heightIn + 'in" ';
+                svg += 'viewBox="0 0 ' + sheetW + ' ' + sheetH + '">\n';
+
+                var x = 0, y = 0, rowHeight = 0, lastSpaceY = 0;
+
+                for (var t = 0; t < tileList.length; t++) {
+                    var tile = tileList[t];
+
+                    if (x > 0 && x + tile.w > sheetW) {
+                        y += rowHeight + lastSpaceY;
+                        x = 0;
+                        rowHeight = 0;
+                        lastSpaceY = 0;
+                    }
+
+                    if (y + tile.h > sheetH) break;
+
+                    var tileKey = tile.designUrl + "|" + (tile.cutGapPx || 15) + "|" + (tile.cornerRadiusPx || 20);
+                    var paths = contourMap[tileKey];
+                    if (paths && paths.length > 0) {
+                        // Get original image dimensions for scaling
+                        var imgEl = imageMap[tile.designUrl];
+                        var srcW = imgEl ? imgEl.naturalWidth : tile.w;
+                        var srcH = imgEl ? imgEl.naturalHeight : tile.h;
+                        var scaleX = tile.w / srcW;
+                        var scaleY = tile.h / srcH;
+
+                        svg += '  <g transform="translate(' + x + ',' + y + ') scale(' + scaleX.toFixed(6) + ',' + scaleY.toFixed(6) + ')">\n';
+                        for (var p = 0; p < paths.length; p++) {
+                            svg += '    <path d="' + paths[p] + '" fill="none" stroke="#000000" stroke-width="' + (1 / Math.min(scaleX, scaleY)).toFixed(2) + '" />\n';
+                        }
+                        svg += '  </g>\n';
+                    }
+
+                    rowHeight = Math.max(rowHeight, tile.h);
+                    lastSpaceY = Math.max(lastSpaceY, tile.sy);
+                    x += tile.w + tile.sx;
+                }
+
+                // Add crop mark circles
+                var markR = Math.round(3 / 25.4 * 300);
+                var inset = Math.round(10 / 25.4 * 300);
+                var positions = [
+                    [inset, inset], [sheetW - inset, inset],
+                    [inset, sheetH - inset], [sheetW - inset, sheetH - inset]
+                ];
+                for (var m = 0; m < positions.length; m++) {
+                    svg += '  <circle cx="' + positions[m][0] + '" cy="' + positions[m][1] + '" r="' + markR + '" fill="#000000" />\n';
+                }
+
+                svg += '</svg>';
+                return svg;
+            });
+        });
+    }
+
+    // Helper: generate contour paths (returns array of SVG path d-strings) from a design image
+    function generateContourPaths(designDataUrl, distancePx, cornerRadiusPx) {
+        return new Promise(function (resolve) {
+            var img = new Image();
+            img.crossOrigin = "anonymous";
+            img.onload = function () {
+                var w = img.naturalWidth;
+                var h = img.naturalHeight;
+
+                var silCanvas = document.createElement("canvas");
+                silCanvas.width = w; silCanvas.height = h;
+                var silCtx = silCanvas.getContext("2d");
+                silCtx.drawImage(img, 0, 0);
+                makeSilhouette(silCtx, w, h);
+
+                // Consolidate nearby elements
+                var closeRadius = Math.max(distancePx, 10);
+                var consolidated = closeMask(silCanvas, w, h, closeRadius);
+
+                var expandedCanvas = expandMask(consolidated, w, h, distancePx + cornerRadiusPx);
+                var expCtx = expandedCanvas.getContext("2d");
+                var imageData = expCtx.getImageData(0, 0, w, h);
+                var contours = traceContours(imageData, w, h, 128);
+
+                var svgPaths = [];
+                for (var i = 0; i < contours.length; i++) {
+                    var simplified = simplifyPath(contours[i], 2.0);
+                    var smoothed = smoothContour(simplified, 3);
+                    if (smoothed.length < 3) continue;
+
+                    var pathD = "M " + smoothed[0].x.toFixed(2) + " " + smoothed[0].y.toFixed(2);
+                    for (var j = 1; j < smoothed.length; j++) {
+                        pathD += " L " + smoothed[j].x.toFixed(2) + " " + smoothed[j].y.toFixed(2);
+                    }
+                    pathD += " Z";
+                    svgPaths.push(pathD);
+                }
+
+                resolve(svgPaths);
+            };
+            img.onerror = function () { resolve([]); };
+            img.src = designDataUrl;
+        });
+    }
+
+    function downloadSvgBlob(svgString, filename) {
+        if (!svgString) return;
+        var blob = new Blob([svgString], { type: "image/svg+xml" });
+        downloadBlob(blob, filename);
+    }
+
+    function downloadCutSVGMulti(filename, designEntries, sheetW, sheetH) {
+        return generateCutSheetSVG(designEntries, sheetW, sheetH).then(function (svg) {
+            downloadSvgBlob(svg, filename);
+        });
+    }
+
+    // Morphological erode: shrink a binary mask by radiusPx
+    // Inverse of expandMask - erodes by checking if ALL pixels in the neighborhood are set
+    function erodeMask(srcCanvas, w, h, radiusPx) {
+        var r = Math.round(radiusPx);
+        if (r <= 0) {
+            var c = document.createElement("canvas");
+            c.width = w; c.height = h;
+            c.getContext("2d").drawImage(srcCanvas, 0, 0);
+            return c;
+        }
+
+        // Erode = invert -> dilate -> invert
+        // Invert alpha: opaque becomes transparent, transparent becomes opaque
+        var invCanvas = document.createElement("canvas");
+        invCanvas.width = w; invCanvas.height = h;
+        var invCtx = invCanvas.getContext("2d");
+        invCtx.drawImage(srcCanvas, 0, 0);
+        var invData = invCtx.getImageData(0, 0, w, h);
+        var invD = invData.data;
+        for (var i = 0; i < w * h; i++) {
+            var a = invD[i * 4 + 3];
+            if (a > 128) {
+                invD[i * 4] = 0; invD[i * 4 + 1] = 0; invD[i * 4 + 2] = 0; invD[i * 4 + 3] = 0;
+            } else {
+                invD[i * 4] = 255; invD[i * 4 + 1] = 255; invD[i * 4 + 2] = 255; invD[i * 4 + 3] = 255;
+            }
+        }
+        invCtx.putImageData(invData, 0, 0);
+
+        // Dilate the inverted mask
+        var dilatedInv = expandMask(invCanvas, w, h, r);
+
+        // Invert back
+        var resultCanvas = document.createElement("canvas");
+        resultCanvas.width = w; resultCanvas.height = h;
+        var resultCtx = resultCanvas.getContext("2d");
+        resultCtx.drawImage(dilatedInv, 0, 0);
+        var resultData = resultCtx.getImageData(0, 0, w, h);
+        var rD = resultData.data;
+        for (var j = 0; j < w * h; j++) {
+            var a2 = rD[j * 4 + 3];
+            if (a2 > 128) {
+                rD[j * 4] = 0; rD[j * 4 + 1] = 0; rD[j * 4 + 2] = 0; rD[j * 4 + 3] = 0;
+            } else {
+                rD[j * 4] = 255; rD[j * 4 + 1] = 255; rD[j * 4 + 2] = 255; rD[j * 4 + 3] = 255;
+            }
+        }
+        resultCtx.putImageData(resultData, 0, 0);
+        return resultCanvas;
+    }
+
+    // Morphological close: dilate then erode by the same radius.
+    // Fills gaps between nearby elements, merging them into one connected shape.
+    function closeMask(srcCanvas, w, h, radiusPx) {
+        var dilated = expandMask(srcCanvas, w, h, radiusPx);
+        return erodeMask(dilated, w, h, radiusPx);
+    }
+
     // Generate the cut outline: a black ring around the design silhouette.
-    // Uses morphological dilation to create smooth, accurate contours for cutting machines.
+    // Uses morphological close to consolidate nearby elements, then dilation for the contour.
     function generateOutline(designDataUrl, distancePx, cornerRadiusPx, widthPx) {
         return new Promise(function (resolve) {
             var img = new Image();
@@ -528,13 +942,19 @@ window.shapeCut = (function () {
                 silCtx.drawImage(img, 0, 0);
                 makeSilhouette(silCtx, w, h);
 
-                // Step 2: Outer boundary (distance + width + corner smoothing)
-                var outerCanvas = expandMask(silCanvas, w, h, distancePx + widthPx + cornerRadiusPx);
+                // Step 2: Morphological close to consolidate nearby elements
+                // (e.g., logo icon + text) into one connected shape.
+                // Close radius = distancePx so elements within gap distance merge together.
+                var closeRadius = Math.max(distancePx, 10);
+                var consolidatedCanvas = closeMask(silCanvas, w, h, closeRadius);
 
-                // Step 3: Inner boundary (distance + corner smoothing)
-                var innerCanvas = expandMask(silCanvas, w, h, distancePx + cornerRadiusPx);
+                // Step 3: Outer boundary (distance + width + corner smoothing)
+                var outerCanvas = expandMask(consolidatedCanvas, w, h, distancePx + widthPx + cornerRadiusPx);
 
-                // Step 4: Subtract inner from outer to get the outline ring
+                // Step 4: Inner boundary (distance + corner smoothing)
+                var innerCanvas = expandMask(consolidatedCanvas, w, h, distancePx + cornerRadiusPx);
+
+                // Step 5: Subtract inner from outer to get the outline ring
                 var outCanvas = document.createElement("canvas");
                 outCanvas.width = w; outCanvas.height = h;
                 var outCtx = outCanvas.getContext("2d");
@@ -543,7 +963,7 @@ window.shapeCut = (function () {
                 outCtx.drawImage(innerCanvas, 0, 0);
                 outCtx.globalCompositeOperation = "source-over";
 
-                // Step 5: Color the ring solid black
+                // Step 6: Color the ring solid black
                 outCtx.globalCompositeOperation = "source-in";
                 outCtx.fillStyle = "#000000";
                 outCtx.fillRect(0, 0, w, h);
@@ -672,46 +1092,50 @@ window.shapeCut = (function () {
         sheetCanvas.clear();
         sheetCanvas.backgroundColor = "#ffffff";
 
-        // Print mode: designs only + crop marks
-        // Cut mode: outlines only + crop marks
-        var srcUrl = viewMode === "print" ? designDataUrl : outlineDataUrl;
-        if (!srcUrl) {
+        // Load both images for cut mode (design + outline overlay)
+        var urlsToLoad = [designDataUrl, outlineDataUrl].filter(Boolean);
+        if (urlsToLoad.length === 0) {
             sheetCanvas.renderAll();
             return Promise.resolve();
         }
 
-        return new Promise(function (resolve) {
-            var tileImg = new Image();
-            tileImg.crossOrigin = "anonymous";
+        return loadImages(urlsToLoad).then(function (imageMap) {
+            var count = 0;
+            for (var r = 0; r < rows && count < quantity; r++) {
+                for (var c = 0; c < cols && count < quantity; c++) {
+                    var x = offsetX + c * (designW + spacing);
+                    var y = offsetY + r * (designH + spacing);
 
-            tileImg.onload = function () {
-                var count = 0;
-                for (var r = 0; r < rows && count < quantity; r++) {
-                    for (var c = 0; c < cols && count < quantity; c++) {
-                        var x = offsetX + c * (designW + spacing);
-                        var y = offsetY + r * (designH + spacing);
-
-                        sheetCanvas.add(new fabric.Image(tileImg, {
+                    // Preview: always show design + outline overlay together
+                    var dImg = imageMap[designDataUrl];
+                    if (dImg) {
+                        sheetCanvas.add(new fabric.Image(dImg, {
                             left: x, top: y,
-                            scaleX: designW / tileImg.naturalWidth,
-                            scaleY: designH / tileImg.naturalHeight,
+                            scaleX: designW / dImg.naturalWidth,
+                            scaleY: designH / dImg.naturalHeight,
                             selectable: false, evented: false,
                         }));
-
-                        count++;
                     }
-                }
+                    var oImg = imageMap[outlineDataUrl];
+                    if (oImg) {
+                        sheetCanvas.add(new fabric.Image(oImg, {
+                            left: x, top: y,
+                            scaleX: designW / oImg.naturalWidth,
+                            scaleY: designH / oImg.naturalHeight,
+                            selectable: false, evented: false,
+                        }));
+                    }
 
-                addCropMarksToFabric(sheetCanvas, sheetW, sheetH);
-                sheetCanvas.renderAll();
-                requestAnimationFrame(function () {
-                    var canvasEl = document.getElementById(canvasId);
-                    if (canvasEl && sheetCanvas) fitCanvasToContainer(sheetCanvas, canvasEl);
-                });
-                resolve();
-            };
-            tileImg.onerror = function () { resolve(); };
-            tileImg.src = srcUrl;
+                    count++;
+                }
+            }
+
+            addCropMarksToFabric(sheetCanvas, sheetW, sheetH);
+            sheetCanvas.renderAll();
+            requestAnimationFrame(function () {
+                var canvasEl = document.getElementById(canvasId);
+                if (canvasEl && sheetCanvas) fitCanvasToContainer(sheetCanvas, canvasEl);
+            });
         });
     }
 
@@ -907,13 +1331,22 @@ window.shapeCut = (function () {
 
                 if (y + tile.h > sheetH) break;
 
-                var srcUrl = viewMode === "print" ? tile.designUrl : tile.outlineUrl;
-                var imgEl = imageMap[srcUrl];
-                if (imgEl) {
-                    sheetCanvas.add(new fabric.Image(imgEl, {
+                // Preview: always show design + outline overlay together
+                var designImg = imageMap[tile.designUrl];
+                if (designImg) {
+                    sheetCanvas.add(new fabric.Image(designImg, {
                         left: x, top: y,
-                        scaleX: tile.w / imgEl.naturalWidth,
-                        scaleY: tile.h / imgEl.naturalHeight,
+                        scaleX: tile.w / designImg.naturalWidth,
+                        scaleY: tile.h / designImg.naturalHeight,
+                        selectable: false, evented: false,
+                    }));
+                }
+                var outlineImg = imageMap[tile.outlineUrl];
+                if (outlineImg) {
+                    sheetCanvas.add(new fabric.Image(outlineImg, {
+                        left: x, top: y,
+                        scaleX: tile.w / outlineImg.naturalWidth,
+                        scaleY: tile.h / outlineImg.naturalHeight,
                         selectable: false, evented: false,
                     }));
                 }
@@ -943,7 +1376,9 @@ window.shapeCut = (function () {
                     w: e.widthPx || 300,
                     h: e.heightPx || 400,
                     sx: e.spaceXPx || 0,
-                    sy: e.spaceYPx || 0
+                    sy: e.spaceYPx || 0,
+                    cutGapPx: e.cutGapPx || 15,
+                    cornerRadiusPx: e.cornerRadiusPx || 20
                 });
             }
         }
@@ -1093,6 +1528,9 @@ window.shapeCut = (function () {
         updateOutlinePreview: updateOutlinePreview,
         clearOutlinePreview: clearOutlinePreview,
         generateOutline: generateOutline,
+        generateCutContourSVG: generateCutContourSVG,
+        generateCutSheetSVG: generateCutSheetSVG,
+        downloadCutSVGMulti: downloadCutSVGMulti,
         setViewMode: setViewMode,
         renderSheet: renderSheet,
         renderSheetMulti: renderSheetMulti,

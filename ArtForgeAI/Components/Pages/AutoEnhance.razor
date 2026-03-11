@@ -1,0 +1,509 @@
+@page "/auto-enhance"
+@rendermode InteractiveServer
+@attribute [Authorize]
+@inject IImageStorageService ImageStorage
+@inject IImageEnhancerService ImageEnhancer
+@inject TiledGeminiEnhanceService TiledEnhancer
+@inject IJSRuntime JS
+@inject IWebHostEnvironment Env
+@inject ILogger<AutoEnhance> Logger
+@inject ISubscriptionService SubscriptionService
+@inject ICoinService CoinService
+@inject AuthenticationStateProvider AuthState
+@inject NavigationManager Nav
+
+<PageTitle>ArtForge AI - Auto Enhance</PageTitle>
+
+<div class="page-header page-header-lg">
+    <h2>Auto Enhance</h2>
+    <p>AI-powered enhancement &mdash; sharpen, restore clarity, and upscale your photos</p>
+</div>
+
+<div class="create-layout">
+    @* ── Left column ── *@
+    <div class="create-left">
+        <div class="card">
+            <div class="card-body">
+
+                @* Upload area *@
+                <div class="mb-3">
+                    <label class="form-label">Upload Photo</label>
+                    @if (!string.IsNullOrEmpty(_uploadedPath))
+                    {
+                        <div style="position: relative;">
+                            <button class="ref-thumb-remove" @onclick="RemovePhoto" disabled="@_isProcessing"
+                                    style="position:absolute;top:4px;right:4px;z-index:20;">&#10005;</button>
+                            <img src="@_uploadedDataUrl" alt="Uploaded"
+                                 style="width:100%;max-height:280px;object-fit:contain;border-radius:var(--radius-sm);background:var(--bg-tertiary);" />
+                        </div>
+                        @if (_sourceWidth > 0)
+                        {
+                            <p style="font-size: 0.72rem; color: var(--text-muted); margin: 0.35rem 0 0 0;">
+                                Source: @(_sourceWidth)x@(_sourceHeight) px
+                            </p>
+                        }
+                    }
+                    else
+                    {
+                        <label class="upload-area upload-area-compact @(_isUploading ? "disabled" : "")">
+                            <span class="upload-icon">&#128248;</span>
+                            <span>Upload a photo to enhance</span>
+                            <span style="font-size: 0.7rem; color: var(--text-muted); margin-left: 0.5rem;">JPG, PNG up to 10MB</span>
+                            <InputFile OnChange="HandleFileUpload" accept="image/*;capture=camera" style="display:none" disabled="@(_isProcessing || _isUploading)" />
+                        </label>
+                    }
+                    @if (_isUploading)
+                    {
+                        <div class="upload-progress-bar" style="margin-top: 0.35rem;">
+                            <div class="upload-progress-fill" style="width: 50%"></div>
+                            <span class="upload-progress-text">Uploading...</span>
+                        </div>
+                    }
+                </div>
+
+                @if (!string.IsNullOrEmpty(_uploadedPath))
+                {
+                    <hr style="margin: 0.5rem 0; border-color: var(--border-color);" />
+
+                    <button class="btn-primary-gradient" style="width:100%;margin-top:0.5rem;"
+                            @onclick="EnhanceImage" disabled="@_isProcessing">
+                        &#10024; Auto Enhance
+                    </button>
+                    <p style="font-size:0.7rem;color:var(--text-muted);margin-top:0.25rem;">
+                        AI enhances your entire image at once, preserving layout and faces. Just better quality.
+                    </p>
+                }
+            </div>
+        </div>
+
+        @if (!string.IsNullOrEmpty(_errorMessage))
+        {
+            <div class="card" style="margin-top: 0.75rem; border-left: 3px solid var(--danger);">
+                <div class="card-body" style="padding: 0.75rem 1rem; color: var(--danger); font-size: 0.85rem;">
+                    <strong>Error:</strong> @_errorMessage
+                </div>
+            </div>
+        }
+    </div>
+
+    @* ── Right column: result ── *@
+    <div class="create-right">
+        @if (_resultReady)
+        {
+            <div class="right-panel-card">
+                <div class="right-panel-label">Enhanced Result</div>
+
+                @* Before / After comparison — equal sizes *@
+                <div style="display:grid;grid-template-columns:1fr 1fr;gap:0.75rem;">
+                    <div style="text-align:center;">
+                        <span class="ns-compare-label">Before</span>
+                        <div style="aspect-ratio:@_sourceWidth/@_sourceHeight;max-height:400px;margin:0 auto;overflow:hidden;border-radius:var(--radius-sm);background:var(--bg-tertiary);">
+                            <img src="@_uploadedDataUrl" alt="Original"
+                                 style="width:100%;height:100%;object-fit:contain;" />
+                        </div>
+                    </div>
+                    <div style="text-align:center;">
+                        <span class="ns-compare-label">After</span>
+                        <div style="aspect-ratio:@_sourceWidth/@_sourceHeight;max-height:400px;margin:0 auto;overflow:hidden;border-radius:var(--radius-sm);background:var(--bg-tertiary);">
+                            <img src="@_enhancedDataUrl" alt="Enhanced"
+                                 style="width:100%;height:100%;object-fit:contain;" />
+                        </div>
+                    </div>
+                </div>
+
+                <div style="font-size:0.75rem;color:var(--text-muted);margin-top:0.4rem;text-align:center;">
+                    @(_sourceWidth)x@(_sourceHeight) px &mdash; same proportions preserved
+                </div>
+
+                @* Download buttons *@
+                <div class="pp-download-bar" style="margin-top:0.5rem;flex-wrap:wrap;gap:0.4rem;">
+                    <button class="btn-primary-gradient" style="font-size: 0.85rem; padding: 0.4rem 0.85rem;"
+                            @onclick='() => DownloadEnhanced("png")' disabled="@_isDownloading">
+                        &#128424; PNG
+                    </button>
+                    <button class="btn-secondary" style="font-size: 0.85rem; padding: 0.4rem 0.85rem;"
+                            @onclick='() => DownloadEnhanced("jpg")' disabled="@_isDownloading">
+                        JPG
+                    </button>
+                    <button class="btn-secondary" style="font-size: 0.85rem; padding: 0.4rem 0.85rem;"
+                            @onclick='() => DownloadUpscaled(2)' disabled="@_isDownloading">
+                        &#128200; 2x
+                    </button>
+                    <button class="btn-secondary" style="font-size: 0.85rem; padding: 0.4rem 0.85rem;"
+                            @onclick='() => DownloadUpscaled(4)' disabled="@_isDownloading">
+                        &#128200; 4x
+                    </button>
+                    <button class="btn-secondary" style="font-size: 0.85rem; padding: 0.4rem 0.85rem;"
+                            @onclick='() => DownloadUpscaled(8)' disabled="@_isDownloading">
+                        &#128200; 8x
+                    </button>
+                    <button class="btn-secondary" style="font-size: 0.85rem; padding: 0.4rem 0.85rem;"
+                            @onclick="StartNew">
+                        &#10024; Process Another
+                    </button>
+                </div>
+
+                @if (_isDownloading)
+                {
+                    <div class="upload-progress-bar" style="margin-top: 0.5rem;">
+                        <div class="upload-progress-fill" style="width: @(_downloadProgress)%"></div>
+                        <span class="upload-progress-text">@_downloadStatus @(_downloadProgress)%</span>
+                    </div>
+                }
+
+                <div class="ai-disclaimer">
+                    AI-enhanced &mdash; layout and content preserved, quality improved.
+                </div>
+            </div>
+        }
+    </div>
+</div>
+
+@* ── Image too large — compression confirmation ── *@
+@if (_pendingCompression)
+{
+    <div class="pp-processing-overlay">
+        <div class="pp-processing-modal" style="max-width:400px;">
+            <h4 style="margin:0 0 0.75rem;">Image Too Large</h4>
+            <p style="margin:0 0 0.5rem;font-size:0.9rem;color:var(--text-secondary);">Your image (@ImageUploadHelper.FormatFileSize(_pendingFileSize)) exceeds the @ImageUploadHelper.FormatFileSize(ImageUploadHelper.DefaultMaxUploadSize) limit.</p>
+            <p style="margin:0 0 1rem;font-size:0.9rem;color:var(--text-secondary);">It will be resized to fit within the limit while preserving quality.</p>
+            <div style="display:flex;gap:0.5rem;justify-content:center;">
+                <button class="btn-primary-gradient" @onclick="AcceptCompression">Resize &amp; Continue</button>
+                <button class="btn-secondary" @onclick="CancelCompression">&times; Cancel</button>
+            </div>
+        </div>
+    </div>
+}
+
+@* ── Processing overlay ── *@
+@if (_isProcessing)
+{
+    <div class="pp-processing-overlay">
+        <div class="pp-processing-modal">
+            <div class="processing-spinner" style="width:36px;height:36px;margin:0 auto 1rem;"></div>
+            <p style="margin:0;font-size:0.95rem;color:var(--text-primary);">@_processingStatus</p>
+        </div>
+    </div>
+}
+
+@code {
+    // ── State ──
+    private string? _uploadedPath;
+    private string? _uploadedDataUrl;
+    private bool _isUploading;
+    private bool _isProcessing;
+    private string _processingStatus = "";
+    private string? _errorMessage;
+    private int _sourceWidth;
+    private int _sourceHeight;
+
+    // Image compression confirmation state
+    private bool _pendingCompression;
+    private long _pendingFileSize;
+    private InputFileChangeEventArgs? _pendingFileEvent;
+
+    // Result
+    private bool _resultReady;
+    private string? _enhancedImagePath;
+    private string? _enhancedDataUrl;
+    private int _enhancedWidth;
+    private int _enhancedHeight;
+
+    // Download
+    private bool _isDownloading;
+    private int _downloadProgress;
+    private string _downloadStatus = "";
+
+    // ── Lifecycle ──
+
+    protected override async Task OnInitializedAsync()
+    {
+        var authState = await AuthState.GetAuthenticationStateAsync();
+        if (!authState.User.IsInRole("SuperAdmin"))
+        {
+            var userIdStr = authState.User.FindFirstValue(System.Security.Claims.ClaimTypes.NameIdentifier);
+            if (int.TryParse(userIdStr, out var uid))
+            {
+                if (!await SubscriptionService.HasFeatureAccessAsync(uid, ArtForgeAI.Models.FeatureAccess.AutoEnhance))
+                {
+                    Nav.NavigateTo("/pricing", forceLoad: true);
+                    return;
+                }
+            }
+        }
+    }
+
+    // ── Upload ──
+
+    private async Task HandleFileUpload(InputFileChangeEventArgs e)
+    {
+        var file = e.File;
+        if (file is null) return;
+
+        // If file exceeds max upload size, ask user to confirm compression
+        if (file.Size > ImageUploadHelper.DefaultMaxUploadSize)
+        {
+            if (file.Size > ImageUploadHelper.MaxReadSize)
+            {
+                _errorMessage = $"File is too large ({ImageUploadHelper.FormatFileSize(file.Size)}). Maximum allowed is {ImageUploadHelper.FormatFileSize(ImageUploadHelper.MaxReadSize)}.";
+                StateHasChanged();
+                return;
+            }
+            _pendingFileSize = file.Size;
+            _pendingFileEvent = e;
+            _pendingCompression = true;
+            StateHasChanged();
+            return;
+        }
+
+        await ProcessUpload(e);
+    }
+
+    private async Task ProcessUpload(InputFileChangeEventArgs e, MemoryStream? compressedStream = null)
+    {
+        _isUploading = true;
+        _errorMessage = null;
+        StateHasChanged();
+
+        try
+        {
+            var file = e.File;
+            if (compressedStream is not null)
+            {
+                _uploadedPath = await ImageStorage.SaveUploadedFileAsync(compressedStream, file.Name);
+            }
+            else
+            {
+                using var stream = file.OpenReadStream(ImageUploadHelper.MaxReadSize);
+                _uploadedPath = await ImageStorage.SaveUploadedFileAsync(stream, file.Name);
+            }
+            _resultReady = false;
+            _enhancedImagePath = null;
+            _enhancedDataUrl = null;
+
+            // Read dimensions and build data URL
+            var fullPath = ResolveFullPath(_uploadedPath);
+            var imageBytes = await File.ReadAllBytesAsync(fullPath);
+            using var img = SixLabors.ImageSharp.Image.Load(imageBytes);
+            _sourceWidth = img.Width;
+            _sourceHeight = img.Height;
+
+            var ext = _uploadedPath.EndsWith(".png", StringComparison.OrdinalIgnoreCase) ? "png" : "jpeg";
+            _uploadedDataUrl = $"data:image/{ext};base64," + Convert.ToBase64String(imageBytes);
+        }
+        catch (Exception ex)
+        {
+            Logger.LogError(ex, "Upload failed");
+            _errorMessage = "Upload failed. Please try again.";
+            return;
+        }
+        finally
+        {
+            _isUploading = false;
+            StateHasChanged();
+        }
+    }
+
+    private async Task AcceptCompression()
+    {
+        if (_pendingFileEvent is null) return;
+
+        _pendingCompression = false;
+
+        try
+        {
+            var file = _pendingFileEvent.File;
+            using var readMs = new MemoryStream();
+            await file.OpenReadStream(ImageUploadHelper.MaxReadSize).CopyToAsync(readMs);
+            var compressed = ImageUploadHelper.CompressToFit(readMs.ToArray(), file.Name);
+            await ProcessUpload(_pendingFileEvent, compressed);
+        }
+        catch (Exception ex)
+        {
+            Logger.LogError(ex, "Image compression failed");
+            _errorMessage = "Failed to compress the image. Please try a smaller file.";
+            StateHasChanged();
+        }
+        finally
+        {
+            _pendingFileEvent = null;
+        }
+    }
+
+    private void CancelCompression()
+    {
+        _pendingCompression = false;
+        _pendingFileEvent = null;
+    }
+
+    // ── Gemini AI Enhancement (tiled to preserve layout) ──
+
+    private async Task EnhanceImage()
+    {
+        if (string.IsNullOrEmpty(_uploadedPath)) return;
+
+        // Debit coins
+        var authStateC = await AuthState.GetAuthenticationStateAsync();
+        var uidStrC = authStateC.User.FindFirstValue(System.Security.Claims.ClaimTypes.NameIdentifier);
+        if (int.TryParse(uidStrC, out var userIdC) && !authStateC.User.IsInRole("SuperAdmin"))
+        {
+            var cost = ArtForgeAI.Models.FeatureAccess.GetCost("AutoEnhance");
+            if (!await CoinService.DebitCoinsAsync(userIdC, cost, ArtForgeAI.Models.CoinTransactionType.GenerationSpend, "Auto Enhance"))
+            {
+                _errorMessage = "Insufficient coins. Please top up to continue.";
+                StateHasChanged();
+                return;
+            }
+        }
+
+        _isProcessing = true;
+        _processingStatus = "Preparing enhancement...";
+        _errorMessage = null;
+        _resultReady = false;
+        StateHasChanged();
+
+        try
+        {
+            var fullPath = ResolveFullPath(_uploadedPath);
+            var imageBytes = await File.ReadAllBytesAsync(fullPath);
+
+            var progress = new Progress<(int current, int total, string status)>(p =>
+            {
+                _processingStatus = p.status;
+                InvokeAsync(StateHasChanged);
+            });
+
+            // Tiled Gemini enhancement — each tile enhanced individually,
+            // so the overall layout stays intact
+            var enhancedBytes = await TiledEnhancer.EnhanceAsync(
+                imageBytes, _sourceWidth, _sourceHeight, progress);
+
+            var outputFileName = $"ae_{Guid.NewGuid():N}.png";
+            _enhancedImagePath = await ImageStorage.SaveImageFromBytesAsync(
+                BinaryData.FromBytes(enhancedBytes), outputFileName);
+
+            _enhancedWidth = _sourceWidth;
+            _enhancedHeight = _sourceHeight;
+            _enhancedDataUrl = "data:image/png;base64," + Convert.ToBase64String(enhancedBytes);
+            _resultReady = true;
+        }
+        catch (Exception ex)
+        {
+            Logger.LogError(ex, "Enhancement failed");
+            _errorMessage = "Enhancement failed: " + ex.Message;
+        }
+        finally
+        {
+            _isProcessing = false;
+            _processingStatus = "";
+            StateHasChanged();
+        }
+    }
+
+    // ── Downloads ──
+
+    private async Task DownloadEnhanced(string format)
+    {
+        if (string.IsNullOrEmpty(_enhancedImagePath)) return;
+        try
+        {
+            var webPath = await ImageStorage.PrepareHighResDownloadAsync(
+                _enhancedImagePath, format, _enhancedWidth, _enhancedHeight);
+            await JS.InvokeVoidAsync("downloadFile", $"/{webPath}", $"auto_enhanced.{format}");
+        }
+        catch (Exception ex)
+        {
+            Logger.LogError(ex, "Download failed");
+            _errorMessage = "Download failed: " + ex.Message;
+            StateHasChanged();
+        }
+    }
+
+    private async Task DownloadUpscaled(int multiplier)
+    {
+        if (string.IsNullOrEmpty(_enhancedImagePath)) return;
+
+        _isDownloading = true;
+        _downloadProgress = 10;
+        _downloadStatus = $"Preparing {multiplier}x upscale...";
+        _errorMessage = null;
+        StateHasChanged();
+
+        try
+        {
+            var targetW = _enhancedWidth * multiplier;
+            var targetH = _enhancedHeight * multiplier;
+
+            // Cap max dimension at 16384 to avoid memory issues
+            if (targetW > 16384 || targetH > 16384)
+            {
+                var scale = 16384.0 / Math.Max(targetW, targetH);
+                targetW = (int)(targetW * scale);
+                targetH = (int)(targetH * scale);
+            }
+
+            _downloadProgress = 30;
+            _downloadStatus = $"Upscaling to {targetW}x{targetH}...";
+            StateHasChanged();
+
+            var webPath = await ImageStorage.PrepareHighResDownloadAsync(
+                _enhancedImagePath, "png", targetW, targetH, 300);
+
+            _downloadProgress = 85;
+            _downloadStatus = "Starting download...";
+            StateHasChanged();
+
+            await JS.InvokeVoidAsync("downloadFile", $"/{webPath}", $"auto_enhanced_{multiplier}x.png");
+
+            _downloadProgress = 100;
+            _downloadStatus = "Done!";
+            StateHasChanged();
+
+            await Task.Delay(500);
+        }
+        catch (Exception ex)
+        {
+            Logger.LogError(ex, "{Multiplier}x download failed", multiplier);
+            _errorMessage = $"{multiplier}x download failed: " + ex.Message;
+        }
+        finally
+        {
+            _isDownloading = false;
+            _downloadProgress = 0;
+            _downloadStatus = "";
+            StateHasChanged();
+        }
+    }
+
+    // ── Start New ──
+
+    private async Task StartNew()
+    {
+        await RemovePhoto();
+        StateHasChanged();
+    }
+
+    // ── Remove photo ──
+
+    private async Task RemovePhoto()
+    {
+        if (!string.IsNullOrEmpty(_uploadedPath))
+            await ImageStorage.DeleteImageAsync(_uploadedPath);
+
+        _uploadedPath = null;
+        _uploadedDataUrl = null;
+        _resultReady = false;
+        _errorMessage = null;
+        _enhancedImagePath = null;
+        _enhancedDataUrl = null;
+        _sourceWidth = 0;
+        _sourceHeight = 0;
+        _enhancedWidth = 0;
+        _enhancedHeight = 0;
+    }
+
+    // ── Helpers ──
+
+    private string ResolveFullPath(string webRelativePath) =>
+        System.IO.Path.Combine(Env.WebRootPath, webRelativePath.Replace("/", System.IO.Path.DirectorySeparatorChar.ToString()));
+}

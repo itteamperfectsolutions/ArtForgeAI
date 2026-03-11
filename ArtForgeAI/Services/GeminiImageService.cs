@@ -271,8 +271,6 @@ public class GeminiImageService : IGeminiImageService
         }
 
         _logger.LogInformation("Successfully generated image using model {Model}", model);
-        // Prefix model name so the caller/UI knows which model produced the result
-        textResult = $"[{model}] {textResult ?? ""}";
         return (textResult, imageBytesResult);
     }
 }

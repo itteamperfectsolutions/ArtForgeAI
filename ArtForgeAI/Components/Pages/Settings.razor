@@ -4,8 +4,11 @@
 @using SixLabors.ImageSharp
 @using SixLabors.ImageSharp.PixelFormats
 @using SixLabors.ImageSharp.Processing
+@using SixLabors.ImageSharp.Drawing.Processing
+@using SixLabors.Fonts
 @using System.Text
 @inject IGenerationHistoryService HistoryService
+@inject IBackgroundRemovalService BgRemoval
 @inject IImageSizeMasterService SizeService
 @inject IStylePresetService StyleService
 @inject IImageGenerationService ImageGenService
@@ -830,6 +833,21 @@
                         <input type="text" @bind="_testDateText" placeholder="e.g. 26-07-2023" maxlength="30" />
                     </div>
                 }
+                @if (_testPlaceholderPreset.Category == "Memorial")
+                {
+                    <div class="qs-field">
+                        <label>Name <span class="qs-required">*</span></label>
+                        <input type="text" @bind="_testMemorialName" placeholder="Enter full name..." maxlength="80" />
+                    </div>
+                    <div class="qs-field">
+                        <label>Date of Birth <span class="qs-optional">(optional)</span></label>
+                        <input type="date" @bind="_testMemorialDob" />
+                    </div>
+                    <div class="qs-field">
+                        <label>Date of Death <span class="qs-optional">(optional)</span></label>
+                        <input type="date" @bind="_testMemorialDod" />
+                    </div>
+                }
                 @if (!string.IsNullOrEmpty(_testPlaceholderError))
                 {
                     <div class="qs-field-error">@_testPlaceholderError</div>
@@ -886,16 +904,6 @@
                         else if (!string.IsNullOrEmpty(_testResultPath))
                         {
                             <img src="@($"{ImageStorage.GetWebPath(_testResultPath)}?v={_testVersion}")" alt="Result" />
-                            @if (!string.IsNullOrEmpty(_testModelInfo))
-                            {
-                                // Extract model name from the [model-name] prefix
-                                var modelTag = _testModelInfo.Contains(']')
-                                    ? _testModelInfo[..(_testModelInfo.IndexOf(']') + 1)]
-                                    : "";
-                                <div style="position:absolute;bottom:4px;left:4px;background:rgba(0,0,0,0.7);color:#aaa;font-size:0.65rem;padding:2px 6px;border-radius:3px;">
-                                    @modelTag
-                                </div>
-                            }
                         }
                         else
                         {
@@ -982,6 +990,9 @@
     private DateTime? _testCalendarDate;
     private int? _testNumberValue;
     private string _testDateText = string.Empty;
+    private string _testMemorialName = string.Empty;
+    private DateTime? _testMemorialDob;
+    private DateTime? _testMemorialDod;
     private string? _testPlaceholderError;
 
     // Add form
@@ -1427,7 +1438,7 @@
     }
 
     private bool HasPlaceholders(StylePreset style)
-        => style.PromptTemplate.Contains("{{OCCASION}}") || style.PromptTemplate.Contains("{{MESSAGE}}") || style.PromptTemplate.Contains("{{CALENDAR}}") || style.PromptTemplate.Contains("{{NUMBER}}") || style.PromptTemplate.Contains("{{DATE}}");
+        => style.PromptTemplate.Contains("{{OCCASION}}") || style.PromptTemplate.Contains("{{MESSAGE}}") || style.PromptTemplate.Contains("{{CALENDAR}}") || style.PromptTemplate.Contains("{{NUMBER}}") || style.PromptTemplate.Contains("{{DATE}}") || style.PromptTemplate.Contains("{{NAME}}") || style.PromptTemplate.Contains("{{DOB}}") || style.PromptTemplate.Contains("{{DOD}}");
 
     private string ReplacePlaceholders(string prompt, string occasion, string message)
     {
@@ -1443,6 +1454,20 @@
             result = result.Replace("{{NUMBER}}", _testNumberValue.Value.ToString());
         if (!string.IsNullOrWhiteSpace(_testDateText))
             result = result.Replace("{{DATE}}", _testDateText.Trim());
+
+        // Memorial placeholders
+        if (!string.IsNullOrWhiteSpace(_testMemorialName))
+            result = result.Replace("{{NAME}}", _testMemorialName.Trim());
+        else
+            result = result.Replace("{{NAME}}", "");
+        if (_testMemorialDob.HasValue)
+            result = result.Replace("{{DOB}}", _testMemorialDob.Value.ToString("dd-MM-yyyy"));
+        else
+            result = result.Replace("{{DOB}}", "");
+        if (_testMemorialDod.HasValue)
+            result = result.Replace("{{DOD}}", _testMemorialDod.Value.ToString("dd-MM-yyyy"));
+        else
+            result = result.Replace("{{DOD}}", "");
         return result;
     }
 
@@ -1455,8 +1480,9 @@
         using var stream = file.OpenReadStream(10 * 1024 * 1024);
         _testSourcePath = await ImageStorage.SaveUploadedFileAsync(stream, file.Name);
 
-        // If the style has placeholders, show text input modal first
-        if (HasPlaceholders(preset))
+        // Memorial styles always need Name/DOB/DOD inputs
+        // Other styles with placeholders also show modal
+        if (preset.Category == "Memorial" || HasPlaceholders(preset))
         {
             _testPlaceholderPreset = preset;
             _testOccasionText = string.Empty;
@@ -1464,6 +1490,9 @@
             _testCalendarDate = null;
             _testNumberValue = null;
             _testDateText = string.Empty;
+            _testMemorialName = string.Empty;
+            _testMemorialDob = null;
+            _testMemorialDod = null;
             _testPlaceholderError = null;
             _testPendingPlaceholders = true;
             StateHasChanged();
@@ -1498,6 +1527,12 @@
         if (_testPlaceholderPreset.PromptTemplate.Contains("{{DATE}}") && string.IsNullOrWhiteSpace(_testDateText))
         {
             _testPlaceholderError = "Please enter the date (e.g. 26-07-2023).";
+            return;
+        }
+
+        if (_testPlaceholderPreset.Category == "Memorial" && string.IsNullOrWhiteSpace(_testMemorialName))
+        {
+            _testPlaceholderError = "Please enter the name.";
             return;
         }
 
@@ -1583,6 +1618,22 @@
             // Append universal face/identity preservation instruction
             prompt += " FACE & IDENTITY PRESERVATION (CRITICAL): Carefully analyse the source photo to determine the subject's GENDER, approximate AGE, SKIN TONE, and every facial detail. The generated image MUST match the source exactly — same gender, same age range, same complexion and skin undertone, same face shape, jawline, eye shape, eye colour, eyebrow thickness and arch, nose shape and size, lip shape and fullness, ear shape, hairline, hair colour, hair texture, and hairstyle. Preserve moles, dimples, facial hair, wrinkles, and any distinguishing facial marks. Do NOT alter, beautify, age, de-age, lighten, darken, or change any facial feature. The face in every panel/photo MUST be immediately recognisable as the SAME person from the source image — identical in every detail.";
 
+            // Memorial styles: remove background first
+            var refPath = _testSourcePath;
+            bool isMemorial = preset.Category == "Memorial";
+            if (isMemorial && BgRemoval.IsAvailable)
+            {
+                try
+                {
+                    var bgResult = await BgRemoval.RemoveBackgroundAsync(_testSourcePath);
+                    refPath = bgResult.TransparentImagePath;
+                }
+                catch (Exception bgEx)
+                {
+                    Logger.LogWarning(bgEx, "Background removal failed for memorial test, using original");
+                }
+            }
+
             // Run style transfer with the prompt
             var request = new GenerationRequest
             {
@@ -1591,8 +1642,9 @@
                 Height = targetH,
                 SizeName = "20x30",
                 EnhancePrompt = false,
-                ReferenceImagePaths = [_testSourcePath],
-                Provider = ImageProvider.Gemini
+                ReferenceImagePaths = [refPath],
+                Provider = ImageProvider.Gemini,
+                SkipMultiImageComposition = isMemorial
             };
 
             // Use a 120s timeout to prevent the spinner from hanging forever
@@ -1611,6 +1663,10 @@
 
                     // Enforce 2:3 aspect ratio via center-crop + resize
                     await EnforceAspectRatio(result.LocalImagePath, targetW, targetH);
+
+                    // Memorial: overlay name/DOB/DOD text programmatically
+                    if (isMemorial)
+                        await OverlayMemorialText(result.LocalImagePath);
                 }
                 else
                 {
@@ -1710,6 +1766,89 @@
         _testResultPath = null;
         _testError = null;
         StateHasChanged();
+    }
+
+    private async Task OverlayMemorialText(string localImagePath)
+    {
+        try
+        {
+            var fullPath = Path.Combine(Env.WebRootPath,
+                localImagePath.Replace("/", Path.DirectorySeparatorChar.ToString()));
+            if (!File.Exists(fullPath)) return;
+
+            var imageBytes = await File.ReadAllBytesAsync(fullPath);
+            using var img = Image.Load<Rgba32>(imageBytes);
+
+            FontFamily family;
+            if (!SystemFonts.TryGet("Georgia", out family) &&
+                !SystemFonts.TryGet("Times New Roman", out family) &&
+                !SystemFonts.TryGet("Segoe UI", out family) &&
+                !SystemFonts.TryGet("Arial", out family))
+                family = SystemFonts.Families.First();
+
+            var imgW = img.Width;
+            var imgH = img.Height;
+            var textAreaTop = (int)(imgH * 0.82);
+            var textAreaHeight = imgH - textAreaTop;
+            var centerX = imgW / 2f;
+
+            var nameFont = family.CreateFont(imgW * 0.045f, FontStyle.Bold);
+            var dateFont = family.CreateFont(imgW * 0.028f, FontStyle.Bold);
+            var shadow = new Color(new Rgba32(0, 0, 0, 128));
+            var gold = Color.ParseHex("#FFD700");
+
+            var dateParts = new List<string>();
+            if (_testMemorialDob.HasValue)
+                dateParts.Add($"DOB: {_testMemorialDob.Value:dd-MM-yyyy}");
+            if (_testMemorialDod.HasValue)
+                dateParts.Add($"DOD: {_testMemorialDod.Value:dd-MM-yyyy}");
+            var dateLine = string.Join("     ", dateParts);
+
+            img.Mutate(ctx =>
+            {
+                if (!string.IsNullOrWhiteSpace(_testMemorialName))
+                {
+                    var nameY = textAreaTop + textAreaHeight * 0.25f;
+                    ctx.DrawText(new RichTextOptions(nameFont)
+                    {
+                        Origin = new System.Numerics.Vector2(centerX + 2, nameY + 2),
+                        HorizontalAlignment = HorizontalAlignment.Center,
+                        VerticalAlignment = VerticalAlignment.Center
+                    }, _testMemorialName.Trim().ToUpper(), shadow);
+                    ctx.DrawText(new RichTextOptions(nameFont)
+                    {
+                        Origin = new System.Numerics.Vector2(centerX, nameY),
+                        HorizontalAlignment = HorizontalAlignment.Center,
+                        VerticalAlignment = VerticalAlignment.Center
+                    }, _testMemorialName.Trim().ToUpper(), Color.White);
+                }
+
+                if (!string.IsNullOrWhiteSpace(dateLine))
+                {
+                    var dateY = textAreaTop + textAreaHeight * 0.68f;
+                    ctx.DrawText(new RichTextOptions(dateFont)
+                    {
+                        Origin = new System.Numerics.Vector2(centerX + 1, dateY + 1),
+                        HorizontalAlignment = HorizontalAlignment.Center,
+                        VerticalAlignment = VerticalAlignment.Center
+                    }, dateLine, shadow);
+                    ctx.DrawText(new RichTextOptions(dateFont)
+                    {
+                        Origin = new System.Numerics.Vector2(centerX, dateY),
+                        HorizontalAlignment = HorizontalAlignment.Center,
+                        VerticalAlignment = VerticalAlignment.Center
+                    }, dateLine, gold);
+                }
+            });
+
+            await using var ms = new MemoryStream();
+            await img.SaveAsPngAsync(ms);
+            await File.WriteAllBytesAsync(fullPath, ms.ToArray());
+        }
+        catch (Exception ex)
+        {
+            Logger.LogWarning(ex, "Memorial text overlay failed (non-fatal)");
+        }
     }
 
     private async Task GenerateThumbnail(StylePreset preset)

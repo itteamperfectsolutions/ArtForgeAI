@@ -52,6 +52,10 @@
                 <span class="nav-icon">&#127912;</span>
                 Create
             </NavLink>
+            <NavLink class="nav-item" href="auto-enhance">
+                <span class="nav-icon">&#9889;</span>
+                Auto Enhance
+            </NavLink>
             <NavLink class="nav-item" href="style-transfer">
                 <span class="nav-icon">&#10024;</span>
                 Style Transfer
@@ -109,6 +113,13 @@
                 <NavLink class="nav-item" href="" Match="NavLinkMatch.All">
                     <span class="nav-icon">&#127912;</span>
                     Create
+                </NavLink>
+            }
+            @if (_accessibleFeatures.Contains("AutoEnhance"))
+            {
+                <NavLink class="nav-item" href="auto-enhance">
+                    <span class="nav-icon">&#9889;</span>
+                    Auto Enhance
                 </NavLink>
             }
             @if (_accessibleFeatures.Contains("StyleTransfer"))

@@ -265,6 +265,9 @@
                     <button class="btn-primary-gradient" @onclick="ExportPng" disabled="@_isProcessing">
                         &#11015; Download PNG
                     </button>
+                    <button class="btn-secondary" @onclick="StartNew" disabled="@_isProcessing">
+                        &#10024; Start New
+                    </button>
                     @if (ImageEnhancer.IsAvailable)
                     {
                         <button class="btn-enhance" @onclick="EnhanceAndDownload" disabled="@(_isEnhancing || _isProcessing)">
@@ -479,6 +482,17 @@
     {
         _mainImagePath = null;
         _isCanvasReady = false;
+    }
+
+    private void StartNew()
+    {
+        _mainImagePath = null;
+        _bgImagePaths.Clear();
+        _isCanvasReady = false;
+        _errorMessage = null;
+        _settings = new MosaicSettings();
+        _selectedLayout = "grid";
+        _selectedCanvasSize = "poster";
     }
 
     private async Task RemoveBgImage(int index)

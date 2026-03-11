@@ -265,6 +265,10 @@
                             @onclick="Regenerate">
                         &#128260; Regenerate
                     </button>
+                    <button class="btn-secondary" style="font-size: 0.85rem; padding: 0.4rem 0.85rem;"
+                            @onclick="StartNew">
+                        &#10024; Process Another
+                    </button>
                 </div>
                 @if (_isEnhancing)
                 {
@@ -714,6 +718,14 @@
             _processingStatus = "";
             StateHasChanged();
         }
+    }
+
+    // ── Start New ──
+
+    private async Task StartNew()
+    {
+        await RemovePhoto();
+        StateHasChanged();
     }
 
     // ── Downloads ──

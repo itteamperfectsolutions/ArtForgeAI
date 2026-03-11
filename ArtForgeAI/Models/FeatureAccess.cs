@@ -16,14 +16,15 @@ public static class FeatureAccess
     public const string ShapeCutSheet = "ShapeCutSheet";
     public const string StyleRemix = "StyleRemix";
     public const string NegativeScan = "NegativeScan";
+    public const string AutoEnhance = "AutoEnhance";
 
     /// <summary>Plan name to allowed features mapping</summary>
     public static readonly Dictionary<string, string[]> PlanFeatures = new()
     {
         ["Free"] = [QuickStyle],
         ["Starter"] = [QuickStyle, Home, StyleTransfer, StyleRemix, Gallery],
-        ["Pro"] = [QuickStyle, Home, StyleTransfer, StyleRemix, Gallery, MosaicPoster, PassportPhoto, ImageViewer, Settings, NegativeScan],
-        ["Enterprise"] = [QuickStyle, Home, StyleTransfer, StyleRemix, Gallery, MosaicPoster, PassportPhoto, ImageViewer, Settings, PhotoExpand, GangSheet, ShapeCutSheet, NegativeScan]
+        ["Pro"] = [QuickStyle, Home, StyleTransfer, StyleRemix, Gallery, MosaicPoster, PassportPhoto, ImageViewer, Settings, NegativeScan, AutoEnhance],
+        ["Enterprise"] = [QuickStyle, Home, StyleTransfer, StyleRemix, Gallery, MosaicPoster, PassportPhoto, ImageViewer, Settings, PhotoExpand, GangSheet, ShapeCutSheet, NegativeScan, AutoEnhance]
     };
 
     /// <summary>Coin cost per generation for each feature</summary>
@@ -38,14 +39,15 @@ public static class FeatureAccess
         [GangSheet] = 4,
         [ShapeCutSheet] = 4,
         [StyleRemix] = 3,
-        [NegativeScan] = 2
+        [NegativeScan] = 2,
+        [AutoEnhance] = 3
     };
 
     /// <summary>All feature keys</summary>
     public static readonly string[] AllFeatures =
     [
         QuickStyle, Home, StyleTransfer, StyleRemix, Gallery, MosaicPoster,
-        PassportPhoto, ImageViewer, Settings, PhotoExpand, GangSheet, ShapeCutSheet, NegativeScan
+        PassportPhoto, ImageViewer, Settings, PhotoExpand, GangSheet, ShapeCutSheet, NegativeScan, AutoEnhance
     ];
 
     public static int GetCost(string featureKey) =>

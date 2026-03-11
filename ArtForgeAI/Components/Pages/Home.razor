@@ -335,7 +335,7 @@
             @if (!string.IsNullOrEmpty(_result.EnhancedPrompt))
             {
                 <div class="result-prompt" style="margin-top: 0.75rem;">
-                    <strong>Enhanced prompt:</strong> @_result.EnhancedPrompt
+                    <strong>Enhanced prompt:</strong> @StripModelPrefix(_result.EnhancedPrompt)
                 </div>
             }
             <div class="ai-disclaimer">
@@ -1098,6 +1098,13 @@
             state.IsProcessing = false;
             StateHasChanged();
         }
+    }
+
+    private static string StripModelPrefix(string text)
+    {
+        if (text.StartsWith('[') && text.IndexOf(']') is int idx and > 0)
+            return text[(idx + 1)..].TrimStart();
+        return text;
     }
 
     private class RefImageState

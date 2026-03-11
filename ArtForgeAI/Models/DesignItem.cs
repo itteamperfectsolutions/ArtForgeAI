@@ -18,6 +18,12 @@ public class DesignItem
     public string? ProcessedDataUrl { get; set; }
     public string? FinalDesignUrl { get; set; }
     public string? OutlineDataUrl { get; set; }
+    public string? OutlineSvgData { get; set; }
+
+    // Per-item outline settings
+    public int CutGapPx { get; set; } = 15;
+    public int CornerSmoothPx { get; set; } = 20;
+    public int OutlineWidthPx { get; set; } = 3;
 
     // Per-item design size (inches)
     public double WidthIn { get; set; } = 3.0;

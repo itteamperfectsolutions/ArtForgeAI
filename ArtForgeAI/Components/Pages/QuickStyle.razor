@@ -4,7 +4,11 @@
 @using SixLabors.ImageSharp
 @using SixLabors.ImageSharp.PixelFormats
 @using SixLabors.ImageSharp.Processing
+@using SixLabors.ImageSharp.Drawing
+@using SixLabors.ImageSharp.Drawing.Processing
+@using SixLabors.Fonts
 @inject IStylePresetService StyleService
+@inject IBackgroundRemovalService BgRemoval
 @inject IImageGenerationService ImageGenService
 @inject IImageStorageService ImageStorage
 @inject ICinematicProfileService CinematicProfile
@@ -115,6 +119,21 @@
                         <input type="number" @bind="_numberValue" min="0" max="999" placeholder="e.g. 2, 5, 25..." />
                     </div>
                 }
+                @if (_selectedStyle?.Category == "Memorial")
+                {
+                    <div class="qs-field">
+                        <label>Name <span class="qs-required">*</span></label>
+                        <input type="text" @bind="_memorialName" placeholder="Enter full name..." maxlength="80" />
+                    </div>
+                    <div class="qs-field">
+                        <label>Date of Birth <span class="qs-optional">(optional)</span></label>
+                        <input type="date" @bind="_memorialDob" />
+                    </div>
+                    <div class="qs-field">
+                        <label>Date of Death <span class="qs-optional">(optional)</span></label>
+                        <input type="date" @bind="_memorialDod" />
+                    </div>
+                }
                 @if (_selectedStyle?.PromptTemplate.Contains("{{DATE}}") == true)
                 {
                     <div class="qs-field">
@@ -195,14 +214,35 @@
     </div>
 }
 
+@* ── Image too large — compression confirmation ── *@
+@if (_pendingCompression)
+{
+    <div class="qs-modal-overlay">
+        <div class="qs-modal qs-placeholder-modal">
+            <div class="qs-modal-header">
+                <span>Image Too Large</span>
+                <button class="qs-modal-close" @onclick="CancelCompression">&times;</button>
+            </div>
+            <div class="qs-placeholder-body">
+                <p>Your image (@FormatFileSize(_pendingFileSize)) exceeds the @FormatFileSize(ImageUploadHelper.DefaultMaxUploadSize) limit.</p>
+                <p>It will be resized to fit within the limit while preserving quality. No compression artifacts will be added.</p>
+            </div>
+            <div class="qs-modal-footer">
+                <button class="btn-primary-gradient" @onclick="AcceptCompression">Resize &amp; Continue</button>
+                <button class="btn-secondary" @onclick="CancelCompression">&times; Cancel</button>
+            </div>
+        </div>
+    </div>
+}
+
 @* ── Result popup modal ── *@
 @if (_result is not null && _result.Success)
 {
-    <div class="qs-modal-overlay" @onclick="StartOver">
+    <div class="qs-modal-overlay" @onclick="CloseResult">
         <div class="qs-modal" @onclick:stopPropagation="true">
             <div class="qs-modal-header">
                 <span>@_selectedStyle?.IconEmoji @_selectedStyle?.Name</span>
-                <button class="qs-modal-close" @onclick="StartOver">&times;</button>
+                <button class="qs-modal-close" @onclick="CloseResult">&times;</button>
             </div>
             <div class="qs-modal-body">
                 <div class="qs-modal-img-card">
@@ -241,7 +281,7 @@
                         }
                     </button>
                 }*@
-                <button class="btn-secondary" @onclick="StartOver">&times; Close</button>
+                <button class="btn-secondary" @onclick="CloseResult">&times; Close</button>
             </div>
             @if (_isEnhancing)
             {
@@ -283,12 +323,26 @@
     private string _processingStatus = "";
     private CancellationTokenSource? _statusCts;
 
+    // Memorial fields
+    private string _memorialName = string.Empty;
+    private DateTime? _memorialDob;
+    private DateTime? _memorialDod;
+
     // Silhouette Contour options
     private bool _pendingSilhouetteOptions;
     private string _silhouetteOrientation = "side"; // "front" or "side"
     private string _silhouetteBodyType = "bust"; // "full" or "bust"
 
-    private static readonly string[] _categoryOrder = ["Artistic", "Fun", "Professional", "Abstract", "Mythological", "Regional", "PhotoCollage", "PhotoArts"];
+    // Image compression confirmation state
+    private bool _pendingCompression;
+    private long _pendingFileSize;
+    private InputFileChangeEventArgs? _pendingFileEvent;
+    private StylePreset? _pendingFileStyle;
+
+    // Guard against result-close re-triggering generation
+    private DateTime _resultClosedAt = DateTime.MinValue;
+
+    private static readonly string[] _categoryOrder = ["Artistic", "Fun", "Professional", "Abstract", "Mythological", "Regional", "Memorial", "PhotoCollage", "PhotoArts"];
 
     private IGrouping<string, StylePreset>[] GetFilteredGroups()
     {
@@ -328,7 +382,7 @@
     }
 
     private bool HasPlaceholders(StylePreset style)
-        => style.PromptTemplate.Contains("{{OCCASION}}") || style.PromptTemplate.Contains("{{MESSAGE}}") || style.PromptTemplate.Contains("{{CALENDAR}}") || style.PromptTemplate.Contains("{{NUMBER}}") || style.PromptTemplate.Contains("{{DATE}}");
+        => style.PromptTemplate.Contains("{{OCCASION}}") || style.PromptTemplate.Contains("{{MESSAGE}}") || style.PromptTemplate.Contains("{{CALENDAR}}") || style.PromptTemplate.Contains("{{NUMBER}}") || style.PromptTemplate.Contains("{{DATE}}") || style.PromptTemplate.Contains("{{NAME}}") || style.PromptTemplate.Contains("{{DOB}}") || style.PromptTemplate.Contains("{{DOD}}");
 
     private string ReplacePlaceholders(string prompt)
     {
@@ -380,6 +434,24 @@
             result = result.Replace("{{NUMBER}}", "");
         }
 
+        // NAME (memorial)
+        if (!string.IsNullOrWhiteSpace(_memorialName))
+            result = result.Replace("{{NAME}}", _memorialName.Trim());
+        else
+            result = result.Replace("{{NAME}}", "");
+
+        // DOB (memorial)
+        if (_memorialDob.HasValue)
+            result = result.Replace("{{DOB}}", _memorialDob.Value.ToString("dd-MM-yyyy"));
+        else
+            result = result.Replace("{{DOB}}", "");
+
+        // DOD (memorial)
+        if (_memorialDod.HasValue)
+            result = result.Replace("{{DOD}}", _memorialDod.Value.ToString("dd-MM-yyyy"));
+        else
+            result = result.Replace("{{DOD}}", "");
+
         // DATE — use date picker if set, fall back to text, or omit
         var dateStr = _datePickerValue?.ToString("dd-MM-yyyy") ?? _dateText?.Trim() ?? "";
         if (!string.IsNullOrWhiteSpace(dateStr))
@@ -398,7 +470,27 @@
     private async Task HandleTileClick(InputFileChangeEventArgs e, StylePreset style)
     {
         var file = e.File;
-        if (file is null || file.Size > 30 * 1024 * 1024 || _isProcessing) return;
+        if (file is null || _isProcessing) return;
+
+        // Guard: ignore file input events that fire right after closing the result modal
+        if ((DateTime.UtcNow - _resultClosedAt).TotalMilliseconds < 600) return;
+
+        // If file exceeds max upload size, ask user to confirm compression
+        if (file.Size > ImageUploadHelper.DefaultMaxUploadSize)
+        {
+            if (file.Size > ImageUploadHelper.MaxReadSize)
+            {
+                _error = $"File is too large ({FormatFileSize(file.Size)}). Maximum allowed is {FormatFileSize(ImageUploadHelper.MaxReadSize)}.";
+                StateHasChanged();
+                return;
+            }
+            _pendingFileSize = file.Size;
+            _pendingFileEvent = e;
+            _pendingFileStyle = style;
+            _pendingCompression = true;
+            StateHasChanged();
+            return;
+        }
 
         _selectedStyle = style;
         _error = null;
@@ -407,7 +499,7 @@
 
         try
         {
-            using var stream = file.OpenReadStream(30 * 1024 * 1024);
+            using var stream = file.OpenReadStream(ImageUploadHelper.MaxReadSize);
             _sourcePath = await ImageStorage.SaveUploadedFileAsync(stream, file.Name);
 
             // If Silhouette Contour, show face/body options modal first
@@ -416,6 +508,17 @@
                 _silhouetteOrientation = "side";
                 _silhouetteBodyType = "bust";
                 _pendingSilhouetteOptions = true;
+                StateHasChanged();
+                return;
+            }
+
+            // Memorial styles always need Name/DOB/DOD inputs
+            if (style.Category == "Memorial")
+            {
+                _memorialName = string.Empty;
+                _memorialDob = null;
+                _memorialDod = null;
+                _pendingPlaceholders = true;
                 StateHasChanged();
                 return;
             }
@@ -429,6 +532,9 @@
                 _numberValue = null;
                 _dateText = string.Empty;
                 _datePickerValue = null;
+                _memorialName = string.Empty;
+                _memorialDob = null;
+                _memorialDod = null;
                 _pendingPlaceholders = true;
                 StateHasChanged();
                 return;
@@ -456,8 +562,23 @@
             return;
         }
 
+        // Memorial Name is required
+        if (_selectedStyle.Category == "Memorial" && string.IsNullOrWhiteSpace(_memorialName))
+        {
+            _placeholderError = "Please enter the name.";
+            return;
+        }
+
         _placeholderError = null;
         _pendingPlaceholders = false;
+
+        // Memorial styles use a special pipeline: bg-removal → Gemini frame → text overlay
+        if (_selectedStyle.Category == "Memorial")
+        {
+            await RunMemorialGeneration();
+            return;
+        }
+
         var prompt = ReplacePlaceholders(_selectedStyle.PromptTemplate);
         await RunGeneration(prompt);
     }
@@ -505,6 +626,240 @@
                 : "Neck, shoulders, and upper body as simple contour outlines.";
 
             return $"Transform into a pure line art portrait in elegant side profile view. STRICT RULES: The ENTIRE image must consist of thin outline strokes ONLY. ABSOLUTELY NO filled areas, NO solid colors, NO shading, NO color blocks, NO gradients anywhere in the image — not on clothing, not on hair, not on skin, not on any element. Every single part of the subject — face, hair, neck, shoulders, body, clothing — must be rendered as open unfilled outlines only, like a coloring book page. Do NOT fill or color any clothing — jackets, shirts, dresses must be just outline edges. The subject shown in graceful side-facing profile. Face profile with clearly defined line features: eye with lashes, nose bridge and tip, lips, chin and jawline contour. Hair flowing with elegant sweeping line strokes — no filled hair, just strand outlines. {bodyDesc} All lines in fine warm golden-brown or dark gold color on a soft pale cream or warm ivory flat matte background. At the bottom: ornate golden decorative filigree scrollwork — curling vine patterns, swirls, floral ornamental vector art as a decorative border. No trophy, no award, no glass, no pedestal, no 3D objects. Style: pure outline drawing, premium invitation line art.";
+        }
+    }
+
+    /// <summary>
+    /// Special pipeline for Memorial styles:
+    /// 1. Remove background from uploaded photo
+    /// 2. Send bg-removed photo to Gemini to generate ornate frame + composited person
+    /// 3. Overlay Name, DOB, DOD text programmatically with ImageSharp
+    /// </summary>
+    private async Task RunMemorialGeneration()
+    {
+        if (_selectedStyle is null || _sourcePath is null) return;
+
+        // Debit coins
+        var authState2 = await AuthState.GetAuthenticationStateAsync();
+        var uidStr = authState2.User.FindFirstValue(ClaimTypes.NameIdentifier);
+        if (int.TryParse(uidStr, out var userId) && !authState2.User.IsInRole("SuperAdmin"))
+        {
+            var cost = FeatureAccess.GetCost(FeatureAccess.QuickStyle);
+            if (!await CoinService.DebitCoinsAsync(userId, cost, CoinTransactionType.GenerationSpend, "Quick Style generation"))
+            {
+                _error = "Insufficient coins. Please purchase more coins.";
+                return;
+            }
+        }
+
+        _isProcessing = true;
+        _processingStatus = "Removing background from your photo...";
+        _statusCts = new CancellationTokenSource();
+        StateHasChanged();
+        _ = RotateStatusMessages(_statusCts.Token);
+
+        const int targetW = 1440;
+        const int targetH = 2160;
+
+        try
+        {
+            // Step 1: Remove background
+            string refImagePath = _sourcePath!;
+            if (BgRemoval.IsAvailable)
+            {
+                try
+                {
+                    var bgResult = await BgRemoval.RemoveBackgroundAsync(_sourcePath!);
+                    refImagePath = bgResult.TransparentImagePath;
+                    await UpdateStatus("Background removed. Generating memorial frame...");
+                }
+                catch (Exception bgEx)
+                {
+                    Logger.LogWarning(bgEx, "Background removal failed for memorial, using original photo");
+                    await UpdateStatus("Generating memorial frame...");
+                }
+            }
+            else
+            {
+                await UpdateStatus("Generating memorial frame...");
+            }
+
+            // Step 2: Build prompt — strip the placeholder tokens (they're only kept for HasPlaceholders detection)
+            var prompt = _selectedStyle.PromptTemplate
+                .Replace("{{NAME}}", "").Replace("{{DOB}}", "").Replace("{{DOD}}", "").Trim();
+
+            // Prepend face lock
+            var sb = new StringBuilder();
+            sb.Append("FACE LOCK (HIGHEST PRIORITY): The face of the person in the output MUST be a PHOTOREALISTIC, EXACT copy of their face from the reference photo. Same face shape, nose, eyes, eyebrows, lips, jawline, skin tone. Do NOT alter any facial feature. The reference image has the background already removed — place this person EXACTLY as-is into the circular frame area. Do NOT regenerate or reimagine the person — use the EXACT reference image person. ");
+            sb.Append(prompt);
+            sb.Append(" OUTPUT: Highest quality, photorealistic person, exact 2:3 portrait aspect ratio.");
+
+            var request = new GenerationRequest
+            {
+                Prompt = sb.ToString(),
+                Width = targetW,
+                Height = targetH,
+                SizeName = "20x30",
+                EnhancePrompt = false,
+                ReferenceImagePaths = [refImagePath],
+                Provider = ImageProvider.Gemini,
+                SkipMultiImageComposition = true
+            };
+
+            _result = await ImageGenService.GenerateImageAsync(request);
+
+            if (_result is null)
+            {
+                _error = "Image generation returned no result. Please try again.";
+                return;
+            }
+
+            if (_result.Success)
+            {
+                await UpdateStatus("Perfecting the final composition...");
+                await EnforceAspectRatio(targetW, targetH);
+
+                // Step 3: Overlay text (Name, DOB, DOD) programmatically
+                await UpdateStatus("Adding memorial text...");
+                await OverlayMemorialText();
+                _imgVersion++; // bust browser cache so the text-overlaid image is shown
+            }
+            else
+            {
+                _error = _result.ErrorMessage;
+            }
+        }
+        catch (Exception ex)
+        {
+            Logger.LogError(ex, "Memorial generation failed for style {StyleName}", _selectedStyle?.Name);
+            _error = "An unexpected error occurred. Please try again.";
+        }
+        finally
+        {
+            _statusCts?.Cancel();
+            _statusCts?.Dispose();
+            _statusCts = null;
+            _isProcessing = false;
+            StateHasChanged();
+        }
+    }
+
+    /// <summary>
+    /// Overlays Name, DOB, DOD text on the bottom area of the memorial image
+    /// with bold outlined text (fill + stroke) for a professional print look.
+    /// </summary>
+    private async Task OverlayMemorialText()
+    {
+        if (_result?.LocalImagePath is null) return;
+
+        try
+        {
+            var fullPath = System.IO.Path.Combine(Env.WebRootPath,
+                _result.LocalImagePath.Replace("/", System.IO.Path.DirectorySeparatorChar.ToString()));
+            if (!File.Exists(fullPath)) return;
+
+            var imageBytes = await File.ReadAllBytesAsync(fullPath);
+            using var img = Image.Load<Rgba32>(imageBytes);
+
+            // Find a bold serif-style font for professional memorial look
+            FontFamily family;
+            if (!SystemFonts.TryGet("Georgia", out family) &&
+                !SystemFonts.TryGet("Times New Roman", out family) &&
+                !SystemFonts.TryGet("Segoe UI", out family) &&
+                !SystemFonts.TryGet("Arial", out family))
+            {
+                family = SystemFonts.Families.First();
+            }
+
+            var imgW = img.Width;
+            var imgH = img.Height;
+
+            // Text area: bottom 16% of image
+            var textAreaTop = (int)(imgH * 0.84);
+            var textAreaHeight = imgH - textAreaTop;
+            var centerX = imgW / 2f;
+
+            // Scale font sizes based on image width for consistent look at any resolution
+            var nameFontSize = imgW * 0.055f;  // ~80px on 1440w, ~198px on 3600w
+            var nameFont = family.CreateFont(nameFontSize, FontStyle.Bold);
+            var dateFontSize = imgW * 0.032f;  // ~46px on 1440w, ~115px on 3600w
+            var dateFont = family.CreateFont(dateFontSize, FontStyle.Bold);
+
+            // Outline thickness scales with image size
+            var nameOutlineWidth = Math.Max(2f, imgW * 0.003f);  // ~4px on 1440w, ~11px on 3600w
+            var dateOutlineWidth = Math.Max(1.5f, imgW * 0.002f); // ~3px on 1440w, ~7px on 3600w
+
+            // Colors
+            var nameColor = Color.White;
+            var nameOutlineColor = Color.ParseHex("#1A1A1A");
+            var dateColor = Color.ParseHex("#FFD700"); // gold
+            var dateOutlineColor = Color.ParseHex("#3D2B00"); // dark gold/brown
+
+            // Build date line
+            var dateParts = new List<string>();
+            if (_memorialDob.HasValue)
+                dateParts.Add($"DOB: {_memorialDob.Value:dd-MM-yyyy}");
+            if (_memorialDod.HasValue)
+                dateParts.Add($"DOD: {_memorialDod.Value:dd-MM-yyyy}");
+            var dateLine = string.Join("     ", dateParts);
+
+            // Name vertical position: 30% into text area
+            var nameY = textAreaTop + textAreaHeight * 0.30f;
+            // Date vertical position: 75% into text area
+            var dateY = textAreaTop + textAreaHeight * 0.75f;
+
+            img.Mutate(ctx =>
+            {
+                // ── Draw Name with outline ──
+                if (!string.IsNullOrWhiteSpace(_memorialName))
+                {
+                    var nameText = _memorialName.Trim().ToUpper();
+                    var nameOpts = new RichTextOptions(nameFont)
+                    {
+                        Origin = new System.Numerics.Vector2(centerX, nameY),
+                        HorizontalAlignment = HorizontalAlignment.Center,
+                        VerticalAlignment = VerticalAlignment.Center
+                    };
+
+                    // Build glyph paths for fill + stroke
+                    var nameGlyphs = TextBuilder.GenerateGlyphs(nameText, nameOpts);
+
+                    // 1) Draw dark outline (stroke) around the name
+                    ctx.Draw(new SixLabors.ImageSharp.Drawing.Processing.DrawingOptions(),
+                        new SolidPen(nameOutlineColor, nameOutlineWidth), nameGlyphs);
+                    // 2) Fill the name text on top
+                    ctx.Fill(nameColor, nameGlyphs);
+                }
+
+                // ── Draw Dates with outline ──
+                if (!string.IsNullOrWhiteSpace(dateLine))
+                {
+                    var dateOpts = new RichTextOptions(dateFont)
+                    {
+                        Origin = new System.Numerics.Vector2(centerX, dateY),
+                        HorizontalAlignment = HorizontalAlignment.Center,
+                        VerticalAlignment = VerticalAlignment.Center
+                    };
+
+                    var dateGlyphs = TextBuilder.GenerateGlyphs(dateLine, dateOpts);
+
+                    // 1) Dark outline
+                    ctx.Draw(new SixLabors.ImageSharp.Drawing.Processing.DrawingOptions(),
+                        new SolidPen(dateOutlineColor, dateOutlineWidth), dateGlyphs);
+                    // 2) Gold fill
+                    ctx.Fill(dateColor, dateGlyphs);
+                }
+            });
+
+            await using var ms = new MemoryStream();
+            await img.SaveAsPngAsync(ms);
+            await File.WriteAllBytesAsync(fullPath, ms.ToArray());
+
+            Logger.LogInformation("Memorial text overlay applied: {Name}", _memorialName);
+        }
+        catch (Exception ex)
+        {
+            Logger.LogWarning(ex, "Memorial text overlay failed (non-fatal, image still usable)");
         }
     }
 
@@ -772,6 +1127,15 @@
         }
     }
 
+    private void CloseResult()
+    {
+        _resultClosedAt = DateTime.UtcNow;
+        _result = null;
+        _sourcePath = null;
+        _error = null;
+        _selectedStyle = null;
+    }
+
     private void StartOver()
     {
         _result = null;
@@ -779,6 +1143,90 @@
         _error = null;
         _selectedStyle = null;
     }
+
+    private async Task AcceptCompression()
+    {
+        if (_pendingFileEvent is null || _pendingFileStyle is null) return;
+
+        _pendingCompression = false;
+        _selectedStyle = _pendingFileStyle;
+        _error = null;
+        _result = null;
+        _placeholderError = null;
+
+        try
+        {
+            var file = _pendingFileEvent.File;
+            using var stream = file.OpenReadStream(ImageUploadHelper.MaxReadSize);
+            using var ms = new MemoryStream();
+            await stream.CopyToAsync(ms);
+            var rawBytes = ms.ToArray();
+
+            // Resize dimensions to bring file size under the limit (no quality reduction)
+            using var outMs = ImageUploadHelper.CompressToFit(rawBytes, file.Name);
+            _sourcePath = await ImageStorage.SaveUploadedFileAsync(outMs, file.Name);
+            Logger.LogInformation("Compressed oversized image: {OrigSize} → {NewSize}",
+                ImageUploadHelper.FormatFileSize(_pendingFileSize), ImageUploadHelper.FormatFileSize(outMs.Length));
+
+            _pendingFileEvent = null;
+            _pendingFileStyle = null;
+
+            // Continue with the normal flow
+            var style = _selectedStyle;
+
+            if (style.Name == "Silhouette Contour")
+            {
+                _silhouetteOrientation = "side";
+                _silhouetteBodyType = "bust";
+                _pendingSilhouetteOptions = true;
+                StateHasChanged();
+                return;
+            }
+
+            if (style.Category == "Memorial")
+            {
+                _memorialName = string.Empty;
+                _memorialDob = null;
+                _memorialDod = null;
+                _pendingPlaceholders = true;
+                StateHasChanged();
+                return;
+            }
+
+            if (HasPlaceholders(style))
+            {
+                _occasionText = string.Empty;
+                _messageText = string.Empty;
+                _calendarDate = null;
+                _numberValue = null;
+                _dateText = string.Empty;
+                _datePickerValue = null;
+                _memorialName = string.Empty;
+                _memorialDob = null;
+                _memorialDod = null;
+                _pendingPlaceholders = true;
+                StateHasChanged();
+                return;
+            }
+
+            await RunGeneration(style.PromptTemplate);
+        }
+        catch (Exception ex)
+        {
+            Logger.LogError(ex, "Image compression failed");
+            _error = "Failed to compress the image. Please try a smaller file.";
+            StateHasChanged();
+        }
+    }
+
+    private void CancelCompression()
+    {
+        _pendingCompression = false;
+        _pendingFileEvent = null;
+        _pendingFileStyle = null;
+    }
+
+    private static string FormatFileSize(long bytes) => ImageUploadHelper.FormatFileSize(bytes);
 
     private Task DownloadPng() => DownloadAs("png");
     private Task DownloadJpg() => DownloadAs("jpg");

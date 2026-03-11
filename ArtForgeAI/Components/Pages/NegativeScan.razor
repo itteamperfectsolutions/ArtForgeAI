@@ -166,6 +166,10 @@
                                 @onclick='() => Download4x("original")' disabled="@_isDownloading">
                             &#128200; Original 4x
                         </button>
+                        <button class="btn-secondary" style="font-size: 0.85rem; padding: 0.4rem 0.85rem;"
+                                @onclick="StartNew">
+                            &#10024; Process Another
+                        </button>
                     </div>
                     @if (_isDownloading)
                     {
@@ -199,6 +203,10 @@
                                 @onclick='() => Download4x("original")' disabled="@_isDownloading">
                             &#128200; Download 4x
                         </button>
+                        <button class="btn-secondary" style="font-size: 0.85rem; padding: 0.4rem 0.85rem;"
+                                @onclick="StartNew">
+                            &#10024; Process Another
+                        </button>
                     </div>
                     @if (_isDownloading)
                     {
@@ -217,10 +225,29 @@
                         Further restore clarity, remove grain/dust/scratches, preserve facial features
                     </p>
                 }
+                <div class="ai-disclaimer">
+                    AI-generated image — minor variations in facial features, colours, and details may occur. For best results, try regenerating if needed.
+                </div>
             </div>
         }
     </div>
 </div>
+
+@* ── Image too large — compression confirmation ── *@
+@if (_pendingCompression)
+{
+    <div class="pp-processing-overlay">
+        <div class="pp-processing-modal" style="max-width:400px;">
+            <h4 style="margin:0 0 0.75rem;">Image Too Large</h4>
+            <p style="margin:0 0 0.5rem;font-size:0.9rem;color:var(--text-secondary);">Your image (@ImageUploadHelper.FormatFileSize(_pendingFileSize)) exceeds the @ImageUploadHelper.FormatFileSize(ImageUploadHelper.DefaultMaxUploadSize) limit.</p>
+            <p style="margin:0 0 1rem;font-size:0.9rem;color:var(--text-secondary);">It will be resized to fit within the limit while preserving quality.</p>
+            <div style="display:flex;gap:0.5rem;justify-content:center;">
+                <button class="btn-primary-gradient" @onclick="AcceptCompression">Resize &amp; Continue</button>
+                <button class="btn-secondary" @onclick="CancelCompression">&times; Cancel</button>
+            </div>
+        </div>
+    </div>
+}
 
 @* ── Processing overlay ── *@
 @if (_isProcessing)
@@ -257,6 +284,11 @@
     private int _downloadProgress;
     private string _downloadStatus = "";
 
+    // Image compression confirmation state
+    private bool _pendingCompression;
+    private long _pendingFileSize;
+    private InputFileChangeEventArgs? _pendingFileEvent;
+
     // ── Lifecycle ──
 
     protected override async Task OnInitializedAsync()
@@ -276,6 +308,65 @@
         }
     }
 
+    private async Task AcceptCompression()
+    {
+        if (_pendingFileEvent is null) return;
+
+        _pendingCompression = false;
+        _isUploading = true;
+        _errorMessage = null;
+        StateHasChanged();
+
+        try
+        {
+            var file = _pendingFileEvent.File;
+            using var readMs = new MemoryStream();
+            await file.OpenReadStream(ImageUploadHelper.MaxReadSize).CopyToAsync(readMs);
+
+            using var compressed = ImageUploadHelper.CompressToFit(readMs.ToArray(), file.Name);
+            _uploadedPath = await ImageStorage.SaveUploadedFileAsync(compressed, file.Name);
+            _resultReady = false;
+            _aiEnhanced = false;
+            _enhancedImagePath = null;
+        }
+        catch (Exception ex)
+        {
+            Logger.LogError(ex, "Image compression failed");
+            _errorMessage = "Failed to compress the image. Please try a smaller file.";
+            return;
+        }
+        finally
+        {
+            _pendingFileEvent = null;
+            _isUploading = false;
+            StateHasChanged();
+        }
+
+        // Init crop tool on the uploaded image
+        if (!string.IsNullOrEmpty(_uploadedPath))
+        {
+            await Task.Delay(150);
+            try
+            {
+                var fullPath = ResolveFullPath(_uploadedPath);
+                var imageBytes = await File.ReadAllBytesAsync(fullPath);
+                var ext = _uploadedPath.EndsWith(".png", StringComparison.OrdinalIgnoreCase) ? "png" : "jpeg";
+                var dataUrl = $"data:image/{ext};base64," + Convert.ToBase64String(imageBytes);
+                await JS.InvokeVoidAsync("negativeScan.initCropTool", "nsCropArea", dataUrl);
+            }
+            catch (Exception jsEx)
+            {
+                Logger.LogWarning(jsEx, "Crop tool init failed");
+            }
+        }
+    }
+
+    private void CancelCompression()
+    {
+        _pendingCompression = false;
+        _pendingFileEvent = null;
+    }
+
     public void Dispose()
     {
         try { JS.InvokeVoidAsync("negativeScan.dispose"); } catch { }
@@ -285,20 +376,32 @@
 
     private async Task HandleFileUpload(InputFileChangeEventArgs e)
     {
+        var file = e.File;
+        if (file is null) return;
+
+        // If file exceeds max upload size, ask user to confirm compression
+        if (file.Size > ImageUploadHelper.DefaultMaxUploadSize)
+        {
+            if (file.Size > ImageUploadHelper.MaxReadSize)
+            {
+                _errorMessage = $"File is too large ({ImageUploadHelper.FormatFileSize(file.Size)}). Maximum allowed is {ImageUploadHelper.FormatFileSize(ImageUploadHelper.MaxReadSize)}.";
+                StateHasChanged();
+                return;
+            }
+            _pendingFileSize = file.Size;
+            _pendingFileEvent = e;
+            _pendingCompression = true;
+            StateHasChanged();
+            return;
+        }
+
         _isUploading = true;
         _errorMessage = null;
         StateHasChanged();
 
         try
         {
-            var file = e.File;
-            if (file.Size > 10 * 1024 * 1024)
-            {
-                _errorMessage = "File size must be under 10MB.";
-                return;
-            }
-
-            using var stream = file.OpenReadStream(10 * 1024 * 1024);
+            using var stream = file.OpenReadStream(ImageUploadHelper.MaxReadSize);
             _uploadedPath = await ImageStorage.SaveUploadedFileAsync(stream, file.Name);
             _resultReady = false;
             _aiEnhanced = false;
@@ -599,6 +702,14 @@
             _downloadStatus = "";
             StateHasChanged();
         }
+    }
+
+    // ── Start New ──
+
+    private async Task StartNew()
+    {
+        await RemovePhoto();
+        StateHasChanged();
     }
 
     // ── Remove photo ──

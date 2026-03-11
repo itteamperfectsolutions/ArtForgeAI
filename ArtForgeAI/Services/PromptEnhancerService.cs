@@ -270,6 +270,9 @@ public partial class PromptEnhancerService : IPromptEnhancerService
         sb.Append(", ");
         sb.Append(style.Atmosphere);
 
+        // Proportion guidance
+        sb.Append(". All objects must have correct real-world proportions and scale relative to each other");
+
         // Provider-specific additions
         if (provider == ImageProvider.Replicate)
         {
@@ -398,10 +401,19 @@ public partial class PromptEnhancerService : IPromptEnhancerService
         1. PRESERVE the user's EXACT intent — never change what they asked for
         2. ENHANCE with professional detail — add what's missing, not what contradicts
         3. USE the provided style direction — do not ignore it
+        4. REALISTIC PROPORTIONS — all objects must have correct real-world scale relative to each other.
+           A pen must be pen-sized, a frame must be frame-sized, a person must be person-sized.
+           Explicitly state size relationships when multiple objects appear together.
 
         ## PROMPT STRUCTURE
         Subject → Setting → Style ({ART_STYLE}) → Lighting ({LIGHTING}) →
         Color ({COLOR_PALETTE}) → Mood ({ATMOSPHERE}) → Technical → Quality
+
+        ## PROPORTION GUIDELINES
+        When the prompt mentions real-world objects together, ALWAYS specify their relative sizes:
+        - "a pen (15cm) resting beside a photo frame (20cm tall)" NOT just "a pen and a frame"
+        - "a small coffee cup next to a large laptop" NOT just "a coffee cup and laptop"
+        - If a reference image is provided, objects added to the scene must match the scale of subjects in the image
 
         ## PROVIDER NOTES
         {PROVIDER_GUIDELINES}
@@ -410,6 +422,7 @@ public partial class PromptEnhancerService : IPromptEnhancerService
         - Concrete nouns over vague adjectives
         - Spatial relationships, textures, materials, micro-details
         - Sensory language
+        - Explicit size/scale references for all objects
 
         Under 900 chars (DALL-E/Gemini) or 500 chars (FLUX). Output ONLY the prompt.
         """;
@@ -434,6 +447,9 @@ public partial class PromptEnhancerService : IPromptEnhancerService
         - Focus on what to DO: scene, environment, style, mood, composition
         - Keep it concise and action-oriented
         - Do NOT ask questions or provide commentary — output ONLY the editing instruction
+        - REALISTIC PROPORTIONS: Any objects mentioned must have correct real-world scale.
+          Specify approximate sizes when adding objects (e.g. "a standard-sized pen (15cm)", "a small gift box (10cm)").
+          Objects must be proportional to the subjects already in the image.
 
         {PROVIDER_GUIDELINES}
 
@@ -459,6 +475,9 @@ public partial class PromptEnhancerService : IPromptEnhancerService
         4. Include the user's specific instructions about composition, setting, and arrangement
         5. Do NOT drop, ignore, or merge any subject — EVERY reference image subject must appear
         6. Specify the scene, lighting, and mood to make the composition look natural
+        7. REALISTIC PROPORTIONS: All objects and subjects must have correct real-world scale relative to each other.
+           A pen should be pen-sized, a person should be person-sized, a frame should be frame-sized.
+           Specify approximate real-world dimensions when combining objects of different types.
 
         ## FORMAT
         Start with: "Combine the subjects from all provided reference images into a single scene."
@@ -493,6 +512,8 @@ public partial class PromptEnhancerService : IPromptEnhancerService
         2. For EACH instruction, write a clear, specific directive
         3. Combine them into a single cohesive editing prompt
         4. Preserve the subject's identity unless the user says otherwise
+        5. REALISTIC PROPORTIONS: Any objects mentioned must have correct real-world scale.
+           Specify sizes when adding objects to ensure they are proportional to existing subjects.
 
         ## FORMAT
         Write a direct command: "Remove X", "Change Y to Z", "Add W", "Place..."

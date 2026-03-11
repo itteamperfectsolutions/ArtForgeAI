@@ -30,7 +30,7 @@
                         @if (!string.IsNullOrEmpty(Generation.EnhancedPrompt))
                         {
                             <div class="prompt-text" style="margin-bottom:0.5rem;">
-                                <strong>Enhanced prompt:</strong> @Generation.EnhancedPrompt
+                                <strong>Enhanced prompt:</strong> @StripModelPrefix(Generation.EnhancedPrompt)
                             </div>
                         }
                         <div class="prompt-text" style="margin-bottom:0;">
@@ -103,6 +103,14 @@
     private long _imgVersion;
 
     private void ToggleZoom() => _zoomed = !_zoomed;
+
+    private static string StripModelPrefix(string text)
+    {
+        // Remove [model-name] prefix from old saved data
+        if (text.StartsWith('[') && text.IndexOf(']') is int idx and > 0)
+            return text[(idx + 1)..].TrimStart();
+        return text;
+    }
 
     private Task DownloadPng() => DownloadAs("png");
     private Task DownloadJpg() => DownloadAs("jpg");

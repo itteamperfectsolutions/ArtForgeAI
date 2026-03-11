@@ -17,6 +17,7 @@
 @inject NavigationManager Nav
 @inject IImageEnhancerService ImageEnhancer
 @inject IColorEnhancementService ColorEnhancer
+@inject IImageGenerationService ImageGenService
 @implements IDisposable
 
 <PageTitle>ArtForge AI - Passport Photo</PageTitle>
@@ -200,6 +201,16 @@
                             </div>
                         }
                     }
+
+                    <hr style="margin: 0.5rem 0; border-color: var(--border-color);" />
+
+                    <button class="btn-primary-gradient" style="width:100%;padding:0.5rem;font-size:0.88rem;"
+                            @onclick="AiPassportAdjust" disabled="@_isProcessing">
+                        &#10024; AI Passport Adjust
+                    </button>
+                    <p style="font-size:0.68rem;color:var(--text-muted);margin:0.2rem 0 0 0;">
+                        AI reframes your photo into a proper passport photo with white background, centered face, and correct proportions
+                    </p>
                 }
             </div>
         </div>
@@ -232,6 +243,9 @@
                     </button>
                     <button class="btn-secondary" style="font-size: 0.85rem; padding: 0.4rem 0.85rem;" @onclick="DownloadPassportJpg">
                         Download Photo JPG
+                    </button>
+                    <button class="btn-secondary" style="font-size: 0.85rem; padding: 0.4rem 0.85rem;" @onclick="StartNew">
+                        &#10024; Process Another
                     </button>
                     @if (ImageEnhancer.IsAvailable)
                     {
@@ -272,6 +286,22 @@
     </div>
 </div>
 
+@* ── Image too large — compression confirmation ── *@
+@if (_pendingCompression)
+{
+    <div class="pp-processing-overlay">
+        <div class="pp-processing-modal" style="max-width:400px;">
+            <h4 style="margin:0 0 0.75rem;">Image Too Large</h4>
+            <p style="margin:0 0 0.5rem;font-size:0.9rem;color:var(--text-secondary);">Your image (@ImageUploadHelper.FormatFileSize(_pendingFileSize)) exceeds the @ImageUploadHelper.FormatFileSize(ImageUploadHelper.DefaultMaxUploadSize) limit.</p>
+            <p style="margin:0 0 1rem;font-size:0.9rem;color:var(--text-secondary);">It will be resized to fit within the limit while preserving quality.</p>
+            <div style="display:flex;gap:0.5rem;justify-content:center;">
+                <button class="btn-primary-gradient" @onclick="AcceptCompression">Resize &amp; Continue</button>
+                <button class="btn-secondary" @onclick="CancelCompression">&times; Cancel</button>
+            </div>
+        </div>
+    </div>
+}
+
 @* ── Processing modal overlay ── *@
 @if (_isProcessing)
 {
@@ -279,6 +309,46 @@
         <div class="pp-processing-modal">
             <div class="processing-spinner" style="width:36px;height:36px;margin:0 auto 1rem;"></div>
             <p style="margin:0;font-size:0.95rem;color:var(--text-primary);">@_processingStatus</p>
+        </div>
+    </div>
+}
+
+@* ── AI Compare overlay ── *@
+@if (_showAiCompare)
+{
+    <div class="pp-processing-overlay" style="z-index:1000;">
+        <div style="background:var(--bg-primary);border-radius:var(--radius-lg);padding:1.25rem;max-width:700px;width:95%;max-height:90vh;overflow-y:auto;box-shadow:0 8px 32px rgba(0,0,0,0.4);">
+            <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:0.75rem;">
+                <span style="font-weight:600;font-size:1rem;color:var(--text-primary);">AI Passport Adjust — Compare</span>
+                <button class="gs-design-remove" @onclick="RejectAiResult" style="width:24px;height:24px;">✕</button>
+            </div>
+            <div style="display:grid;grid-template-columns:1fr 1fr;gap:0.75rem;">
+                <div style="text-align:center;">
+                    <span style="display:block;font-size:0.78rem;font-weight:500;color:var(--text-muted);margin-bottom:0.35rem;">Original</span>
+                    <div style="border-radius:var(--radius-sm);overflow:hidden;background:var(--bg-tertiary);">
+                        <img src="@_aiCompareOriginalUrl" alt="Original"
+                             style="max-width:100%;max-height:350px;display:block;margin:0 auto;object-fit:contain;" />
+                    </div>
+                </div>
+                <div style="text-align:center;">
+                    <span style="display:block;font-size:0.78rem;font-weight:500;color:var(--text-muted);margin-bottom:0.35rem;">AI Adjusted</span>
+                    <div style="border-radius:var(--radius-sm);overflow:hidden;background:var(--bg-tertiary);">
+                        <img src="@_aiCompareResultUrl" alt="AI Adjusted"
+                             style="max-width:100%;max-height:350px;display:block;margin:0 auto;object-fit:contain;" />
+                    </div>
+                </div>
+            </div>
+            <p style="font-size:0.72rem;color:var(--text-muted);margin:0.5rem 0 0.75rem 0;text-align:center;">
+                Compare facial features. Accept to use the AI result, or reject to keep the original.
+            </p>
+            <div style="display:flex;gap:0.5rem;justify-content:center;">
+                <button class="btn-primary-gradient" style="padding:0.5rem 1.5rem;font-size:0.9rem;" @onclick="AcceptAiResult">
+                    &#10004; Accept &amp; Use
+                </button>
+                <button class="btn-secondary" style="padding:0.5rem 1.5rem;font-size:0.9rem;" @onclick="RejectAiResult">
+                    &#10006; Reject
+                </button>
+            </div>
         </div>
     </div>
 }
@@ -293,6 +363,18 @@
     private bool _isColorEnhancing;
     private string _processingStatus = "";
     private string? _errorMessage;
+
+    // Image compression confirmation state
+    private bool _pendingCompression;
+    private long _pendingFileSize;
+    private InputFileChangeEventArgs? _pendingFileEvent;
+
+    // AI Compare state
+    private bool _showAiCompare;
+    private string? _aiCompareOriginalUrl;
+    private string? _aiCompareResultUrl;
+    private byte[]? _aiResultBytes;
+    private string? _aiResultLocalPath;
 
     // Print sheet settings
     private string _selectedPaper = "4\u00d76\"";
@@ -358,6 +440,38 @@
         }
     }
 
+    private async Task AcceptCompression()
+    {
+        if (_pendingFileEvent is null) return;
+
+        _pendingCompression = false;
+
+        try
+        {
+            var file = _pendingFileEvent.File;
+            using var readMs = new MemoryStream();
+            await file.OpenReadStream(ImageUploadHelper.MaxReadSize).CopyToAsync(readMs);
+            var compressed = ImageUploadHelper.CompressToFit(readMs.ToArray(), file.Name);
+            await ProcessUpload(_pendingFileEvent, compressed);
+        }
+        catch (Exception ex)
+        {
+            Logger.LogError(ex, "Image compression failed");
+            _errorMessage = "Failed to compress the image. Please try a smaller file.";
+            StateHasChanged();
+        }
+        finally
+        {
+            _pendingFileEvent = null;
+        }
+    }
+
+    private void CancelCompression()
+    {
+        _pendingCompression = false;
+        _pendingFileEvent = null;
+    }
+
     public void Dispose()
     {
         try { JS.InvokeVoidAsync("passportPhoto.dispose"); } catch { }
@@ -366,6 +480,30 @@
     // ── Upload → show crop tool + auto generate sheet ──
 
     private async Task HandleFileUpload(InputFileChangeEventArgs e)
+    {
+        var file = e.File;
+        if (file is null) return;
+
+        // Check file size FIRST before debiting coins
+        if (file.Size > ImageUploadHelper.DefaultMaxUploadSize)
+        {
+            if (file.Size > ImageUploadHelper.MaxReadSize)
+            {
+                _errorMessage = $"File is too large ({ImageUploadHelper.FormatFileSize(file.Size)}). Maximum allowed is {ImageUploadHelper.FormatFileSize(ImageUploadHelper.MaxReadSize)}.";
+                StateHasChanged();
+                return;
+            }
+            _pendingFileSize = file.Size;
+            _pendingFileEvent = e;
+            _pendingCompression = true;
+            StateHasChanged();
+            return;
+        }
+
+        await ProcessUpload(e);
+    }
+
+    private async Task ProcessUpload(InputFileChangeEventArgs e, MemoryStream? compressedStream = null)
     {
         _isUploading = true;
         _errorMessage = null;
@@ -388,14 +526,15 @@
         try
         {
             var file = e.File;
-            if (file.Size > 10 * 1024 * 1024)
+            if (compressedStream is not null)
             {
-                _errorMessage = "File size must be under 10MB.";
-                return;
+                _uploadedPath = await ImageStorage.SaveUploadedFileAsync(compressedStream, file.Name);
             }
-
-            using var stream = file.OpenReadStream(10 * 1024 * 1024);
-            _uploadedPath = await ImageStorage.SaveUploadedFileAsync(stream, file.Name);
+            else
+            {
+                using var stream = file.OpenReadStream(ImageUploadHelper.MaxReadSize);
+                _uploadedPath = await ImageStorage.SaveUploadedFileAsync(stream, file.Name);
+            }
             _sheetReady = false;
         }
         catch (Exception ex)
@@ -447,17 +586,31 @@
                 _transparentPngCache = bgResult.TransparentPngBytes;
                 _bgRemovedDataUrl = await Task.Run(() => CompositeOnColour(bgResult.TransparentPngBytes, _selectedBgColor));
 
-                // Convert subject bounds to face estimates for crop positioning
-                // For portrait photos: head ≈ top of subject, face ≈ upper 45% of subject
-                double subjectH = bgResult.SubjectBottom - bgResult.SubjectTop;
-                double subjectCX = (bgResult.SubjectLeft + bgResult.SubjectRight) / 2.0;
-                double subjectW = bgResult.SubjectRight - bgResult.SubjectLeft;
+                // Estimate face region from subject bounds for crop positioning
+                double subH = bgResult.SubjectBottom - bgResult.SubjectTop;
+                double subW = bgResult.SubjectRight - bgResult.SubjectLeft;
+                double subCX = (bgResult.SubjectLeft + bgResult.SubjectRight) / 2.0;
+
+                // Face (crown-to-chin) ratio relative to visible subject height.
+                // Human head = ~1/7.5 of full body height.
+                // Use subject width/height aspect to determine body coverage:
+                //   Wide+short = headshot, narrow+tall = full body
+                double subAspect = subW / Math.Max(0.01, subH);
+                double faceRatio = subAspect > 0.9 ? 0.75   // very close-up (mostly head)
+                                 : subAspect > 0.7 ? 0.45   // head + neck
+                                 : subAspect > 0.5 ? 0.28   // head + shoulders
+                                 : subAspect > 0.3 ? 0.18   // half body
+                                 : 0.12;                     // full body
 
                 double faceTop = bgResult.SubjectTop;
-                double faceBottom = bgResult.SubjectTop + subjectH * 0.45;
-                double faceLeft = subjectCX - subjectW * 0.3;
-                double faceRight = subjectCX + subjectW * 0.3;
-                double eyeLineY = bgResult.SubjectTop + subjectH * 0.18;
+                double faceBottom = bgResult.SubjectTop + subH * faceRatio;
+                double faceH = faceBottom - faceTop;
+                double eyeLineY = faceTop + faceH * 0.45;
+
+                // Pass face left/right for horizontal centering (narrower than subject)
+                double faceHalfW = subW * 0.30;
+                double faceLeft = subCX - faceHalfW;
+                double faceRight = subCX + faceHalfW;
 
                 await JS.InvokeVoidAsync("passportPhoto.setCropBoxFromFaceDetection",
                     faceTop, faceBottom, faceLeft, faceRight, eyeLineY);
@@ -871,6 +1024,179 @@
             _isColorEnhancing = false;
             StateHasChanged();
         }
+    }
+
+    // ── AI Passport Adjust ──
+
+    private async Task AiPassportAdjust()
+    {
+        if (string.IsNullOrEmpty(_uploadedPath)) return;
+
+        // Debit coins
+        var authStateC = await AuthState.GetAuthenticationStateAsync();
+        var uidStrC = authStateC.User.FindFirstValue(System.Security.Claims.ClaimTypes.NameIdentifier);
+        if (int.TryParse(uidStrC, out var userIdC) && !authStateC.User.IsInRole("SuperAdmin"))
+        {
+            var cost = ArtForgeAI.Models.FeatureAccess.GetCost("PassportPhoto");
+            if (!await CoinService.DebitCoinsAsync(userIdC, cost, ArtForgeAI.Models.CoinTransactionType.GenerationSpend, "AI Passport Adjust"))
+            {
+                _errorMessage = "Insufficient coins. Please top up to continue.";
+                StateHasChanged();
+                return;
+            }
+        }
+
+        _isProcessing = true;
+        _processingStatus = "AI adjusting photo for passport...";
+        _errorMessage = null;
+        StateHasChanged();
+
+        try
+        {
+            var fullPath = ResolveFullPath(_uploadedPath);
+
+            var prompt = "Transform this photo into a professional studio-quality passport photograph. " +
+                         "Requirements: " +
+                         "1. Pure white background (#FFFFFF). " +
+                         "2. Face must be perfectly straight, centered, and looking directly at the camera. " +
+                         "3. Frame the person from the top of the head down to the elbows — include head, neck, shoulders, and upper arms. " +
+                         "This gives extra space above and below the face for the user to crop precisely later. " +
+                         "4. The face should be approximately 50-60% of the total frame height (NOT tightly cropped). " +
+                         "5. Even, soft studio lighting with no harsh shadows on the face or background. " +
+                         "6. Neutral facial expression with mouth closed. " +
+                         "7. Eyes open and clearly visible. " +
+                         "8. Sharp focus on the face, natural skin texture. " +
+                         "CRITICAL: Preserve the EXACT facial features, skin tone, hair style, and identity of the person. " +
+                         "Do NOT change the person's appearance, age, ethnicity, or any identifying features. " +
+                         "The result must look like the same person photographed in a professional passport studio." +
+                         ArtForgeAI.Models.StylePreset.FacialIdentitySuffix;
+
+            var request = new ArtForgeAI.Models.GenerationRequest
+            {
+                Prompt = prompt,
+                ReferenceImagePaths = [fullPath],
+                Provider = ArtForgeAI.Models.ImageProvider.Gemini,
+                EnhancePrompt = false,
+                Width = 826,
+                Height = 1062,
+                UserId = uidStrC ?? "default"
+            };
+
+            _processingStatus = "Generating passport photo with AI (this may take a moment)...";
+            StateHasChanged();
+
+            var result = await ImageGenService.GenerateImageAsync(request);
+
+            if (result.Success && !string.IsNullOrEmpty(result.LocalImagePath))
+            {
+                // Read the AI-generated passport photo
+                var aiFullPath = ResolveFullPath(result.LocalImagePath);
+                var aiBytes = await File.ReadAllBytesAsync(aiFullPath);
+                var aiDataUrl = "data:image/png;base64," + Convert.ToBase64String(aiBytes);
+
+                // Store for comparison — don't apply yet
+                _aiCompareOriginalUrl = _originalDataUrl;
+                _aiCompareResultUrl = aiDataUrl;
+                _aiResultBytes = aiBytes;
+                _aiResultLocalPath = result.LocalImagePath;
+                _showAiCompare = true;
+            }
+            else
+            {
+                _errorMessage = "AI passport adjust failed: " + (result.ErrorMessage ?? "Unknown error");
+            }
+        }
+        catch (Exception ex)
+        {
+            Logger.LogError(ex, "AI Passport Adjust failed");
+            _errorMessage = "AI passport adjust failed: " + ex.Message;
+        }
+        finally
+        {
+            _isProcessing = false;
+            _processingStatus = "";
+            StateHasChanged();
+        }
+    }
+
+    private async Task AcceptAiResult()
+    {
+        if (_aiResultBytes == null || string.IsNullOrEmpty(_aiCompareResultUrl)) return;
+
+        _showAiCompare = false;
+        var aiDataUrl = _aiCompareResultUrl;
+
+        // Apply the AI result as the new working image
+        _originalDataUrl = aiDataUrl;
+        _bgRemovedDataUrl = null;
+        _transparentPngCache = null;
+        _enhancedDataUrl = null;
+        _removeBg = false;
+        _bgRemovalStatus = null;
+        _enhancePhoto = false;
+
+        // Swap the crop tool image
+        await JS.InvokeVoidAsync("passportPhoto.swapCropImage", aiDataUrl);
+
+        // Re-run face detection on the AI result
+        try
+        {
+            var resizedBytes = await Task.Run(() => ResizeForBgRemoval(_aiResultBytes, 1600));
+            var bgResult = await BgRemoval.RemoveBackgroundWithBoundsAsync(resizedBytes);
+            _transparentPngCache = bgResult.TransparentPngBytes;
+            _bgRemovedDataUrl = await Task.Run(() => CompositeOnColour(bgResult.TransparentPngBytes, _selectedBgColor));
+
+            double subH = bgResult.SubjectBottom - bgResult.SubjectTop;
+            double subW = bgResult.SubjectRight - bgResult.SubjectLeft;
+            double subCX = (bgResult.SubjectLeft + bgResult.SubjectRight) / 2.0;
+            double subAspect = subW / Math.Max(0.01, subH);
+            double faceRatio = subAspect > 0.9 ? 0.75
+                             : subAspect > 0.7 ? 0.45
+                             : subAspect > 0.5 ? 0.28
+                             : subAspect > 0.3 ? 0.18
+                             : 0.12;
+
+            double faceTop = bgResult.SubjectTop;
+            double faceBottom = bgResult.SubjectTop + subH * faceRatio;
+            double faceH = faceBottom - faceTop;
+            double eyeLineY = faceTop + faceH * 0.45;
+            double faceHalfW = subW * 0.30;
+            double faceLeft = subCX - faceHalfW;
+            double faceRight = subCX + faceHalfW;
+
+            await JS.InvokeVoidAsync("passportPhoto.setCropBoxFromFaceDetection",
+                faceTop, faceBottom, faceLeft, faceRight, eyeLineY);
+        }
+        catch (Exception ex)
+        {
+            Logger.LogWarning(ex, "Face detection on AI result failed");
+        }
+
+        // Clear compare state
+        _aiCompareOriginalUrl = null;
+        _aiCompareResultUrl = null;
+        _aiResultBytes = null;
+        _aiResultLocalPath = null;
+
+        // Render the sheet
+        await ClientSideRender();
+    }
+
+    private void RejectAiResult()
+    {
+        _showAiCompare = false;
+        _aiCompareOriginalUrl = null;
+        _aiCompareResultUrl = null;
+        _aiResultBytes = null;
+        _aiResultLocalPath = null;
+    }
+
+    // ── Start New ──
+
+    private async Task StartNew()
+    {
+        await RemovePhoto();
+        StateHasChanged();
     }
 
     // ── Downloads (client-side via JS canvas export) ──
