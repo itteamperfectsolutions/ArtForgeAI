@@ -30,3 +30,5 @@ x86/
 
 ## Windows artifacts
 nul
+/ArtForgeAI/wwwroot/downloads
+/ArtForgeAI/wwwroot/presets

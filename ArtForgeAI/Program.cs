@@ -74,6 +74,7 @@ builder.Services.AddScoped<IImageSizeMasterService, ImageSizeMasterService>();
 
 // Style preset CRUD
 builder.Services.AddScoped<IStylePresetService, StylePresetService>();
+builder.Services.AddScoped<IStyleGroupService, StyleGroupService>();
 
 // Application services
 builder.Services.AddHttpClient<IGeminiImageService, GeminiImageService>(client =>
@@ -583,6 +584,76 @@ using (var scope = app.Services.CreateScope())
     catch (Exception ex)
     {
         app.Logger.LogWarning(ex, "StylePresets ThumbnailPath column migration failed (non-fatal)");
+    }
+
+    // Create StyleGroups table if missing
+    try
+    {
+        await db.Database.ExecuteSqlRawAsync(@"
+            IF NOT EXISTS (SELECT * FROM sys.tables WHERE name = 'StyleGroups')
+            BEGIN
+                CREATE TABLE StyleGroups (
+                    StyleGroupId INT IDENTITY(1,1) PRIMARY KEY,
+                    Name NVARCHAR(128) NOT NULL,
+                    SortOrder INT NOT NULL DEFAULT 0,
+                    IsActive BIT NOT NULL DEFAULT 1,
+                    CreatedAtUtc DATETIME2 NOT NULL DEFAULT GETUTCDATE(),
+                    CONSTRAINT UQ_StyleGroups_Name UNIQUE (Name)
+                );
+            END");
+    }
+    catch (Exception ex)
+    {
+        app.Logger.LogWarning(ex, "StyleGroups table creation failed (non-fatal)");
+    }
+
+    // Add StyleGroupId column to StylePresets if missing
+    try
+    {
+        await db.Database.ExecuteSqlRawAsync(@"
+            IF NOT EXISTS (SELECT * FROM sys.columns WHERE object_id = OBJECT_ID('StylePresets') AND name = 'StyleGroupId')
+                ALTER TABLE StylePresets ADD StyleGroupId INT NULL");
+    }
+    catch (Exception ex)
+    {
+        app.Logger.LogWarning(ex, "StylePresets StyleGroupId column migration failed (non-fatal)");
+    }
+
+    // Migrate preset thumbnails from generated/ to presets/ folder
+    try
+    {
+        var webRoot = app.Environment.WebRootPath;
+        var presetsDir = Path.Combine(webRoot, "presets");
+        Directory.CreateDirectory(presetsDir);
+
+        var thumbRows = await db.Database.SqlQueryRaw<ThumbnailRow>(
+            "SELECT Id, ThumbnailPath FROM StylePresets WHERE ThumbnailPath IS NOT NULL AND ThumbnailPath NOT LIKE 'presets/%'")
+            .ToListAsync();
+
+        foreach (var row in thumbRows)
+        {
+            var srcFile = Path.Combine(webRoot, row.ThumbnailPath.Replace("/", Path.DirectorySeparatorChar.ToString()));
+            if (!File.Exists(srcFile)) continue;
+
+            var fileName = Path.GetFileName(srcFile);
+            var destFile = Path.Combine(presetsDir, fileName);
+
+            if (!File.Exists(destFile))
+                File.Copy(srcFile, destFile);
+
+            var newPath = $"presets/{fileName}";
+            await db.Database.ExecuteSqlRawAsync(
+                "UPDATE StylePresets SET ThumbnailPath = {0} WHERE Id = {1}", newPath, row.Id);
+
+            try { File.Delete(srcFile); } catch { /* best effort */ }
+        }
+
+        if (thumbRows.Count > 0)
+            app.Logger.LogInformation("Migrated {Count} preset thumbnails to presets/ folder", thumbRows.Count);
+    }
+    catch (Exception ex)
+    {
+        app.Logger.LogWarning(ex, "Preset thumbnail migration failed (non-fatal)");
     }
 
     if (!seedAlreadyDone)
@@ -2152,3 +2223,6 @@ app.Run();
 // ── Request DTOs for payment endpoints ──
 public record CreateOrderRequest(ArtForgeAI.Models.PaymentPurpose Purpose, int? CoinPackId, int? SubscriptionPlanId);
 public record VerifyPaymentRequest(int PaymentId, string RazorpayPaymentId, string RazorpaySignature);
+
+// Helper for preset thumbnail migration query
+public class ThumbnailRow { public int Id { get; set; } public string ThumbnailPath { get; set; } = ""; }

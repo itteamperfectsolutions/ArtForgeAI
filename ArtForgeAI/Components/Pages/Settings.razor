@@ -11,6 +11,7 @@
 @inject IBackgroundRemovalService BgRemoval
 @inject IImageSizeMasterService SizeService
 @inject IStylePresetService StyleService
+@inject IStyleGroupService StyleGroupService
 @inject IImageGenerationService ImageGenService
 @inject IImageStorageService ImageStorage
 @inject IWebHostEnvironment Env
@@ -232,18 +233,26 @@
         <div class="settings-section" style="margin-bottom: 0;">
             <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:0.75rem;flex-wrap:wrap;gap:0.5rem;">
                 <h3 style="margin-bottom:0;border-bottom:none;padding-bottom:0;">Style Presets</h3>
-                <button class="btn-primary-gradient btn-sm" @onclick="GenerateAllThumbnails"
-                        disabled="@(_batchGenerating || _generatingThumbnailId is not null)"
-                        title="Generate thumbnails for all styles without one (8 concurrent)">
-                    @if (_batchGenerating)
-                    {
-                        <span>&#9203; @_batchCompleted / @_batchTotal generating...</span>
-                    }
-                    else
-                    {
-                        <span>&#10024; Generate All Thumbnails</span>
-                    }
-                </button>
+                <div style="display:flex;gap:0.4rem;flex-wrap:wrap;">
+                    <button class="btn-secondary btn-sm" @onclick='() => _showGroupsModal = true'>
+                        &#128193; Style Groups <span class="qs-category-count">@_allGroups.Count</span>
+                    </button>
+                    <button class="btn-secondary btn-sm" @onclick='() => _showBulkAssignModal = true'>
+                        &#128196; Bulk Assign
+                    </button>
+                    <button class="btn-primary-gradient btn-sm" @onclick="GenerateAllThumbnails"
+                            disabled="@(_batchGenerating || _generatingThumbnailId is not null)"
+                            title="Generate thumbnails for all styles without one (8 concurrent)">
+                        @if (_batchGenerating)
+                        {
+                            <span>&#9203; @_batchCompleted / @_batchTotal generating...</span>
+                        }
+                        else
+                        {
+                            <span>&#10024; Generate All Thumbnails</span>
+                        }
+                    </button>
+                </div>
             </div>
 
             @* ── Active / Inactive sub-tabs ── *@
@@ -308,6 +317,13 @@
                     </select>
                     <input class="form-input" style="width: 50px;" @bind="_newStyleEmoji" placeholder="Emoji" />
                     <input class="form-input" style="width: 80px;" @bind="_newStyleAccent" placeholder="#hex" />
+                    <select class="form-input" style="width: 130px; padding: 0.35rem 0.4rem; font-size: 0.78rem;" @bind="_newStyleGroupId">
+                        <option value="">No Group</option>
+                        @foreach (var g in _allGroups.Where(g => g.IsActive))
+                        {
+                            <option value="@g.StyleGroupId">@g.Name</option>
+                        }
+                    </select>
                     <textarea class="form-input" style="width: 100%; min-height: 50px; font-size: 0.78rem;" @bind="_newStylePrompt" placeholder="Prompt Template"></textarea>
                 </div>
 
@@ -432,6 +448,13 @@
                                     </select>
                                     <input class="form-input" style="width: 50px;" @bind="_editStyleEmoji" placeholder="Emoji" />
                                     <input class="form-input" style="width: 80px;" @bind="_editStyleAccent" placeholder="#hex" />
+                                    <select class="form-input" style="width:120px;padding:0.35rem 0.4rem;font-size:0.78rem;" @bind="_editStyleGroupId">
+                                        <option value="">No Group</option>
+                                        @foreach (var g in _allGroups)
+                                        {
+                                            <option value="@g.StyleGroupId">@g.Name</option>
+                                        }
+                                    </select>
                                 </div>
                                 <textarea class="form-input" style="width: 100%; min-height: 50px; font-size: 0.78rem;" @bind="_editStylePrompt" placeholder="Prompt Template"></textarea>
                                 <div style="display: flex; gap: 0.35rem; justify-content: flex-end;">
@@ -529,6 +552,13 @@
                                                 <option value="Regional">Regional</option>
                                             </select>
                                             <input class="form-input" style="width: 40px; font-size:0.72rem;" @bind="_editStyleEmoji" placeholder="Em" />
+                                            <select class="form-input" style="width:90px;padding:0.2rem;font-size:0.7rem;" @bind="_editStyleGroupId">
+                                                <option value="">No Group</option>
+                                                @foreach (var g in _allGroups)
+                                                {
+                                                    <option value="@g.StyleGroupId">@g.Name</option>
+                                                }
+                                            </select>
                                         </div>
                                         <textarea class="form-input" style="width:100%;min-height:36px;font-size:0.72rem;" @bind="_editStylePrompt" placeholder="Prompt"></textarea>
                                         <div style="display:flex;gap:0.25rem;justify-content:flex-end;">
@@ -643,6 +673,13 @@
                                                 </select>
                                                 <input class="form-input" style="width: 50px;" @bind="_editStyleEmoji" placeholder="Emoji" />
                                                 <input class="form-input" style="width: 80px;" @bind="_editStyleAccent" placeholder="#hex" />
+                                    <select class="form-input" style="width:120px;padding:0.35rem 0.4rem;font-size:0.78rem;" @bind="_editStyleGroupId">
+                                        <option value="">No Group</option>
+                                        @foreach (var g in _allGroups)
+                                        {
+                                            <option value="@g.StyleGroupId">@g.Name</option>
+                                        }
+                                    </select>
                                             </div>
                                             <textarea class="form-input" style="width: 100%; min-height: 50px; font-size: 0.78rem;" @bind="_editStylePrompt" placeholder="Prompt Template"></textarea>
                                             <div style="display: flex; gap: 0.35rem; justify-content: flex-end;">
@@ -732,6 +769,13 @@
                                                         <option value="Regional">Regional</option>
                                                     </select>
                                                     <input class="form-input" style="width: 40px; font-size:0.72rem;" @bind="_editStyleEmoji" placeholder="Em" />
+                                            <select class="form-input" style="width:90px;padding:0.2rem;font-size:0.7rem;" @bind="_editStyleGroupId">
+                                                <option value="">No Group</option>
+                                                @foreach (var g in _allGroups)
+                                                {
+                                                    <option value="@g.StyleGroupId">@g.Name</option>
+                                                }
+                                            </select>
                                                 </div>
                                                 <textarea class="form-input" style="width:100%;min-height:36px;font-size:0.72rem;" @bind="_editStylePrompt" placeholder="Prompt"></textarea>
                                                 <div style="display:flex;gap:0.25rem;justify-content:flex-end;">
@@ -933,6 +977,143 @@
     </div>
 }
 
+@* ── Style Groups Modal ── *@
+@if (_showGroupsModal)
+{
+    <div class="qs-modal-overlay" @onclick="() => _showGroupsModal = false">
+        <div class="qs-modal" style="max-width:600px;" @onclick:stopPropagation="true">
+            <div class="qs-modal-header">
+                <span>&#128193; Style Groups</span>
+                <button class="qs-modal-close" @onclick="() => _showGroupsModal = false">&times;</button>
+            </div>
+            <div class="qs-modal-body" style="padding:1rem;">
+                @if (!string.IsNullOrEmpty(_groupMessage))
+                {
+                    <div style="font-size:0.78rem;color:var(--success);margin-bottom:0.5rem;">@_groupMessage</div>
+                }
+                <div style="display:flex;gap:0.4rem;align-items:center;margin-bottom:0.75rem;">
+                    <input class="form-input" style="width:200px;" @bind="_newGroupName" placeholder="New group name..." />
+                    <button class="btn-primary-gradient btn-sm" @onclick="AddGroup"
+                            disabled="@(string.IsNullOrWhiteSpace(_newGroupName))">+ Add</button>
+                </div>
+                @if (_allGroups.Count > 0)
+                {
+                    <div style="display:flex;flex-direction:column;gap:0.35rem;">
+                        @foreach (var group in _allGroups)
+                        {
+                            @if (_editingGroupId == group.StyleGroupId)
+                            {
+                                <div class="style-group-chip editing" style="padding:0.5rem;">
+                                    <input class="form-input" style="width:140px;padding:0.25rem 0.4rem;font-size:0.78rem;" @bind="_editGroupName" />
+                                    <input type="number" class="form-input" style="width:50px;padding:0.25rem 0.3rem;font-size:0.78rem;" @bind="_editGroupSortOrder" title="Sort order" />
+                                    <label style="font-size:0.75rem;display:flex;align-items:center;gap:0.2rem;cursor:pointer;">
+                                        <input type="checkbox" @bind="_editGroupIsActive" /> Active
+                                    </label>
+                                    <button class="btn-primary-gradient btn-sm" style="font-size:0.72rem;" @onclick="SaveGroupEdit">Save</button>
+                                    <button class="btn-secondary btn-sm" style="font-size:0.72rem;" @onclick="() => _editingGroupId = null">Cancel</button>
+                                </div>
+                            }
+                            else
+                            {
+                                <div class="style-group-chip @(!group.IsActive ? "inactive" : "")" style="justify-content:space-between;width:100%;" @onclick="() => StartGroupEdit(group)" title="Click to edit — Sort: @group.SortOrder">
+                                    <span>@group.Name</span>
+                                    <span style="display:flex;align-items:center;gap:0.4rem;">
+                                        <span class="style-group-count">@_allStyles.Count(s => s.StyleGroupId == group.StyleGroupId)</span>
+                                        <span style="font-size:0.7rem;color:var(--text-muted);">Sort: @group.SortOrder</span>
+                                        <button class="style-group-delete" @onclick="() => DeleteGroup(group.StyleGroupId)" @onclick:stopPropagation="true" title="Delete group">&times;</button>
+                                    </span>
+                                </div>
+                            }
+                        }
+                    </div>
+                }
+                else
+                {
+                    <p style="color:var(--text-muted);font-size:0.82rem;">No groups yet. Create one above.</p>
+                }
+            </div>
+        </div>
+    </div>
+}
+
+@* ── Bulk Assign Modal ── *@
+@if (_showBulkAssignModal)
+{
+    <div class="qs-modal-overlay" @onclick="() => _showBulkAssignModal = false">
+        <div class="qs-modal" style="max-width:900px;max-height:85vh;" @onclick:stopPropagation="true">
+            <div class="qs-modal-header">
+                <span>&#128196; Bulk Assign Group</span>
+                <button class="qs-modal-close" @onclick="() => _showBulkAssignModal = false">&times;</button>
+            </div>
+            <div class="qs-modal-body" style="padding:1rem;overflow-y:auto;">
+                @if (!string.IsNullOrEmpty(_bulkAssignMessage))
+                {
+                    <div style="font-size:0.78rem;color:var(--success);margin-bottom:0.5rem;">@_bulkAssignMessage</div>
+                }
+                <div style="display:flex;gap:0.4rem;align-items:center;flex-wrap:wrap;margin-bottom:0.5rem;">
+                    <input class="form-input" style="width:180px;" @bind="_bulkSearchQuery" @bind:event="oninput" placeholder="Search presets..." />
+                    <select class="form-input" style="width:130px;padding:0.35rem 0.4rem;font-size:0.78rem;" @bind="_bulkFilterCategory">
+                        <option value="">All Categories</option>
+                        @foreach (var cat in _allStyles.Select(s => s.Category).Distinct().OrderBy(c => c))
+                        {
+                            <option value="@cat">@cat</option>
+                        }
+                    </select>
+                    <select class="form-input" style="width:130px;padding:0.35rem 0.4rem;font-size:0.78rem;" @bind="_bulkFilterGroupId">
+                        <option value="">All Groups</option>
+                        <option value="-1">No Group</option>
+                        @foreach (var g in _allGroups)
+                        {
+                            <option value="@g.StyleGroupId">@g.Name</option>
+                        }
+                    </select>
+                    <span style="font-size:0.75rem;color:var(--text-muted);">@GetBulkFilteredStyles().Count matching</span>
+                </div>
+                <div style="display:flex;gap:0.4rem;align-items:center;flex-wrap:wrap;margin-bottom:0.5rem;">
+                    <button class="btn-sm" style="font-size:0.72rem;" @onclick="BulkSelectAll">Select All</button>
+                    <button class="btn-sm" style="font-size:0.72rem;" @onclick="BulkDeselectAll">Deselect All</button>
+                    <span style="font-size:0.75rem;color:var(--text-secondary);">@_bulkSelectedIds.Count selected</span>
+                    <span style="margin-left:auto;display:flex;gap:0.4rem;align-items:center;">
+                        <select class="form-input" style="width:130px;padding:0.35rem 0.4rem;font-size:0.78rem;" @bind="_bulkTargetGroupId">
+                            <option value="">Remove Group</option>
+                            @foreach (var g in _allGroups.Where(g => g.IsActive))
+                            {
+                                <option value="@g.StyleGroupId">@g.Name</option>
+                            }
+                        </select>
+                        <button class="btn-primary-gradient btn-sm" @onclick="ApplyBulkAssign"
+                                disabled="@(_bulkSelectedIds.Count == 0)">
+                            Assign (@_bulkSelectedIds.Count)
+                        </button>
+                    </span>
+                </div>
+                <div class="bulk-assign-grid">
+                    @foreach (var style in GetBulkFilteredStyles())
+                    {
+                        var isSelected = _bulkSelectedIds.Contains(style.Id);
+                        var groupName = _allGroups.FirstOrDefault(g => g.StyleGroupId == style.StyleGroupId)?.Name;
+                        <label class="bulk-assign-item @(isSelected ? "selected" : "")">
+                            <input type="checkbox" checked="@isSelected" @onchange="() => ToggleBulkSelect(style.Id)" />
+                            @if (!string.IsNullOrEmpty(style.ThumbnailPath))
+                            {
+                                <img src="/@style.ThumbnailPath" alt="" />
+                            }
+                            else
+                            {
+                                <span class="bulk-assign-emoji">@style.IconEmoji</span>
+                            }
+                            <div class="bulk-assign-info">
+                                <span class="bulk-assign-name">@style.Name</span>
+                                <span class="bulk-assign-meta">@style.Category @(groupName != null ? $"· {groupName}" : "")</span>
+                            </div>
+                        </label>
+                    }
+                </div>
+            </div>
+        </div>
+    </div>
+}
+
 @code {
     [CascadingParameter] private Task<AuthenticationState>? _authStateCascade { get; set; }
     private string _userId = "default";
@@ -950,6 +1131,25 @@
     // Style presets
     private List<StylePreset> _allStyles = [];
     private string? _styleMessage;
+
+    // Style Groups
+    private List<StyleGroup> _allGroups = [];
+    private string _newGroupName = string.Empty;
+    private int? _editingGroupId;
+    private string _editGroupName = string.Empty;
+    private int _editGroupSortOrder;
+    private bool _editGroupIsActive = true;
+    private bool _showGroupsModal;
+    private bool _showBulkAssignModal;
+    private string? _groupMessage;
+
+    // Bulk assign
+    private string _bulkSearchQuery = string.Empty;
+    private string _bulkFilterCategory = string.Empty;
+    private string _bulkFilterGroupId = string.Empty;
+    private string _bulkTargetGroupId = string.Empty;
+    private HashSet<int> _bulkSelectedIds = [];
+    private string? _bulkAssignMessage;
     private string _styleSearchQuery = string.Empty;
     private static readonly string[] _categoryOrder = ["Artistic", "Fun", "Professional", "Abstract", "Mythological", "Regional", "PhotoCollage", "PhotoArts", "Cartoon Characters", "Super Heroes", "Anime & Gaming", "K-Culture"];
 
@@ -1008,6 +1208,7 @@
     private string _newStyleEmoji = string.Empty;
     private string _newStyleAccent = string.Empty;
     private string _newStylePrompt = string.Empty;
+    private int? _newStyleGroupId;
 
     // New style inline test preview
     private string? _newStyleTestSourcePath;
@@ -1024,6 +1225,7 @@
     private string _editStyleAccent = string.Empty;
     private string _editStylePrompt = string.Empty;
     private bool _editStyleIsActive = true;
+    private int? _editStyleGroupId;
 
     // Edit state
     private int? _editingSizeId;
@@ -1059,6 +1261,7 @@
         _prefs = await HistoryService.GetUserPreferencesAsync(userId: _userId);
         await LoadSizes();
         await LoadStyles();
+        await LoadGroups();
     }
 
     private async Task LoadSizes()
@@ -1073,6 +1276,11 @@
             .OrderBy(s => string.IsNullOrEmpty(s.ThumbnailPath) ? 0 : 1)
             .ThenByDescending(s => s.Id)
             .ToList();
+    }
+
+    private async Task LoadGroups()
+    {
+        _allGroups = await StyleGroupService.GetAllAsync();
     }
 
     private async Task ApplyTheme()
@@ -1246,7 +1454,8 @@
             Category = _newStyleCategory,
             IconEmoji = _newStyleEmoji.Trim(),
             AccentColor = string.IsNullOrWhiteSpace(_newStyleAccent) ? null : _newStyleAccent.Trim(),
-            IsActive = false
+            IsActive = false,
+            StyleGroupId = _newStyleGroupId
         };
 
         await StyleService.CreateAsync(preset);
@@ -1269,6 +1478,7 @@
             IconEmoji = _newStyleEmoji.Trim(),
             AccentColor = string.IsNullOrWhiteSpace(_newStyleAccent) ? null : _newStyleAccent.Trim(),
             IsActive = false,
+            StyleGroupId = _newStyleGroupId,
             ThumbnailPath = _newStyleTestResultPath
         };
 
@@ -1286,6 +1496,7 @@
         _newStyleEmoji = string.Empty;
         _newStyleAccent = string.Empty;
         _newStylePrompt = string.Empty;
+        _newStyleGroupId = null;
         ClearNewStylePreview();
     }
 
@@ -1362,6 +1573,7 @@
         _editStyleAccent = preset.AccentColor ?? string.Empty;
         _editStylePrompt = preset.PromptTemplate;
         _editStyleIsActive = preset.IsActive;
+        _editStyleGroupId = preset.StyleGroupId;
     }
 
     private void CancelStyleEdit()
@@ -1381,6 +1593,7 @@
         preset.IconEmoji = _editStyleEmoji.Trim();
         preset.AccentColor = string.IsNullOrWhiteSpace(_editStyleAccent) ? null : _editStyleAccent.Trim();
         preset.IsActive = _editStyleIsActive;
+        preset.StyleGroupId = _editStyleGroupId;
 
         await StyleService.UpdateAsync(preset);
         _editingStyleId = null;
@@ -1416,7 +1629,7 @@
         try
         {
             using var stream = file.OpenReadStream(10 * 1024 * 1024);
-            var path = await ImageStorage.SaveUploadedFileAsync(stream, file.Name);
+            var path = await ImageStorage.SavePresetThumbnailFromStreamAsync(stream, file.Name);
 
             var entity = await StyleService.GetByIdAsync(presetId);
             if (entity is not null)
@@ -1743,10 +1956,11 @@
     {
         if (_testingStyleId is null || string.IsNullOrEmpty(_testResultPath)) return;
 
+        var presetPath = await MoveToPresetsFolder(_testResultPath);
         var entity = await StyleService.GetByIdAsync(_testingStyleId.Value);
         if (entity is not null)
         {
-            entity.ThumbnailPath = _testResultPath;
+            entity.ThumbnailPath = presetPath;
             await StyleService.UpdateAsync(entity);
         }
 
@@ -1876,10 +2090,13 @@
 
             if (result.Success && !string.IsNullOrEmpty(result.LocalImagePath))
             {
+                // Move thumbnail from generated/ to presets/ folder
+                var presetPath = await MoveToPresetsFolder(result.LocalImagePath);
+
                 var entity = await StyleService.GetByIdAsync(preset.Id);
                 if (entity is not null)
                 {
-                    entity.ThumbnailPath = result.LocalImagePath;
+                    entity.ThumbnailPath = presetPath;
                     await StyleService.UpdateAsync(entity);
                 }
                 _thumbnailMessage = $"Thumbnail generated for {preset.Name}!";
@@ -1950,10 +2167,11 @@
 
                 if (result.Success && !string.IsNullOrEmpty(result.LocalImagePath))
                 {
+                    var presetPath = await MoveToPresetsFolder(result.LocalImagePath);
                     var entity = await StyleService.GetByIdAsync(preset.Id);
                     if (entity is not null)
                     {
-                        entity.ThumbnailPath = result.LocalImagePath;
+                        entity.ThumbnailPath = presetPath;
                         await StyleService.UpdateAsync(entity);
                     }
                 }
@@ -1982,5 +2200,139 @@
         _thumbnailMessage = $"Done! Generated {_batchCompleted} thumbnails.";
         await LoadStyles();
         StateHasChanged();
+    }
+
+    // ── Bulk Assign ──
+
+    private List<StylePreset> GetBulkFilteredStyles()
+    {
+        IEnumerable<StylePreset> result = _allStyles;
+
+        if (!string.IsNullOrWhiteSpace(_bulkSearchQuery))
+        {
+            var q = _bulkSearchQuery.Trim();
+            result = result.Where(s => s.Name.Contains(q, StringComparison.OrdinalIgnoreCase)
+                                    || s.Category.Contains(q, StringComparison.OrdinalIgnoreCase));
+        }
+
+        if (!string.IsNullOrEmpty(_bulkFilterCategory))
+            result = result.Where(s => s.Category == _bulkFilterCategory);
+
+        if (_bulkFilterGroupId == "-1")
+            result = result.Where(s => s.StyleGroupId is null);
+        else if (int.TryParse(_bulkFilterGroupId, out var gid))
+            result = result.Where(s => s.StyleGroupId == gid);
+
+        return result.OrderBy(s => s.Category).ThenBy(s => s.Name).ToList();
+    }
+
+    private void ToggleBulkSelect(int id)
+    {
+        if (!_bulkSelectedIds.Remove(id))
+            _bulkSelectedIds.Add(id);
+    }
+
+    private void BulkSelectAll()
+    {
+        foreach (var s in GetBulkFilteredStyles())
+            _bulkSelectedIds.Add(s.Id);
+    }
+
+    private void BulkDeselectAll()
+    {
+        var filtered = GetBulkFilteredStyles().Select(s => s.Id).ToHashSet();
+        _bulkSelectedIds.RemoveWhere(id => filtered.Contains(id));
+    }
+
+    private async Task ApplyBulkAssign()
+    {
+        if (_bulkSelectedIds.Count == 0) return;
+
+        int? targetGroupId = int.TryParse(_bulkTargetGroupId, out var gid) ? gid : null;
+        var ids = _bulkSelectedIds.ToList();
+
+        foreach (var id in ids)
+        {
+            var preset = await StyleService.GetByIdAsync(id);
+            if (preset is not null)
+            {
+                preset.StyleGroupId = targetGroupId;
+                await StyleService.UpdateAsync(preset);
+            }
+        }
+
+        var groupName = targetGroupId.HasValue
+            ? _allGroups.FirstOrDefault(g => g.StyleGroupId == targetGroupId)?.Name ?? "group"
+            : "none";
+        _bulkAssignMessage = $"Assigned {ids.Count} presets to {groupName}";
+        _bulkSelectedIds.Clear();
+        await LoadStyles();
+        StateHasChanged();
+    }
+
+    // ── Style Group CRUD ──
+
+    private async Task AddGroup()
+    {
+        if (string.IsNullOrWhiteSpace(_newGroupName)) return;
+
+        var group = new StyleGroup { Name = _newGroupName.Trim() };
+        await StyleGroupService.CreateAsync(group);
+        _newGroupName = string.Empty;
+        _groupMessage = "Group added!";
+        await LoadGroups();
+        StateHasChanged();
+    }
+
+    private void StartGroupEdit(StyleGroup group)
+    {
+        _editingGroupId = group.StyleGroupId;
+        _editGroupName = group.Name;
+        _editGroupSortOrder = group.SortOrder;
+        _editGroupIsActive = group.IsActive;
+    }
+
+    private async Task SaveGroupEdit()
+    {
+        if (_editingGroupId is null) return;
+        var group = await StyleGroupService.GetByIdAsync(_editingGroupId.Value);
+        if (group is null) return;
+
+        group.Name = _editGroupName.Trim();
+        group.SortOrder = _editGroupSortOrder;
+        group.IsActive = _editGroupIsActive;
+        await StyleGroupService.UpdateAsync(group);
+        _editingGroupId = null;
+        _groupMessage = "Group updated!";
+        await LoadGroups();
+        StateHasChanged();
+    }
+
+    private async Task DeleteGroup(int id)
+    {
+        await StyleGroupService.DeleteAsync(id);
+        _groupMessage = "Group deleted.";
+        await LoadGroups();
+        await LoadStyles();
+        StateHasChanged();
+    }
+
+    /// <summary>
+    /// Copies a generated/uploaded image to the presets/ folder and returns the new path.
+    /// The original file is deleted after a successful copy.
+    /// </summary>
+    private async Task<string> MoveToPresetsFolder(string sourcePath)
+    {
+        var fullSource = Path.Combine(Env.WebRootPath, sourcePath.Replace("/", Path.DirectorySeparatorChar.ToString()));
+        if (!File.Exists(fullSource)) return sourcePath; // fallback: keep original path
+
+        var imageBytes = await File.ReadAllBytesAsync(fullSource);
+        var fileName = Path.GetFileName(fullSource);
+        var presetPath = await ImageStorage.SavePresetThumbnailAsync(BinaryData.FromBytes(imageBytes), fileName);
+
+        // Delete original from generated/uploads
+        try { File.Delete(fullSource); } catch { /* best effort */ }
+
+        return presetPath;
     }
 }

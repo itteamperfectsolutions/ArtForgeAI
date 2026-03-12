@@ -27,7 +27,7 @@
 <PageTitle>ArtForge AI - Quick Style</PageTitle>
 
 <div class="page-header">
-    <h2>Quick Style</h2>
+    <h2>Quick Style <span class="qs-total-count">@_styles.Count styles</span></h2>
     <p>Click any style to upload a photo and get a print-ready result</p>
 </div>
 
@@ -53,7 +53,7 @@
 @foreach (var group in filtered)
 {
     <div class="qs-category-section">
-        <div class="qs-category-header">@group.Key</div>
+        <div class="qs-category-header">@group.Key <span class="qs-category-count">@group.Count()</span></div>
         <div class="qs-grid">
             @foreach (var style in group)
             {

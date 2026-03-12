@@ -18,6 +18,7 @@ public class AppDbContext : DbContext
     public DbSet<CoinPack> CoinPacks => Set<CoinPack>();
     public DbSet<Payment> Payments => Set<Payment>();
     public DbSet<Referral> Referrals => Set<Referral>();
+    public DbSet<StyleGroup> StyleGroups => Set<StyleGroup>();
 
     protected override void OnModelCreating(ModelBuilder modelBuilder)
     {

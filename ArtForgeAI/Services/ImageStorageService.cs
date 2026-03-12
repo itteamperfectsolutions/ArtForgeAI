@@ -85,6 +85,42 @@ public class ImageStorageService : IImageStorageService
         return Path.Combine("uploads", safeName).Replace("\\", "/");
     }
 
+    public async Task<string> SavePresetThumbnailAsync(BinaryData imageBytes, string fileName)
+    {
+        ValidateFileExtension(fileName);
+
+        var safeName = Path.GetFileName(fileName);
+        var presetsDir = Path.Combine(_env.WebRootPath, "presets");
+        Directory.CreateDirectory(presetsDir);
+
+        var filePath = SafeResolvePath(Path.Combine("presets", safeName));
+        await File.WriteAllBytesAsync(filePath, imageBytes.ToArray());
+
+        await ValidateImageContent(filePath);
+
+        return Path.Combine("presets", safeName).Replace("\\", "/");
+    }
+
+    public async Task<string> SavePresetThumbnailFromStreamAsync(Stream fileStream, string fileName)
+    {
+        ValidateFileExtension(fileName);
+
+        var presetsDir = Path.Combine(_env.WebRootPath, "presets");
+        Directory.CreateDirectory(presetsDir);
+
+        var safeName = $"{Guid.NewGuid():N}_{Path.GetFileName(fileName)}";
+        var filePath = Path.Combine(presetsDir, safeName);
+
+        using (var fs = new FileStream(filePath, FileMode.Create, FileAccess.Write, FileShare.None, bufferSize: 262144, useAsync: true))
+        {
+            await fileStream.CopyToAsync(fs, bufferSize: 262144);
+        }
+
+        await ValidateImageContent(filePath);
+
+        return Path.Combine("presets", safeName).Replace("\\", "/");
+    }
+
     public async Task<byte[]> GetImageAsBytesAsync(string localPath, string format)
     {
         var fullPath = SafeResolvePath(localPath);

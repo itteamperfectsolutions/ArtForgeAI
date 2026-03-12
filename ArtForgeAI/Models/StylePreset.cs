@@ -47,4 +47,7 @@ public class StylePreset
     public bool IsActive { get; set; } = true;
 
     public int SortOrder { get; set; }
+
+    /// <summary>Optional grouping for display on the Quick Style page.</summary>
+    public int? StyleGroupId { get; set; }
 }
