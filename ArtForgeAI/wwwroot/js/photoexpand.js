@@ -8,8 +8,6 @@ window.photoExpand = (function () {
     let sourceImg = null;
     let sourceObj = null;
     let checkerPattern = null;
-    let containerEl = null;
-    let resizeObserver = null;
     let canvasId = '';
 
     // Current state (actual image pixels)
@@ -33,30 +31,11 @@ window.photoExpand = (function () {
         return c;
     }
 
-    function findPreviewContainer() {
-        // Walk up from the canvas to find .pse-preview-container
-        var el = document.getElementById(canvasId);
-        while (el) {
-            if (el.classList && el.classList.contains('pse-preview-container')) return el;
-            el = el.parentElement;
-        }
-        return containerEl;
-    }
-
     function getContainerSize() {
-        var el = findPreviewContainer();
-        if (!el) {
-            // Fallback: use viewport dimensions
-            var w = Math.round(window.innerWidth * 0.45);
-            var h = window.innerHeight - 180;
-            return { w: Math.max(400, w), h: Math.max(400, h) };
-        }
-        var rect = el.getBoundingClientRect();
-        var w = Math.round(rect.width) - 16;
-        var h = Math.round(rect.height) - 16;
-        if (w < 200) w = Math.round(window.innerWidth * 0.45);
-        if (h < 200) h = window.innerHeight - 180;
-        return { w: w, h: h };
+        // Use fixed dimensions based on viewport — no DOM measurement to avoid resize loops
+        var w = Math.round(window.innerWidth * 0.55) - 40;
+        var h = window.innerHeight - 220;
+        return { w: Math.max(300, w), h: Math.max(300, h) };
     }
 
     function calcDisplayScale() {
@@ -90,20 +69,16 @@ window.photoExpand = (function () {
         if (wrapPx > 0) {
             var wrapD = Math.round(wrapPx * ds);
             var dimStyle = { fill: 'rgba(0,0,0,0.25)', selectable: false, evented: false };
-            // Top strip
             canvas.add(new fabric.Rect(Object.assign({ left: 0, top: 0, width: dw, height: wrapD }, dimStyle)));
-            // Bottom strip
             canvas.add(new fabric.Rect(Object.assign({ left: 0, top: dh - wrapD, width: dw, height: wrapD }, dimStyle)));
-            // Left strip (between top and bottom)
             canvas.add(new fabric.Rect(Object.assign({ left: 0, top: wrapD, width: wrapD, height: dh - 2 * wrapD }, dimStyle)));
-            // Right strip (between top and bottom)
             canvas.add(new fabric.Rect(Object.assign({ left: dw - wrapD, top: wrapD, width: wrapD, height: dh - 2 * wrapD }, dimStyle)));
         }
 
         // Source photo — best-fit scale to target area, then position within it
         if (sourceImg && srcW > 0 && srcH > 0) {
             var wrapD2 = wrapPx > 0 ? Math.round(wrapPx * ds) : 0;
-            var innerW = dw - 2 * wrapD2;  // target display area
+            var innerW = dw - 2 * wrapD2;
             var innerH = dh - 2 * wrapD2;
 
             // 96% of best-fit: small margin for AI to blend edges
@@ -114,7 +89,6 @@ window.photoExpand = (function () {
             var sX = wrapD2 + Math.round((innerW - sW) * posX);
             var sY = wrapD2 + Math.round((innerH - sH) * posY);
 
-            // Clamp to target area (not wrap zone)
             sX = Math.max(wrapD2, Math.min(sX, wrapD2 + innerW - sW));
             sY = Math.max(wrapD2, Math.min(sY, wrapD2 + innerH - sH));
 
@@ -162,18 +136,13 @@ window.photoExpand = (function () {
             }));
         }
 
-        // Canvas wrap guide lines (subtle dashed lines showing target boundary)
+        // Canvas wrap guide lines
         if (wrapPx > 0) {
             var wrapD = Math.round(wrapPx * ds);
             var guideStyle = { stroke: 'rgba(255,255,255,0.35)', strokeWidth: 1, strokeDashArray: [6, 4], selectable: false, evented: false };
-
-            // Top guide
             canvas.add(new fabric.Line([0, wrapD, dw, wrapD], guideStyle));
-            // Bottom guide
             canvas.add(new fabric.Line([0, dh - wrapD, dw, dh - wrapD], guideStyle));
-            // Left guide
             canvas.add(new fabric.Line([wrapD, 0, wrapD, dh], guideStyle));
-            // Right guide
             canvas.add(new fabric.Line([dw - wrapD, 0, dw - wrapD, dh], guideStyle));
         }
 
@@ -205,15 +174,18 @@ window.photoExpand = (function () {
 
             this.dispose();
 
-            containerEl = document.getElementById(id)?.parentElement;
-
             canvas = new fabric.Canvas(id, {
                 width: 100, height: 100,
                 selection: false,
-                renderOnAddRemove: false
+                renderOnAddRemove: false,
+                allowTouchScrolling: true
             });
 
-            var self = this;
+            canvas.on('mouse:wheel', function (opt) {
+                opt.e.preventDefault();
+                opt.e.stopPropagation();
+            });
+
             var img = new Image();
             img.onload = function () {
                 sourceImg = img;
@@ -221,14 +193,8 @@ window.photoExpand = (function () {
             };
             img.src = imageDataUrl;
 
-            // Also render immediately with checkerboard (before image loads)
+            // Render checkerboard immediately (before image loads)
             render();
-
-            var observeEl = findPreviewContainer() || containerEl;
-            if (observeEl) {
-                resizeObserver = new ResizeObserver(function () { render(); });
-                resizeObserver.observe(observeEl);
-            }
         },
 
         setTargetSize: function (tw, th) {
@@ -255,12 +221,17 @@ window.photoExpand = (function () {
             canvasId = id;
             tgtW = w; tgtH = h;
             wrapPx = wp || 0;
-            containerEl = document.getElementById(id)?.parentElement;
 
             canvas = new fabric.Canvas(id, {
                 width: 100, height: 100,
                 selection: false,
-                renderOnAddRemove: false
+                renderOnAddRemove: false,
+                allowTouchScrolling: true
+            });
+
+            canvas.on('mouse:wheel', function (opt) {
+                opt.e.preventDefault();
+                opt.e.stopPropagation();
             });
 
             var resultImg = null;
@@ -279,7 +250,6 @@ window.photoExpand = (function () {
                     selectable: false, evented: false
                 }));
 
-                // Draw wrap guide lines on result
                 if (wp > 0) {
                     var wrapD = Math.round(wp * ds);
                     var guideStyle = { stroke: 'rgba(255,255,255,0.3)', strokeWidth: 1, strokeDashArray: [6, 4], selectable: false, evented: false };
@@ -298,12 +268,6 @@ window.photoExpand = (function () {
                 renderResult();
             };
             img.src = dataUrl;
-
-            var observeEl = findPreviewContainer() || containerEl;
-            if (observeEl) {
-                resizeObserver = new ResizeObserver(function () { renderResult(); });
-                resizeObserver.observe(observeEl);
-            }
         },
 
         downloadResult: function (dataUrl, fileName) {
@@ -320,11 +284,9 @@ window.photoExpand = (function () {
         },
 
         dispose: function () {
-            if (resizeObserver) { resizeObserver.disconnect(); resizeObserver = null; }
             if (canvas) { canvas.dispose(); canvas = null; }
             sourceImg = null;
             sourceObj = null;
-            containerEl = null;
         }
     };
 })();

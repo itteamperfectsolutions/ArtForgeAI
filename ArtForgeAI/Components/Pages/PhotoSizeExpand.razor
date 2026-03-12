@@ -40,7 +40,7 @@
                             <button class="ref-thumb-remove" @onclick="RemovePhoto" disabled="@_isProcessing"
                                     style="position:absolute;top:4px;right:4px;z-index:20;">&#10005;</button>
                             <div style="border-radius:6px;overflow:hidden;background:var(--bg-tertiary);text-align:center;">
-                                <img src="@_imageDataUrl" style="max-width:100%;max-height:200px;display:block;margin:0 auto;" />
+                                <img src="@_imageDataUrl" style="max-width:100%;max-height:200px;display:block;margin:0 auto;pointer-events:none;" />
                             </div>
                         </div>
 
@@ -203,11 +203,11 @@
                 }
             </div>
 
-            <div class="pse-preview-container" style="flex:1;min-height:0;display:flex;align-items:center;justify-content:center;overflow:hidden;">
+            <div class="pse-preview-container">
                 @if (_resultReady && !string.IsNullOrEmpty(_resultDataUrl))
                 {
                     <img src="@_resultDataUrl" alt="Expanded result"
-                         style="display:block;max-height:100%;max-width:100%;object-fit:contain;" />
+                         style="display:block;max-height:100%;max-width:100%;object-fit:contain;pointer-events:none;" />
                 }
                 else
                 {

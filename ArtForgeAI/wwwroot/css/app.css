@@ -4936,8 +4936,8 @@ select.form-input {
     overflow: hidden;
     width: 100%;
     box-sizing: border-box;
-    flex: 1;
-    min-height: 0;
+    height: calc(100vh - 220px);
+    flex: none;
 }
 
 .pse-preview-container img {
