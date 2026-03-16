@@ -68,6 +68,14 @@
                 <span class="nav-icon">&#129513;</span>
                 Mosaic Poster
             </NavLink>
+            <NavLink class="nav-item" href="template-collage">
+                <span class="nav-icon">&#127912;</span>
+                Template Collage
+            </NavLink>
+            <NavLink class="nav-item" href="photo-collages">
+                <span class="nav-icon">&#128444;</span>
+                Photo Collages
+            </NavLink>
             <NavLink class="nav-item" href="passport-photo">
                 <span class="nav-icon">&#128247;</span>
                 Passport Photo
@@ -103,6 +111,10 @@
             <NavLink class="nav-item nav-item-admin" href="admin">
                 <span class="nav-icon">&#128737;</span>
                 Admin Panel
+            </NavLink>
+            <NavLink class="nav-item nav-item-admin" href="photo-collage-settings">
+                <span class="nav-icon">&#128444;</span>
+                Collage Templates
             </NavLink>
         }
         else
@@ -141,6 +153,17 @@
                 <NavLink class="nav-item" href="mosaic-poster">
                     <span class="nav-icon">&#129513;</span>
                     Mosaic Poster
+                </NavLink>
+                <NavLink class="nav-item" href="template-collage">
+                    <span class="nav-icon">&#127912;</span>
+                    Template Collage
+                </NavLink>
+            }
+            @if (_accessibleFeatures.Contains("PhotoCollages"))
+            {
+                <NavLink class="nav-item" href="photo-collages">
+                    <span class="nav-icon">&#128444;</span>
+                    Photo Collages
                 </NavLink>
             }
             @if (_accessibleFeatures.Contains("PassportPhoto"))

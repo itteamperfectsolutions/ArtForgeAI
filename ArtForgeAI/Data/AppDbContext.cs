@@ -19,6 +19,7 @@ public class AppDbContext : DbContext
     public DbSet<Payment> Payments => Set<Payment>();
     public DbSet<Referral> Referrals => Set<Referral>();
     public DbSet<StyleGroup> StyleGroups => Set<StyleGroup>();
+    public DbSet<CollageTemplate> CollageTemplates => Set<CollageTemplate>();
 
     protected override void OnModelCreating(ModelBuilder modelBuilder)
     {

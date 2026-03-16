@@ -92,6 +92,8 @@ builder.Services.AddScoped<IFaceCorrectionService, FaceCorrectionService>();
 builder.Services.AddScoped<IFormalAttireService, FormalAttireService>();
 builder.Services.AddScoped<PhotoExpandService>();
 builder.Services.AddScoped<TiledGeminiEnhanceService>();
+builder.Services.AddScoped<ITemplateCollageService, TemplateCollageService>();
+builder.Services.AddScoped<ICollageTemplateService, CollageTemplateService>();
 
 // ── Coin, Subscription, Referral & Payment services ──
 builder.Services.AddScoped<ICoinService, CoinService>();
@@ -605,6 +607,201 @@ using (var scope = app.Services.CreateScope())
     catch (Exception ex)
     {
         app.Logger.LogWarning(ex, "StyleGroups table creation failed (non-fatal)");
+    }
+
+    // ── CollageTemplates table ──
+    try
+    {
+        await db.Database.ExecuteSqlRawAsync(@"
+            IF NOT EXISTS (SELECT * FROM sys.tables WHERE name = 'CollageTemplates')
+            BEGIN
+                CREATE TABLE CollageTemplates (
+                    Id INT IDENTITY(1,1) PRIMARY KEY,
+                    Name NVARCHAR(100) NOT NULL,
+                    Description NVARCHAR(500) NOT NULL DEFAULT '',
+                    Category NVARCHAR(50) NOT NULL,
+                    ThumbnailPath NVARCHAR(500) NULL,
+                    SlotCount INT NOT NULL DEFAULT 5,
+                    SlotDescriptionsJson NVARCHAR(MAX) NOT NULL DEFAULT '[]',
+                    MasterSlotIndex INT NOT NULL DEFAULT 0,
+                    ColorTheme NVARCHAR(200) NOT NULL DEFAULT '',
+                    Mood NVARCHAR(200) NOT NULL DEFAULT '',
+                    DecorativeElements NVARCHAR(500) NOT NULL DEFAULT '',
+                    TextOverlay NVARCHAR(200) NOT NULL DEFAULT '',
+                    LayoutDescription NVARCHAR(MAX) NULL,
+                    IconEmoji NVARCHAR(10) NOT NULL DEFAULT '',
+                    AskName BIT NOT NULL DEFAULT 0,
+                    AskOccasion BIT NOT NULL DEFAULT 0,
+                    AskDate BIT NOT NULL DEFAULT 0,
+                    AskMessage BIT NOT NULL DEFAULT 0,
+                    IsActive BIT NOT NULL DEFAULT 1,
+                    SortOrder INT NOT NULL DEFAULT 0,
+                    CreatedAtUtc DATETIME2 NOT NULL DEFAULT GETUTCDATE()
+                );
+            END");
+    }
+    catch (Exception ex)
+    {
+        app.Logger.LogWarning(ex, "CollageTemplates table creation failed (non-fatal)");
+    }
+
+    // Add Ask* columns if missing (migration for existing tables)
+    try
+    {
+        await db.Database.ExecuteSqlRawAsync(@"
+            IF NOT EXISTS (SELECT * FROM sys.columns WHERE object_id = OBJECT_ID('CollageTemplates') AND name = 'AskName')
+            BEGIN
+                ALTER TABLE CollageTemplates ADD AskName BIT NOT NULL DEFAULT 0;
+                ALTER TABLE CollageTemplates ADD AskOccasion BIT NOT NULL DEFAULT 0;
+                ALTER TABLE CollageTemplates ADD AskDate BIT NOT NULL DEFAULT 0;
+                ALTER TABLE CollageTemplates ADD AskMessage BIT NOT NULL DEFAULT 0;
+            END");
+    }
+    catch (Exception ex)
+    {
+        app.Logger.LogWarning(ex, "CollageTemplates Ask* columns migration failed (non-fatal)");
+    }
+
+    // Seed CollageTemplates — reseed with v2 pose-variation descriptions
+    try
+    {
+        // Check if v2 seed is needed (look for old imaginary slot descriptions)
+        var needsReseed = false;
+        var collageCount = await db.Database.SqlQueryRaw<int>(
+            "SELECT COUNT(*) AS [Value] FROM CollageTemplates").ToListAsync();
+        if (collageCount.Count == 0 || collageCount[0] == 0)
+        {
+            needsReseed = true;
+        }
+        else
+        {
+            // Check if we need to reseed: old imaginary descriptions or missing new templates
+            var oldRows = await db.Database.SqlQueryRaw<int>(
+                "SELECT COUNT(*) AS [Value] FROM CollageTemplates WHERE SlotDescriptionsJson LIKE '%blowing candles%' OR SlotDescriptionsJson LIKE '%throwing colorful%' OR SlotDescriptionsJson LIKE '%holding baby shoes%' OR SlotDescriptionsJson LIKE '%candlelit dinner%'").ToListAsync();
+            var hasBWStrip = await db.Database.SqlQueryRaw<int>(
+                "SELECT COUNT(*) AS [Value] FROM CollageTemplates WHERE Name = 'B&W Strip Panels'").ToListAsync();
+            if ((oldRows.Count > 0 && oldRows[0] > 0) || (hasBWStrip.Count > 0 && hasBWStrip[0] == 0))
+            {
+                await db.Database.ExecuteSqlRawAsync("DELETE FROM CollageTemplates");
+                needsReseed = true;
+                app.Logger.LogInformation("Cleared CollageTemplates for reseed (old descriptions or missing new templates).");
+            }
+        }
+        if (needsReseed)
+        {
+            await db.Database.ExecuteSqlRawAsync(@"
+INSERT INTO CollageTemplates (Name, Description, Category, SlotCount, SlotDescriptionsJson, MasterSlotIndex, ColorTheme, Mood, DecorativeElements, TextOverlay, LayoutDescription, IconEmoji, AskName, AskOccasion, AskDate, AskMessage, SortOrder)
+VALUES
+('Birthday Bash Burst', 'Vibrant birthday collage with balloons, confetti and 5 themed photos', 'Birthday', 5,
+ '[""Center circle hero shot - looking straight at camera, big warm smile, head and shoulders"",""Top-left tilted frame - head tilted slightly left, looking to the side, playful smirk, waist-up"",""Top-right tilted frame - laughing with head thrown back slightly, joyful expression, close-up"",""Bottom-left tilted frame - looking down with gentle smile, chin slightly lowered, medium shot"",""Bottom-right tilted frame - looking over shoulder, side angle, confident grin, upper body""]',
+ 0, 'soft pink, magenta, purple gradient with gold accents', 'festive, celebratory, joyful, playful',
+ 'colorful balloons, confetti, shooting stars, sparkles, ribbons, party streamers',
+ 'Happy Birthday',
+ 'Center: large circular frame (40% of height) with hero portrait and white border ring. Top-left: rectangular frame tilted 5 degrees clockwise. Top-right: rectangular frame tilted 5 degrees counter-clockwise. Bottom-left: rectangular frame tilted 5 degrees clockwise. Bottom-right: rectangular frame tilted 5 degrees counter-clockwise. Title Happy Birthday at top in bold decorative font. Warm wish message in cursive at the bottom. Background: gradient from soft pink to light purple with scattered confetti and floating balloons.',
+ '🎂', 1, 1, 0, 1, 1),
+
+('Birthday Celebration Classic', 'Classic birthday collage with elegant gold-themed design', 'Birthday', 4,
+ '[""Center - looking at camera, warm genuine smile, head and shoulders portrait"",""Left - three-quarter face angle turned left, serene expression, upper body"",""Right - close-up face, eyes looking up, bright happy expression"",""Bottom - wider medium shot, arms crossed confidently, calm smile""]',
+ 0, 'deep royal blue, gold, white', 'elegant, celebratory, warm',
+ 'gold stars, glitter, elegant frames, crown, candles',
+ 'Happy Birthday',
+ 'Center: large rectangular frame taking 50% width. Left: tall rectangular frame. Right: tall rectangular frame. Bottom center: wide rectangular frame spanning full width. Title text at very top in gold cursive. Background: deep royal blue with gold glitter particles.',
+ '🎉', 1, 1, 0, 1, 2),
+
+('Baby Shower Joy', 'Adorable baby shower collage with pastel colors', 'Baby Shower', 5,
+ '[""Center circle - gentle smile looking at camera, soft warm lighting, head and shoulders"",""Top-left - looking to the right, peaceful serene expression, close-up"",""Top-right - slight head tilt, dreamy gentle smile, upper body shot"",""Bottom-left - looking down with tender expression, chin lowered, medium shot"",""Bottom-right - profile view facing right, calm and glowing, side portrait""]',
+ 0, 'pastel pink, mint green, soft lavender, cream', 'gentle, loving, warm, dreamy',
+ 'baby rattles, teddy bears, clouds, stars, hearts, tiny footprints, soft bows',
+ 'Welcome Little One',
+ 'Center: large circular frame with soft white border. Four corner rectangular frames with rounded corners. Title at top in soft handwritten font. Pastel gradient background with floating clouds and tiny stars.',
+ '👶', 1, 1, 1, 1, 3),
+
+('Wedding Bliss', 'Romantic wedding collage with floral elegance', 'Wedding', 5,
+ '[""Center circle - elegant pose looking at camera, soft romantic lighting, head and shoulders"",""Top-left - looking over left shoulder, graceful three-quarter turn, upper body"",""Top-right - close-up face, eyes slightly lowered, subtle romantic smile"",""Bottom-left - profile view facing left, serene elegant expression"",""Bottom-right - head tilted right, looking up, dreamy joyful expression, medium shot""]',
+ 0, 'blush pink, rose gold, ivory, soft green', 'romantic, elegant, timeless, dreamy',
+ 'roses, peonies, gold vines, delicate lace patterns, floating petals, soft bokeh lights',
+ 'Happily Ever After',
+ 'Center: large circular frame with rose gold border. Four corner rectangular frames with soft rounded edges. Floral arrangements in corners. Title in elegant script font at top. Background: soft ivory with blush pink gradient and floating petals.',
+ '💒', 1, 1, 1, 1, 4),
+
+('Graduation Pride', 'Proud graduation collage celebrating academic achievement', 'Graduation', 4,
+ '[""Center - proud confident smile looking at camera, head and shoulders"",""Left - three-quarter angle looking to the right, determined expression, close-up"",""Right - looking upward with hopeful expression, upper body, inspired pose"",""Bottom - wider shot, arms at sides standing tall, calm accomplished smile""]',
+ 0, 'navy blue, gold, white, crimson', 'proud, accomplished, celebratory, inspirational',
+ 'graduation caps, diplomas, gold laurel wreaths, stars, confetti, academic scrolls',
+ 'Congratulations Graduate',
+ 'Center: large square frame with gold border. Left: vertical rectangular frame. Right: vertical rectangular frame. Bottom: wide horizontal frame. Title in bold serif font at top with laurel wreath. Background: navy blue with gold accents and floating caps.',
+ '🎓', 1, 1, 1, 1, 5),
+
+('Anniversary Love', 'Heartfelt anniversary collage with romantic touches', 'Anniversary', 4,
+ '[""Center circle - warm loving smile at camera, soft golden lighting, head and shoulders"",""Top - looking to the side with nostalgic gentle smile, wider upper body shot"",""Bottom-left - close-up face, eyes softly gazing downward, tender expression"",""Bottom-right - three-quarter turn looking over shoulder, warm romantic glow""]',
+ 0, 'deep red, gold, champagne, soft pink', 'romantic, loving, warm, nostalgic',
+ 'hearts, roses, champagne glasses, gold rings, candles, rose petals, soft sparkles',
+ 'Happy Anniversary',
+ 'Center: large circular frame with gold ring border. Top: wide rectangular frame spanning full width. Bottom: two equal rectangular frames side by side. Title in elegant gold script. Background: deep red to champagne gradient with floating rose petals and hearts.',
+ '❤️', 1, 1, 1, 1, 6),
+
+('Festival of Colors', 'Vibrant colorful celebration collage', 'Festival', 5,
+ '[""Center circle - big energetic smile at camera, head and shoulders, vibrant lighting"",""Top-left - head tilted back, laughing with open mouth, joyful close-up"",""Top-right - looking to the left, wide grin, three-quarter face angle, upper body"",""Bottom-left - looking down with playful smirk, chin lowered, medium shot"",""Bottom-right - profile view facing right, big smile, side portrait with colorful glow""]',
+ 0, 'vibrant magenta, electric blue, sunny yellow, bright green, orange', 'joyful, energetic, vibrant, playful',
+ 'colorful powder clouds, flower petals, rangoli patterns, sparkles',
+ 'Festival of Colors',
+ 'Center: large circular frame with rainbow border. Four corner rectangular frames tilted slightly. Colorful effects between frames. Title in bold colorful block letters. Background: white with splashes of vibrant colors.',
+ '🎨', 1, 1, 0, 1, 7),
+
+('Mothers Day Love', 'Tender and beautiful Mothers Day tribute collage', 'Mothers Day', 4,
+ '[""Center - warm motherly smile at camera, soft lighting, head and shoulders"",""Left - profile view facing right, peaceful serene expression, gentle glow"",""Right - looking down with tender loving smile, close-up face"",""Bottom - three-quarter angle, looking to the left, calm grateful expression, medium shot""]',
+ 0, 'lavender, soft pink, cream, mint green', 'loving, tender, warm, grateful',
+ 'carnations, roses, hearts, butterflies, soft ribbons, watercolor flowers',
+ 'Happy Mothers Day',
+ 'Center: large oval frame with floral border. Left and right: vertical rectangular frames with soft edges. Bottom: wide horizontal frame. Watercolor flower arrangements around frames. Title in elegant handwritten font. Background: soft lavender to cream gradient.',
+ '💐', 1, 1, 0, 1, 8),
+
+('Golden Cinematic Portrait', 'Elegant multi-exposure cinematic portrait with warm golden tones and dreamy bokeh', 'Portrait', 5,
+ '[""Center foreground - large hero portrait, looking at camera with warm confident smile, head to waist, sharp focus"",""Top-left background - dreamy soft-focus close-up of face, eyes looking away, ethereal golden glow, faded overlay"",""Top-right background - gentle side profile facing right, soft serene expression, blended with golden light"",""Left background - medium shot from different angle, looking slightly upward, soft fade into background"",""Right background - three-quarter view, chin slightly raised, elegant expression, soft bokeh blend""]',
+ 0, 'warm golden, bronze, amber, soft champagne, dark brown undertones', 'cinematic, elegant, dreamy, warm, ethereal',
+ 'golden sparkles, bokeh light orbs, soft light rays, subtle lens flare, warm gradient overlay',
+ '',
+ 'This is a CINEMATIC MULTI-EXPOSURE style collage — NOT a framed grid layout. The hero/master portrait is in the CENTER FOREGROUND, sharp and prominent, taking up about 60 percent of the image from mid-chest upward. The other photos are BLENDED INTO THE BACKGROUND using soft dissolve/fade/double-exposure technique — they should appear as dreamy overlays behind and around the hero shot, NOT in separate frames. Top-left: faded dreamy close-up. Top-right: soft side profile fading into golden light. Left behind hero: medium shot with low opacity blend. Right behind: three-quarter view fading out. Background is a warm golden-to-dark-brown gradient with floating bokeh orbs and subtle sparkles. Name text in elegant script at the bottom center. NO BORDERS, NO FRAMES — everything blends seamlessly like a cinematic movie poster.',
+ '✨', 1, 0, 0, 0, 9),
+
+('Royal Traditional Portrait', 'Grand traditional portrait collage with rich jewel tones and ornate styling', 'Portrait', 4,
+ '[""Center - regal portrait looking at camera, confident poised expression, head and shoulders, sharp detail"",""Top-left - gentle three-quarter angle looking to the right, graceful expression, dreamy soft blend"",""Top-right - close-up face, serene peaceful expression, eyes slightly lowered, golden soft glow"",""Bottom background - wider medium shot, different angle, soft fade overlay behind main portrait""]',
+ 0, 'rich maroon, deep gold, royal purple, warm cream, burgundy', 'regal, traditional, majestic, warm, grand',
+ 'ornate gold filigree borders, mandala patterns, jewel-like sparkles, subtle paisley motifs, warm light rays',
+ '',
+ 'Cinematic multi-exposure style. Center foreground: large sharp hero portrait. Other images blended as soft translucent overlays in the background using double-exposure fade technique. Rich warm gradient background from maroon to dark gold. Subtle ornate gold filigree pattern along edges. Name in elegant traditional calligraphy at bottom. NO separate frames — everything blends cinematically.',
+ '👑', 1, 0, 0, 0, 10),
+
+('B&W Strip Panels', 'Dramatic B&W background strips with colorful hero in front and stylish name text', 'Portrait', 5,
+ '[""Center foreground - large full-body or waist-up hero portrait, colorful, sharp focus, looking at camera confidently"",""Background strip 1 (leftmost) - black and white, profile view facing right, soft desaturated, vertical strip panel"",""Background strip 2 - black and white, three-quarter angle looking up, hand near hair, desaturated vertical strip"",""Background strip 3 - black and white, gentle smile looking down, close-up face, desaturated vertical strip"",""Background strip 4 (rightmost) - black and white, looking over shoulder, soft expression, desaturated vertical strip""]',
+ 0, 'colorful hero against monochrome black and white background, white base', 'dramatic, editorial, stylish, modern, high-fashion',
+ 'vertical strip panel dividers, subtle gradient fade between strips, clean modern lines',
+ '',
+ 'EDITORIAL STRIP PANEL style: Background has 4-5 VERTICAL STRIP PANELS side by side spanning the full height, each showing a different B&W (black and white desaturated) photo of the person in different poses. The strips should have subtle gaps or fade between them. The HERO portrait is in the CENTER FOREGROUND, FULLY COLORFUL and vibrant, overlapping the B&W strips, taking about 50-60 percent width. The hero is sharp and prominent while B&W strips are slightly softer. At the BOTTOM CENTER: the person name in LARGE STYLISH SCRIPT/CALLIGRAPHY FONT with appropriate color. Below the name: occasion text in smaller uppercase letters. White or very light background base visible between strips. Overall look: high-fashion editorial poster.',
+ '🖤', 1, 1, 1, 1, 11),
+
+('Neon Glow Portrait', 'Vibrant neon-lit portrait collage with electric colors and urban vibe', 'Portrait', 4,
+ '[""Center - hero portrait facing camera, confident expression, neon-lit, head and shoulders"",""Left background - side profile with neon pink glow rim lighting, dreamy soft blend"",""Right background - three-quarter angle with neon blue glow, soft overlay blend"",""Top background - close-up face looking up, neon purple tones, faded dreamy overlay""]',
+ 0, 'electric neon pink, neon blue, neon purple, deep black, hot magenta', 'futuristic, urban, vibrant, edgy, electric',
+ 'neon light streaks, glowing lines, light trails, subtle smoke, electric sparks, lens flare',
+ '',
+ 'Cinematic multi-exposure with NEON GLOW aesthetic. Dark/black background. Hero portrait center foreground with vivid neon rim lighting (pink on one side, blue on other). Other photos blended as translucent neon-tinted overlays. Neon light streaks and glowing lines between images. Name at bottom in neon-style glowing font. NO frames — seamless neon-lit blend.',
+ '💜', 1, 1, 0, 1, 12),
+
+('Floral Elegance', 'Beautiful floral-framed portrait collage with watercolor flowers', 'Portrait', 4,
+ '[""Center - elegant portrait with warm smile, head and shoulders, sharp focus"",""Top-left - gentle three-quarter angle, soft floral glow, dreamy close-up blend"",""Top-right - looking to the side, peaceful expression, watercolor overlay blend"",""Bottom - wider medium shot, different angle, soft floral fade behind hero""]',
+ 0, 'soft blush pink, sage green, lavender, cream, rose gold', 'elegant, feminine, romantic, delicate, graceful',
+ 'watercolor roses, peonies, eucalyptus leaves, delicate baby breath flowers, gold leaf accents, soft petals',
+ '',
+ 'Elegant FLORAL FRAME style. Hero portrait in center with a soft oval or circular floral frame made of watercolor roses and greenery. Other photos softly blended into background with floral overlay. Lush watercolor flower arrangements framing the entire composition — top corners and bottom. Name at bottom in elegant rose-gold script font. Background: soft cream to blush gradient. Delicate and feminine aesthetic.',
+ '🌸', 1, 1, 1, 1, 13)
+");
+            app.Logger.LogInformation("Seeded {Count} CollageTemplates.", 13);
+        }
+    }
+    catch (Exception ex)
+    {
+        app.Logger.LogWarning(ex, "CollageTemplates seeding failed (non-fatal)");
     }
 
     // Add StyleGroupId column to StylePresets if missing

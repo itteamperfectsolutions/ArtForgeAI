@@ -1,0 +1,765 @@
+@page "/photo-collages"
+@rendermode InteractiveServer
+@attribute [Authorize]
+@inject ICollageTemplateService TemplateService
+@inject IGeminiImageService GeminiService
+@inject IImageStorageService ImageStorage
+@inject IJSRuntime JS
+@inject ILogger<PhotoCollages> Logger
+@inject ISubscriptionService SubscriptionService
+@inject ICoinService CoinService
+@inject AuthenticationStateProvider AuthState
+@inject NavigationManager Nav
+@inject IWebHostEnvironment Env
+@inject IImageEnhancerService ImageEnhancer
+@implements IDisposable
+
+<PageTitle>ArtForge AI - Photo Collages</PageTitle>
+
+<div class="page-header">
+    <h2>Photo Collages</h2>
+    <p>Select a template, upload one photo, and AI generates all variations for a stunning collage</p>
+</div>
+
+@* Hidden file input *@
+<input type="file" id="pcPhotoInput" accept=".jpg,.jpeg,.png,.webp" style="display:none;" />
+
+@if (_selectedTemplate is null)
+{
+    @* ── Step 1: Template Selection ── *@
+    <div class="pc-category-tabs">
+        <button class="pc-tab @(_selectedCategory is null ? "pc-tab-active" : "")"
+                @onclick="() => FilterCategory(null)">All</button>
+        @foreach (var cat in _categories)
+        {
+            var c = cat;
+            <button class="pc-tab @(_selectedCategory == c ? "pc-tab-active" : "")"
+                    @onclick="() => FilterCategory(c)">@c</button>
+        }
+    </div>
+
+    <div class="pc-template-grid">
+        @foreach (var t in GetFilteredTemplates())
+        {
+            var tmpl = t;
+            <div class="pc-template-card" @onclick="() => SelectTemplate(tmpl)">
+                @if (!string.IsNullOrEmpty(tmpl.ThumbnailPath))
+                {
+                    <div class="pc-template-thumb">
+                        <img src="/@tmpl.ThumbnailPath" alt="@tmpl.Name" />
+                    </div>
+                }
+                else
+                {
+                    <div class="pc-template-icon">@tmpl.IconEmoji</div>
+                }
+                <div class="pc-template-name">@tmpl.Name</div>
+                <div class="pc-template-meta">
+                    <span class="pc-template-cat">@tmpl.Category</span>
+                    <span class="pc-template-slots">@tmpl.SlotCount photos</span>
+                </div>
+                <div class="pc-template-desc">@tmpl.Description</div>
+            </div>
+        }
+    </div>
+}
+else
+{
+    @* ── Steps 2-4: Upload, Generate, Compose ── *@
+    <div class="create-layout">
+        <div class="create-left">
+            <div class="card">
+                <div class="card-body">
+                    @* Template Info with Thumbnail *@
+                    <div class="pc-selected-header">
+                        @if (!string.IsNullOrEmpty(_selectedTemplate.ThumbnailPath))
+                        {
+                            <div class="pc-selected-thumb">
+                                <img src="/@_selectedTemplate.ThumbnailPath" alt="@_selectedTemplate.Name" />
+                            </div>
+                        }
+                        else
+                        {
+                            <span class="pc-selected-icon">@_selectedTemplate.IconEmoji</span>
+                        }
+                        <div style="flex:1;">
+                            <strong>@_selectedTemplate.Name</strong>
+                            <div style="font-size:0.75rem;color:var(--text-muted);">@_selectedTemplate.Description</div>
+                        </div>
+                        <button class="btn-secondary btn-sm" @onclick="DeselectTemplate"
+                                disabled="@_isProcessing" style="margin-left:auto;">Change</button>
+                    </div>
+
+                    @* Personalisation inputs (shown if template has Ask* flags) *@
+                    @if (_selectedTemplate.AskName || _selectedTemplate.AskOccasion || _selectedTemplate.AskDate || _selectedTemplate.AskMessage)
+                    {
+                        <hr style="margin:0.5rem 0;border-color:var(--border-color);" />
+
+                        <div class="mb-3">
+                            <label class="form-label" style="font-size:0.82rem;">Personalise</label>
+                            <div style="display:flex;flex-direction:column;gap:0.4rem;">
+                                @if (_selectedTemplate.AskName)
+                                {
+                                    <div class="qs-field" style="margin:0;">
+                                        <label style="font-size:0.75rem;">Name <span style="color:var(--text-muted);font-size:0.68rem;">(displayed on collage)</span></label>
+                                        <input type="text" class="form-input" @bind="_userName" placeholder="e.g. Shree, Lakshmi..." maxlength="50" />
+                                    </div>
+                                }
+                                @if (_selectedTemplate.AskOccasion)
+                                {
+                                    <div class="qs-field" style="margin:0;">
+                                        <label style="font-size:0.75rem;">Occasion <span style="color:var(--text-muted);font-size:0.68rem;">(optional)</span></label>
+                                        <input type="text" class="form-input" @bind="_userOccasion" placeholder="e.g. Happy Birthday, Wedding Day..." maxlength="100" />
+                                    </div>
+                                }
+                                @if (_selectedTemplate.AskDate)
+                                {
+                                    <div class="qs-field" style="margin:0;">
+                                        <label style="font-size:0.75rem;">Special Date <span style="color:var(--text-muted);font-size:0.68rem;">(optional — shown as calendar)</span></label>
+                                        <input type="date" class="form-input" @bind="_userDate" />
+                                    </div>
+                                }
+                                @if (_selectedTemplate.AskMessage)
+                                {
+                                    <div class="qs-field" style="margin:0;">
+                                        <label style="font-size:0.75rem;">Message <span style="color:var(--text-muted);font-size:0.68rem;">(optional — auto-generated if blank)</span></label>
+                                        <textarea class="form-input" @bind="_userMessage" rows="2" placeholder="e.g. Wishing you all the best!" maxlength="200"></textarea>
+                                    </div>
+                                }
+                            </div>
+                        </div>
+                    }
+
+                    <hr style="margin:0.5rem 0;border-color:var(--border-color);" />
+
+                    @* Step 2: Upload Master Photo *@
+                    <div class="mb-3">
+                        <label class="form-label">
+                            <span class="tc-step-badge">1</span> Upload Your Photo
+                        </label>
+                        @if (_masterPhotoDataUrl is not null)
+                        {
+                            <div class="tc-template-preview" style="max-height:180px;">
+                                <img src="@_masterPhotoDataUrl" alt="Your Photo" style="max-height:180px;" />
+                                <button class="mosaic-thumb-remove" @onclick="RemovePhoto"
+                                        disabled="@_isProcessing" title="Remove">&#10005;</button>
+                            </div>
+                        }
+                        else
+                        {
+                            <div class="upload-area" style="cursor:pointer;" @onclick="ClickPhotoInput">
+                                <div class="upload-icon">&#128247;</div>
+                                <div style="font-size:0.82rem;">Upload your photo</div>
+                                <div style="font-size:0.7rem;color:var(--text-muted);">One photo — AI creates all variations</div>
+                            </div>
+                        }
+                    </div>
+
+                    @* Slot Preview List *@
+                    @if (_masterPhotoDataUrl is not null)
+                    {
+                        <hr style="margin:0.5rem 0;border-color:var(--border-color);" />
+
+                        <div class="mb-3">
+                            <label class="form-label">
+                                <span class="tc-step-badge">2</span> Generate Slot Images
+                            </label>
+                            <p style="font-size:0.75rem;color:var(--text-muted);margin-bottom:0.5rem;">
+                                AI will generate @_selectedTemplate.SlotCount different variations of your photo.
+                            </p>
+
+                            <div class="pc-slot-list">
+                                @for (int i = 0; i < _slotDescriptions.Count; i++)
+                                {
+                                    var idx = i;
+                                    var hasGenerated = idx < _generatedSlots.Count && _generatedSlots[idx] is not null;
+                                    var isGenerating = _isProcessing && _currentSlotIndex == idx;
+
+                                    <div class="pc-slot-row @(isGenerating ? "pc-slot-active" : "") @(hasGenerated ? "pc-slot-done" : "")">
+                                        <span class="pc-slot-idx">@(idx + 1)</span>
+                                        <span class="pc-slot-desc">
+                                            @_slotDescriptions[idx]
+                                            @if (idx == _selectedTemplate.MasterSlotIndex)
+                                            {
+                                                <span class="pc-master-badge">MASTER</span>
+                                            }
+                                        </span>
+                                        @if (hasGenerated)
+                                        {
+                                            <span class="tc-status-done" style="font-size:0.65rem;">&#10004;</span>
+                                        }
+                                        else if (isGenerating)
+                                        {
+                                            <span class="tc-status-active" style="font-size:0.65rem;">...</span>
+                                        }
+                                    </div>
+                                }
+                            </div>
+
+                            @* Generate buttons *@
+                            @if (GetPendingSlotCount() > 0)
+                            {
+                                <button class="btn-primary-gradient" style="width:100%;margin-top:0.6rem;"
+                                        @onclick="GenerateAllSlots"
+                                        disabled="@_isProcessing">
+                                    @if (_isProcessing)
+                                    {
+                                        <span>Generating slot @(_currentSlotIndex + 1) of @_slotDescriptions.Count...</span>
+                                    }
+                                    else
+                                    {
+                                        <span>&#10024; Generate All Variations (@GetPendingSlotCount() remaining)</span>
+                                    }
+                                </button>
+                            }
+
+                            @if (_isProcessing)
+                            {
+                                <div class="tc-progress-bar" style="margin-top:0.5rem;">
+                                    <div class="tc-progress-fill" style="width:@(GetGeneratedPercent())%"></div>
+                                    <span class="tc-progress-text">@GetGeneratedCount() / @_slotDescriptions.Count</span>
+                                </div>
+                            }
+                        </div>
+
+                        @* Step 3: Generate Collage *@
+                        @if (GetGeneratedCount() == _slotDescriptions.Count)
+                        {
+                            <hr style="margin:0.5rem 0;border-color:var(--border-color);" />
+
+                            <div class="mb-3">
+                                <label class="form-label">
+                                    <span class="tc-step-badge">3</span> Create Final Collage
+                                </label>
+                                <button class="btn-primary-gradient" style="width:100%;"
+                                        @onclick="ComposeCollage"
+                                        disabled="@_isComposing">
+                                    @if (_isComposing)
+                                    {
+                                        <span>Composing collage...</span>
+                                    }
+                                    else
+                                    {
+                                        <span>&#127912; Create Collage</span>
+                                    }
+                                </button>
+                            </div>
+                        }
+                    }
+                </div>
+            </div>
+
+            @if (!string.IsNullOrEmpty(_errorMessage))
+            {
+                <div class="card" style="margin-top:0.75rem;border-left:3px solid var(--danger);">
+                    <div class="card-body" style="padding:0.75rem 1rem;color:var(--danger);font-size:0.85rem;">
+                        <strong>Error:</strong> @_errorMessage
+                    </div>
+                </div>
+            }
+
+            @if (!string.IsNullOrEmpty(_statusMessage))
+            {
+                <div class="card" style="margin-top:0.75rem;border-left:3px solid var(--primary);">
+                    <div class="card-body" style="padding:0.75rem 1rem;color:var(--primary);font-size:0.85rem;">
+                        @_statusMessage
+                    </div>
+                </div>
+            }
+        </div>
+
+        @* ── Right column: results ── *@
+        <div class="create-right">
+            @* Final Collage *@
+            @if (_collageDataUrl is not null)
+            {
+                <div class="right-panel-card">
+                    <div class="right-panel-label">Final Collage</div>
+                    <div class="tc-result-preview">
+                        <img src="@_collageDataUrl" alt="Final Collage" />
+                    </div>
+                    <div class="right-panel-actions">
+                        <button class="btn-primary-gradient" @onclick="DownloadCollage">
+                            &#11015; Download Collage
+                        </button>
+                        @if (ImageEnhancer.IsAvailable)
+                        {
+                            <button class="btn-enhance" @onclick="EnhanceAndDownload" disabled="@_isEnhancing">
+                                @if (_isEnhancing)
+                                {
+                                    <span>Enhancing...</span>
+                                }
+                                else
+                                {
+                                    <span>&#9889; Enhance 4x</span>
+                                }
+                            </button>
+                        }
+                        <button class="btn-secondary" @onclick="ComposeCollage" disabled="@_isComposing">
+                            &#128260; Regenerate
+                        </button>
+                    </div>
+                    @if (_isEnhancing)
+                    {
+                        <div class="enhance-progress-bar">
+                            <div class="enhance-progress-fill" style="width:@(_enhanceProgress)%"></div>
+                            <span class="enhance-progress-text">@(_enhanceProgress)%</span>
+                        </div>
+                    }
+                </div>
+            }
+
+            @* Generated Slot Images *@
+            @if (_generatedSlots.Any(s => s is not null))
+            {
+                <div class="right-panel-card" style="margin-top:0.75rem;">
+                    <div class="right-panel-label">Generated Photos (@GetGeneratedCount() of @_slotDescriptions.Count)</div>
+                    <div class="pc-generated-grid">
+                        @for (int i = 0; i < _generatedSlots.Count; i++)
+                        {
+                            if (_generatedSlots[i] is null) continue;
+                            var idx = i;
+                            <div class="pc-generated-card">
+                                <div class="pc-generated-img">
+                                    <img src="@_generatedDataUrls[idx]" alt="Slot @(idx + 1)" />
+                                    @if (idx == _selectedTemplate.MasterSlotIndex)
+                                    {
+                                        <span class="pc-master-badge" style="position:absolute;top:4px;left:4px;">MASTER</span>
+                                    }
+                                </div>
+                                <div class="pc-generated-info">
+                                    <span class="pc-generated-label">@(idx + 1). @(_slotDescriptions.Count > idx ? _slotDescriptions[idx].Split('-').Last().Trim() : "")</span>
+                                    <div class="pc-generated-actions">
+                                        <button class="btn-secondary btn-sm" @onclick="() => DownloadSlotImage(idx)">
+                                            &#11015;
+                                        </button>
+                                        <button class="btn-secondary btn-sm" @onclick="() => RegenerateSlot(idx)"
+                                                disabled="@_isProcessing">
+                                            &#128260;
+                                        </button>
+                                    </div>
+                                </div>
+                            </div>
+                        }
+                    </div>
+                </div>
+            }
+
+            @if (_collageDataUrl is null && !_generatedSlots.Any(s => s is not null))
+            {
+                <div class="right-panel-card">
+                    <div class="right-panel-label">Template Preview</div>
+                    @if (!string.IsNullOrEmpty(_selectedTemplate.ThumbnailPath))
+                    {
+                        <div class="tc-result-preview">
+                            <img src="/@_selectedTemplate.ThumbnailPath" alt="@_selectedTemplate.Name template" />
+                        </div>
+                        <p style="text-align:center;font-size:0.78rem;color:var(--text-muted);margin-top:0.4rem;">
+                            @if (_masterPhotoDataUrl is null)
+                            {
+                                <span>Upload your photo — the final collage will match this template design</span>
+                            }
+                            else
+                            {
+                                <span>Click "Generate All Variations" to create themed photos</span>
+                            }
+                        </p>
+                    }
+                    else
+                    {
+                        <div class="right-panel-empty" style="padding:2rem;">
+                            <div class="empty-icon">@_selectedTemplate.IconEmoji</div>
+                            <p>
+                                @if (_masterPhotoDataUrl is null)
+                                {
+                                    <span>Upload your photo to get started</span>
+                                }
+                                else
+                                {
+                                    <span>Click "Generate All Variations" to create themed photos</span>
+                                }
+                            </p>
+                        </div>
+                    }
+                </div>
+            }
+        </div>
+    </div>
+}
+
+<Toast @ref="_toast" />
+
+@code {
+    private List<ArtForgeAI.Models.CollageTemplate> _templates = new();
+    private List<string> _categories = new();
+    private string? _selectedCategory;
+    private ArtForgeAI.Models.CollageTemplate? _selectedTemplate;
+    private List<string> _slotDescriptions = new();
+
+    // Master photo
+    private byte[]? _masterPhotoBytes;
+    private string? _masterPhotoMime;
+
+    // User personalisation inputs
+    private string _userName = "";
+    private string _userOccasion = "";
+    private DateTime? _userDate;
+    private string _userMessage = "";
+    private string? _masterPhotoDataUrl;
+
+    // Generated slots
+    private List<byte[]?> _generatedSlots = new();
+    private List<string?> _generatedDataUrls = new();
+    private int _currentSlotIndex;
+
+    // Final collage
+    private byte[]? _collageBytes;
+    private string? _collageDataUrl;
+
+    // State
+    private bool _isProcessing;
+    private bool _isComposing;
+    private bool _isEnhancing;
+    private int _enhanceProgress;
+    private string? _errorMessage;
+    private string? _statusMessage;
+    private Toast? _toast;
+    private DotNetObjectReference<PhotoCollages>? _dotNetRef;
+
+    protected override async Task OnInitializedAsync()
+    {
+        var authState = await AuthState.GetAuthenticationStateAsync();
+        if (!authState.User.IsInRole("SuperAdmin"))
+        {
+            var userIdStr = authState.User.FindFirstValue(System.Security.Claims.ClaimTypes.NameIdentifier);
+            if (int.TryParse(userIdStr, out var uid))
+            {
+                if (!await SubscriptionService.HasFeatureAccessAsync(uid, ArtForgeAI.Models.FeatureAccess.PhotoCollages))
+                {
+                    Nav.NavigateTo("/pricing", forceLoad: true);
+                    return;
+                }
+            }
+        }
+
+        _templates = await TemplateService.GetActiveAsync();
+        _categories = await TemplateService.GetCategoriesAsync();
+    }
+
+    protected override async Task OnAfterRenderAsync(bool firstRender)
+    {
+        if (firstRender)
+        {
+            _dotNetRef = DotNetObjectReference.Create(this);
+            await JS.InvokeVoidAsync("templateCollageHelper.register", "pcPhotoInput", _dotNetRef, "OnPhotoReceived");
+        }
+    }
+
+    public void Dispose() => _dotNetRef?.Dispose();
+
+    // ── Template Selection ──
+
+    private void FilterCategory(string? cat) => _selectedCategory = cat;
+
+    private List<ArtForgeAI.Models.CollageTemplate> GetFilteredTemplates()
+    {
+        if (_selectedCategory is null) return _templates;
+        return _templates.Where(t => t.Category == _selectedCategory).ToList();
+    }
+
+    private void SelectTemplate(ArtForgeAI.Models.CollageTemplate t)
+    {
+        _selectedTemplate = t;
+        try
+        {
+            _slotDescriptions = System.Text.Json.JsonSerializer.Deserialize<List<string>>(t.SlotDescriptionsJson) ?? new();
+        }
+        catch { _slotDescriptions = new(); }
+
+        _generatedSlots = Enumerable.Repeat<byte[]?>(null, t.SlotCount).ToList();
+        _generatedDataUrls = Enumerable.Repeat<string?>(null, t.SlotCount).ToList();
+        _collageBytes = null;
+        _collageDataUrl = null;
+        _masterPhotoBytes = null;
+        _masterPhotoDataUrl = null;
+    }
+
+    private void DeselectTemplate()
+    {
+        _selectedTemplate = null;
+        _masterPhotoBytes = null;
+        _masterPhotoDataUrl = null;
+        _generatedSlots.Clear();
+        _generatedDataUrls.Clear();
+        _collageBytes = null;
+        _collageDataUrl = null;
+        _errorMessage = null;
+        _statusMessage = null;
+        _userName = _userOccasion = _userMessage = "";
+        _userDate = null;
+    }
+
+    // ── Photo Upload ──
+
+    private async Task ClickPhotoInput()
+    {
+        await JS.InvokeVoidAsync("templateCollageHelper.click", "pcPhotoInput");
+    }
+
+    [JSInvokable]
+    public Task OnPhotoReceived(List<TemplateCollage.FileData> files)
+    {
+        if (files is null || files.Count == 0) return Task.CompletedTask;
+        _errorMessage = null;
+
+        try
+        {
+            var f = files[0];
+            _masterPhotoBytes = Convert.FromBase64String(f.Base64);
+            _masterPhotoMime = GetMimeType(f.Name);
+            _masterPhotoDataUrl = $"data:{_masterPhotoMime};base64,{f.Base64}";
+
+            // Reset generated images
+            for (int i = 0; i < _generatedSlots.Count; i++)
+            {
+                _generatedSlots[i] = null;
+                _generatedDataUrls[i] = null;
+            }
+            _collageBytes = null;
+            _collageDataUrl = null;
+        }
+        catch (Exception ex)
+        {
+            Logger.LogError(ex, "Photo upload failed");
+            _errorMessage = "Photo upload failed.";
+        }
+        StateHasChanged();
+        return Task.CompletedTask;
+    }
+
+    private void RemovePhoto()
+    {
+        _masterPhotoBytes = null;
+        _masterPhotoMime = null;
+        _masterPhotoDataUrl = null;
+        for (int i = 0; i < _generatedSlots.Count; i++)
+        {
+            _generatedSlots[i] = null;
+            _generatedDataUrls[i] = null;
+        }
+        _collageBytes = null;
+        _collageDataUrl = null;
+    }
+
+    // ── Slot Generation ──
+
+    private async Task GenerateAllSlots()
+    {
+        if (_selectedTemplate is null || _masterPhotoBytes is null || _isProcessing) return;
+
+        _isProcessing = true;
+        _errorMessage = null;
+        StateHasChanged();
+
+        try
+        {
+            for (int i = 0; i < _selectedTemplate.SlotCount; i++)
+            {
+                if (_generatedSlots[i] is not null) continue; // skip already generated
+
+                _currentSlotIndex = i;
+                _statusMessage = $"Generating photo {i + 1} of {_selectedTemplate.SlotCount}...";
+                StateHasChanged();
+
+                var bytes = await TemplateService.GenerateSlotImageAsync(
+                    _selectedTemplate, _masterPhotoBytes, _masterPhotoMime!, i, 1024, 1024);
+
+                _generatedSlots[i] = bytes;
+                _generatedDataUrls[i] = $"data:image/png;base64,{Convert.ToBase64String(bytes)}";
+                StateHasChanged();
+            }
+
+            _statusMessage = $"All {_selectedTemplate.SlotCount} photos generated! Review below, then create the collage.";
+            if (_toast is not null) _ = _toast.ShowAsync("All slot images generated!");
+        }
+        catch (Exception ex)
+        {
+            Logger.LogError(ex, "Slot generation failed at index {Idx}", _currentSlotIndex);
+            _errorMessage = $"Generation failed on slot {_currentSlotIndex + 1}. Try again.";
+        }
+        finally
+        {
+            _isProcessing = false;
+            _currentSlotIndex = -1;
+            StateHasChanged();
+        }
+    }
+
+    private async Task RegenerateSlot(int index)
+    {
+        if (_selectedTemplate is null || _masterPhotoBytes is null || _isProcessing) return;
+
+        _isProcessing = true;
+        _currentSlotIndex = index;
+        _errorMessage = null;
+        _statusMessage = $"Regenerating photo {index + 1}...";
+        StateHasChanged();
+
+        try
+        {
+            var bytes = await TemplateService.GenerateSlotImageAsync(
+                _selectedTemplate, _masterPhotoBytes, _masterPhotoMime!, index, 1024, 1024);
+
+            _generatedSlots[index] = bytes;
+            _generatedDataUrls[index] = $"data:image/png;base64,{Convert.ToBase64String(bytes)}";
+            _statusMessage = $"Photo {index + 1} regenerated!";
+            if (_toast is not null) _ = _toast.ShowAsync($"Photo {index + 1} regenerated!");
+        }
+        catch (Exception ex)
+        {
+            Logger.LogError(ex, "Slot regeneration failed at {Idx}", index);
+            _errorMessage = $"Regeneration failed. Try again.";
+        }
+        finally
+        {
+            _isProcessing = false;
+            _currentSlotIndex = -1;
+            StateHasChanged();
+        }
+    }
+
+    // ── Final Collage ──
+
+    private async Task ComposeCollage()
+    {
+        if (_selectedTemplate is null || _isComposing) return;
+        var slotImages = _generatedSlots.Where(s => s is not null).Select(s => s!).ToList();
+        if (slotImages.Count == 0) return;
+
+        // Debit coins
+        var authState2 = await AuthState.GetAuthenticationStateAsync();
+        var uidStr = authState2.User.FindFirstValue(System.Security.Claims.ClaimTypes.NameIdentifier);
+        if (int.TryParse(uidStr, out var userId) && !authState2.User.IsInRole("SuperAdmin"))
+        {
+            var cost = ArtForgeAI.Models.FeatureAccess.GetCost(ArtForgeAI.Models.FeatureAccess.PhotoCollages);
+            if (!await CoinService.DebitCoinsAsync(userId, cost, ArtForgeAI.Models.CoinTransactionType.GenerationSpend, "Photo Collage composition"))
+            {
+                _errorMessage = "Insufficient coins.";
+                return;
+            }
+        }
+
+        _isComposing = true;
+        _errorMessage = null;
+        _statusMessage = "Composing final collage...";
+        StateHasChanged();
+
+        try
+        {
+            var personalisation = new CollagePersonalisation
+            {
+                Name = string.IsNullOrWhiteSpace(_userName) ? null : _userName.Trim(),
+                Occasion = string.IsNullOrWhiteSpace(_userOccasion) ? null : _userOccasion.Trim(),
+                Date = _userDate,
+                Message = string.IsNullOrWhiteSpace(_userMessage) ? null : _userMessage.Trim()
+            };
+            _collageBytes = await TemplateService.ComposeCollageAsync(
+                _selectedTemplate, slotImages, 1024, 1440, personalisation);
+            _collageDataUrl = $"data:image/png;base64,{Convert.ToBase64String(_collageBytes)}";
+            _statusMessage = "Collage created!";
+            if (_toast is not null) _ = _toast.ShowAsync("Collage created!");
+        }
+        catch (Exception ex)
+        {
+            Logger.LogError(ex, "Collage composition failed");
+            _errorMessage = "Collage composition failed. Try again.";
+        }
+        finally
+        {
+            _isComposing = false;
+            StateHasChanged();
+        }
+    }
+
+    // ── Downloads ──
+
+    private async Task DownloadCollage()
+    {
+        if (_collageBytes is null) return;
+        var b64 = Convert.ToBase64String(_collageBytes);
+        await JS.InvokeVoidAsync("downloadFileFromBytes",
+            $"collage_{DateTime.Now:yyyyMMdd_HHmmss}.png", "image/png", b64);
+    }
+
+    private async Task DownloadSlotImage(int index)
+    {
+        if (index < 0 || index >= _generatedSlots.Count || _generatedSlots[index] is null) return;
+        var b64 = Convert.ToBase64String(_generatedSlots[index]!);
+        await JS.InvokeVoidAsync("downloadFileFromBytes",
+            $"slot_{index + 1}_{DateTime.Now:yyyyMMdd_HHmmss}.png", "image/png", b64);
+    }
+
+    private async Task EnhanceAndDownload()
+    {
+        if (_collageBytes is null || _isEnhancing) return;
+        _isEnhancing = true;
+        _enhanceProgress = 0;
+        StateHasChanged();
+
+        try
+        {
+            var outputDir = Path.Combine(Env.WebRootPath, "generated");
+            Directory.CreateDirectory(outputDir);
+            var tempPath = Path.Combine(outputDir, $"pc_temp_{Guid.NewGuid():N}.png");
+            await File.WriteAllBytesAsync(tempPath, _collageBytes);
+
+            var progress = new Progress<int>(pct =>
+            {
+                _enhanceProgress = pct;
+                InvokeAsync(StateHasChanged);
+            });
+
+            var enhancedPath = await ImageEnhancer.EnhanceImageAsync(tempPath, progress);
+            var fullPath = Path.IsPathRooted(enhancedPath)
+                ? enhancedPath
+                : Path.Combine(Env.WebRootPath, enhancedPath.Replace('/', Path.DirectorySeparatorChar));
+            var bytes = await File.ReadAllBytesAsync(fullPath);
+            await JS.InvokeVoidAsync("downloadFileFromBytes",
+                $"collage_4x_{DateTime.Now:yyyyMMdd_HHmmss}.png", "image/png", Convert.ToBase64String(bytes));
+            try { File.Delete(tempPath); } catch { }
+            if (_toast is not null) _ = _toast.ShowAsync("Enhanced 4x downloaded!");
+        }
+        catch (Exception ex)
+        {
+            Logger.LogError(ex, "Enhance failed");
+            _errorMessage = "Enhancement failed.";
+        }
+        finally
+        {
+            _isEnhancing = false;
+            StateHasChanged();
+        }
+    }
+
+    // ── Helpers ──
+
+    private int GetPendingSlotCount() => _generatedSlots.Count(s => s is null);
+    private int GetGeneratedCount() => _generatedSlots.Count(s => s is not null);
+    private int GetGeneratedPercent()
+    {
+        var total = _slotDescriptions.Count;
+        return total > 0 ? (GetGeneratedCount() * 100) / total : 0;
+    }
+
+    private static string GetMimeType(string fileName)
+    {
+        var ext = Path.GetExtension(fileName).ToLowerInvariant();
+        return ext switch
+        {
+            ".jpg" or ".jpeg" => "image/jpeg",
+            ".png" => "image/png",
+            ".webp" => "image/webp",
+            _ => "image/png"
+        };
+    }
+}

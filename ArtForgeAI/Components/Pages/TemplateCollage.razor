@@ -1,0 +1,1001 @@
+@page "/template-collage"
+@rendermode InteractiveServer
+@attribute [Authorize]
+@inject ITemplateCollageService CollageService
+@inject IImageStorageService ImageStorage
+@inject IGeminiImageService GeminiService
+@inject IJSRuntime JS
+@inject ILogger<TemplateCollage> Logger
+@inject ISubscriptionService SubscriptionService
+@inject ICoinService CoinService
+@inject AuthenticationStateProvider AuthState
+@inject NavigationManager Nav
+@inject IWebHostEnvironment Env
+@inject IImageEnhancerService ImageEnhancer
+@implements IDisposable
+
+<PageTitle>ArtForge AI - Template Collage</PageTitle>
+
+<div class="page-header">
+    <h2>Template Collage</h2>
+    <p>Upload a template, process each photo individually, assign to slots, then generate</p>
+</div>
+
+<div class="create-layout">
+    @* ── Left column: controls ── *@
+    <div class="create-left">
+        <div class="card">
+            <div class="card-body">
+
+                @* Hidden file inputs — one per photo slot + template *@
+                <input type="file" id="tcTemplateInput" accept=".jpg,.jpeg,.png,.webp" style="display:none;" />
+                @for (int s = 0; s < _photoCount; s++)
+                {
+                    var slotIdx = s;
+                    <input type="file" id="tcPhotoInput_@slotIdx" accept=".jpg,.jpeg,.png,.webp" style="display:none;" />
+                }
+
+                @* ── Step 1: Template Upload ── *@
+                <div class="mb-3">
+                    <label class="form-label">
+                        <span class="tc-step-badge">1</span> Upload Template
+                    </label>
+                    @if (_templateDataUrl is not null)
+                    {
+                        <div class="tc-template-preview">
+                            <img src="@_templateDataUrl" alt="Template" />
+                            <button class="mosaic-thumb-remove" @onclick="RemoveTemplate" title="Remove"
+                                    disabled="@_isProcessing">&#10005;</button>
+                        </div>
+
+                        @if (_analysis is not null)
+                        {
+                            <div class="tc-analysis-card">
+                                <div class="tc-analysis-title">Template Analysis</div>
+                                <div class="tc-analysis-row">
+                                    <span class="tc-label">Colors:</span>
+                                    <span>@_analysis.ColorTheme</span>
+                                </div>
+                                <div class="tc-analysis-row">
+                                    <span class="tc-label">Mood:</span>
+                                    <span>@_analysis.Mood</span>
+                                </div>
+                                <div class="tc-analysis-row">
+                                    <span class="tc-label">Decorations:</span>
+                                    <span>@_analysis.DecorativeElements</span>
+                                </div>
+                                @if (!string.IsNullOrEmpty(_analysis.TextElements))
+                                {
+                                    <div class="tc-analysis-row">
+                                        <span class="tc-label">Text:</span>
+                                        <span>@_analysis.TextElements</span>
+                                    </div>
+                                }
+                                <div class="tc-analysis-row">
+                                    <span class="tc-label">Detected Slots:</span>
+                                    <span>@_analysis.PhotoSlotCount</span>
+                                </div>
+                            </div>
+                        }
+                    }
+                    else
+                    {
+                        <div class="upload-area" style="cursor:pointer;" @onclick="ClickTemplateInput">
+                            <div class="upload-icon">&#128444;</div>
+                            <div style="font-size:0.82rem;">Click to upload a collage template</div>
+                            <div style="font-size:0.7rem; color:var(--text-muted);">JPG, PNG, WebP</div>
+                        </div>
+                    }
+
+                    @if (_isAnalyzing)
+                    {
+                        <div class="tc-progress-bar">
+                            <div class="tc-progress-fill tc-progress-indeterminate"></div>
+                            <span class="tc-progress-text">Analyzing template...</span>
+                        </div>
+                    }
+                </div>
+
+                @* ── Step 2: Number of Photos ── *@
+                @if (_analysis is not null)
+                {
+                    <hr style="margin: 0.5rem 0; border-color: var(--border-color);" />
+
+                    <div class="mb-3">
+                        <label class="form-label">
+                            <span class="tc-step-badge">2</span> How many photos do you want?
+                        </label>
+                        <div class="tc-count-row">
+                            <button class="tc-count-btn" @onclick="() => ChangePhotoCount(-1)"
+                                    disabled="@(_photoCount <= 1 || _isProcessing)">&#8722;</button>
+                            <span class="tc-count-value">@_photoCount</span>
+                            <button class="tc-count-btn" @onclick="() => ChangePhotoCount(1)"
+                                    disabled="@(_photoCount >= 10 || _isProcessing)">&#43;</button>
+                            <span style="font-size:0.78rem; color:var(--text-muted); margin-left:0.5rem;">
+                                (template has @_analysis.PhotoSlotCount slots)
+                            </span>
+                        </div>
+                    </div>
+
+                    @* ── Step 3: Upload & Process Individual Photos ── *@
+                    <hr style="margin: 0.5rem 0; border-color: var(--border-color);" />
+
+                    <div class="mb-3">
+                        <label class="form-label">
+                            <span class="tc-step-badge">3</span> Upload Photos (one per slot)
+                        </label>
+                        <p style="font-size:0.75rem; color:var(--text-muted); margin-bottom:0.5rem;">
+                            Upload each photo separately. Each will be processed with the template's color theme.
+                        </p>
+
+                        <div class="tc-photo-slots">
+                            @for (int i = 0; i < _photoCount; i++)
+                            {
+                                var idx = i;
+                                var hasOriginal = idx < _uploadedPhotos.Count && _uploadedPhotos[idx] is not null;
+                                var hasProcessed = idx < _processedPhotos.Count && _processedPhotos[idx] is not null;
+                                var isProcessingThis = _isProcessing && _currentProcessingIndex == idx;
+
+                                <div class="tc-slot-card @(isProcessingThis ? "tc-slot-processing" : "") @(hasProcessed ? "tc-slot-done" : "")">
+                                    <div class="tc-slot-header">
+                                        <span class="tc-slot-number">Photo @(idx + 1)</span>
+                                        @if (hasProcessed)
+                                        {
+                                            <span class="tc-slot-status tc-status-done">&#10004; Processed</span>
+                                        }
+                                        else if (isProcessingThis)
+                                        {
+                                            <span class="tc-slot-status tc-status-active">Processing...</span>
+                                        }
+                                        else if (hasOriginal)
+                                        {
+                                            <span class="tc-slot-status tc-status-ready">Ready</span>
+                                        }
+                                    </div>
+
+                                    <div class="tc-slot-body">
+                                        @if (hasOriginal)
+                                        {
+                                            <div class="tc-slot-thumb">
+                                                <img src="@_uploadedPhotos[idx]!.DataUrl" alt="Photo @(idx + 1)" />
+                                                <button class="mosaic-thumb-remove" title="Remove"
+                                                        @onclick="() => RemovePhoto(idx)"
+                                                        disabled="@_isProcessing">&#10005;</button>
+                                            </div>
+                                        }
+                                        else
+                                        {
+                                            <div class="tc-slot-upload" @onclick="() => ClickPhotoInput(idx)">
+                                                <span class="upload-icon" style="font-size:1.3rem;">&#128247;</span>
+                                                <span style="font-size:0.75rem;">Upload</span>
+                                            </div>
+                                        }
+                                    </div>
+
+                                    @if (hasOriginal && !hasProcessed && !isProcessingThis)
+                                    {
+                                        <button class="btn-secondary btn-sm tc-slot-btn"
+                                                @onclick="() => ProcessSinglePhoto(idx)"
+                                                disabled="@_isProcessing">
+                                            &#10024; Process
+                                        </button>
+                                    }
+                                    @if (hasProcessed)
+                                    {
+                                        <button class="btn-secondary btn-sm tc-slot-btn"
+                                                @onclick="() => ReprocessPhoto(idx)"
+                                                disabled="@_isProcessing">
+                                            &#128260; Redo
+                                        </button>
+                                    }
+                                </div>
+                            }
+                        </div>
+
+                        @* Process All button *@
+                        @if (GetUnprocessedCount() > 0)
+                        {
+                            <button class="btn-primary-gradient" style="width:100%; margin-top:0.6rem;"
+                                    @onclick="ProcessAllPhotos"
+                                    disabled="@_isProcessing">
+                                @if (_isProcessing)
+                                {
+                                    <span>Processing @(_currentProcessingIndex + 1) of @_photoCount...</span>
+                                }
+                                else
+                                {
+                                    <span>&#10024; Process All (@GetUnprocessedCount() remaining)</span>
+                                }
+                            </button>
+                        }
+
+                        @if (_isProcessing)
+                        {
+                            <div class="tc-progress-bar" style="margin-top:0.5rem;">
+                                <div class="tc-progress-fill" style="width:@(GetProcessingPercent())%"></div>
+                                <span class="tc-progress-text">@GetProcessedCount() / @GetTotalPhotoCount()</span>
+                            </div>
+                        }
+                    </div>
+
+                    @* ── Step 4: Assign Slots & Generate ── *@
+                    @if (_processedPhotos.Count(p => p is not null) > 0)
+                    {
+                        <hr style="margin: 0.5rem 0; border-color: var(--border-color);" />
+
+                        <div class="mb-3">
+                            <label class="form-label">
+                                <span class="tc-step-badge">4</span> Assign to Slots & Generate
+                            </label>
+                            <p style="font-size:0.75rem; color:var(--text-muted); margin-bottom:0.5rem;">
+                                Assign each processed photo to a template slot. Then generate the collage.
+                            </p>
+
+                            <div class="tc-assign-list">
+                                @for (int i = 0; i < _processedPhotos.Count; i++)
+                                {
+                                    if (_processedPhotos[i] is null) continue;
+                                    var idx = i;
+                                    <div class="tc-assign-row">
+                                        <div class="tc-assign-thumb">
+                                            <img src="@_processedPhotos[idx]!.DataUrl" alt="Processed @(idx + 1)" />
+                                        </div>
+                                        <span class="tc-assign-label">Photo @(idx + 1)</span>
+                                        <span class="tc-assign-arrow">&#10132;</span>
+                                        <select class="form-input tc-assign-select"
+                                                value="@GetSlotAssignment(idx)"
+                                                @onchange="(e) => SetSlotAssignment(idx, e)">
+                                            @for (int slot = 1; slot <= _analysis!.PhotoSlotCount; slot++)
+                                            {
+                                                var slotNum = slot;
+                                                var taken = IsSlotTaken(slotNum, idx);
+                                                <option value="@slotNum" disabled="@taken">
+                                                    Slot @slotNum @(taken ? "(taken)" : "")
+                                                </option>
+                                            }
+                                        </select>
+                                    </div>
+                                }
+                            </div>
+
+                            <button class="btn-primary-gradient" style="width:100%; margin-top:0.6rem;"
+                                    @onclick="GenerateCollage"
+                                    disabled="@(_isGeneratingCollage || GetProcessedCount() == 0)">
+                                @if (_isGeneratingCollage)
+                                {
+                                    <span>Generating Collage...</span>
+                                }
+                                else
+                                {
+                                    <span>&#127912; Generate Collage</span>
+                                }
+                            </button>
+                        </div>
+                    }
+                }
+            </div>
+        </div>
+
+        @if (!string.IsNullOrEmpty(_errorMessage))
+        {
+            <div class="card" style="margin-top: 0.75rem; border-left: 3px solid var(--danger);">
+                <div class="card-body" style="padding: 0.75rem 1rem; color: var(--danger); font-size: 0.85rem;">
+                    <strong>Error:</strong> @_errorMessage
+                </div>
+            </div>
+        }
+
+        @if (!string.IsNullOrEmpty(_statusMessage))
+        {
+            <div class="card" style="margin-top: 0.75rem; border-left: 3px solid var(--primary);">
+                <div class="card-body" style="padding: 0.75rem 1rem; color: var(--primary); font-size: 0.85rem;">
+                    @_statusMessage
+                </div>
+            </div>
+        }
+    </div>
+
+    @* ── Right column: results ── *@
+    <div class="create-right">
+        @* Generated Collage *@
+        @if (_collageResultDataUrl is not null)
+        {
+            <div class="right-panel-card">
+                <div class="right-panel-label">Generated Collage</div>
+                <div class="tc-result-preview">
+                    <img src="@_collageResultDataUrl" alt="Generated Collage" />
+                </div>
+                <div class="right-panel-actions">
+                    <button class="btn-primary-gradient" @onclick="DownloadCollage" disabled="@_isProcessing">
+                        &#11015; Download Collage
+                    </button>
+                    @if (ImageEnhancer.IsAvailable)
+                    {
+                        <button class="btn-enhance" @onclick="EnhanceAndDownload" disabled="@(_isEnhancing || _isProcessing)">
+                            @if (_isEnhancing)
+                            {
+                                <span>Enhancing...</span>
+                            }
+                            else
+                            {
+                                <span>&#9889; Enhance 4x</span>
+                            }
+                        </button>
+                    }
+                    <button class="btn-secondary" @onclick="GenerateCollage"
+                            disabled="@(_isGeneratingCollage)">
+                        &#128260; Regenerate
+                    </button>
+                </div>
+                @if (_isEnhancing)
+                {
+                    <div class="enhance-progress-bar">
+                        <div class="enhance-progress-fill" style="width: @(_enhanceProgress)%"></div>
+                        <span class="enhance-progress-text">@(_enhanceProgress)%</span>
+                    </div>
+                }
+            </div>
+        }
+
+        @* Processed Photos Gallery — always show individual results *@
+        @{
+            var processedItems = _processedPhotos
+                .Select((p, i) => new { Photo = p, Index = i })
+                .Where(x => x.Photo is not null)
+                .ToList();
+        }
+        @if (processedItems.Count > 0)
+        {
+            <div class="right-panel-card" style="margin-top: 0.75rem;">
+                <div class="right-panel-label">Processed Photos (@processedItems.Count)</div>
+                <div class="tc-processed-grid">
+                    @foreach (var item in processedItems)
+                    {
+                        var idx = item.Index;
+                        var photo = item.Photo!;
+                        <div class="tc-processed-item">
+                            <div class="tc-processed-compare">
+                                <div class="tc-compare-original">
+                                    <img src="@_uploadedPhotos[idx]!.DataUrl" alt="Original @(idx + 1)" />
+                                    <span class="tc-compare-label">Original</span>
+                                </div>
+                                <div class="tc-compare-arrow">&#10132;</div>
+                                <div class="tc-compare-processed">
+                                    <img src="@photo.DataUrl" alt="Processed @(idx + 1)" />
+                                    <span class="tc-compare-label">Themed</span>
+                                </div>
+                            </div>
+                            <div class="tc-processed-actions">
+                                <span class="tc-processed-slot-label">
+                                    Slot @GetSlotAssignment(idx)
+                                </span>
+                                <button class="btn-secondary btn-sm" @onclick="() => DownloadProcessedPhoto(idx)">
+                                    &#11015; Download
+                                </button>
+                                <button class="btn-secondary btn-sm" @onclick="() => ReprocessPhoto(idx)"
+                                        disabled="@_isProcessing">
+                                    &#128260; Redo
+                                </button>
+                            </div>
+                        </div>
+                    }
+                </div>
+            </div>
+        }
+
+        @if (_collageResultDataUrl is null && processedItems.Count == 0)
+        {
+            <div class="right-panel-empty">
+                <div class="empty-icon">&#127912;</div>
+                <p>
+                    @if (_templateDataUrl is null)
+                    {
+                        <span>Upload a collage template to get started</span>
+                    }
+                    else if (_analysis is null)
+                    {
+                        <span>Analyzing template...</span>
+                    }
+                    else
+                    {
+                        <span>Set the number of photos, upload each one, and process them individually</span>
+                    }
+                </p>
+            </div>
+        }
+    </div>
+</div>
+
+<Toast @ref="_toast" />
+
+@code {
+    // ── State ──
+    private byte[]? _templateBytes;
+    private string? _templateMime;
+    private string? _templateDataUrl;
+    private TemplateAnalysis? _analysis;
+
+    private int _photoCount = 5; // user-configurable
+    private List<PhotoItem?> _uploadedPhotos = new();
+    private List<PhotoItem?> _processedPhotos = new();
+    private Dictionary<int, int> _slotAssignments = new(); // photoIndex → slotNumber
+    private int _currentProcessingIndex;
+
+    private byte[]? _collageResultBytes;
+    private string? _collageResultDataUrl;
+
+    private bool _isAnalyzing;
+    private bool _isProcessing;
+    private bool _isGeneratingCollage;
+    private bool _isEnhancing;
+    private int _enhanceProgress;
+    private string? _errorMessage;
+    private string? _statusMessage;
+    private Toast? _toast;
+    private DotNetObjectReference<TemplateCollage>? _dotNetRef;
+    private bool _needsReRegister;
+
+    protected override async Task OnInitializedAsync()
+    {
+        var authState = await AuthState.GetAuthenticationStateAsync();
+        if (!authState.User.IsInRole("SuperAdmin"))
+        {
+            var userIdStr = authState.User.FindFirstValue(System.Security.Claims.ClaimTypes.NameIdentifier);
+            if (int.TryParse(userIdStr, out var uid))
+            {
+                if (!await SubscriptionService.HasFeatureAccessAsync(uid, ArtForgeAI.Models.FeatureAccess.MosaicPoster))
+                {
+                    Nav.NavigateTo("/pricing", forceLoad: true);
+                    return;
+                }
+            }
+        }
+
+        // Initialize photo slots
+        EnsurePhotoSlots();
+    }
+
+    protected override async Task OnAfterRenderAsync(bool firstRender)
+    {
+        if (firstRender)
+        {
+            _dotNetRef = DotNetObjectReference.Create(this);
+            await JS.InvokeVoidAsync("templateCollageHelper.register", "tcTemplateInput", _dotNetRef, "OnTemplateFileReceived");
+            await RegisterPhotoInputs();
+        }
+        if (_needsReRegister)
+        {
+            _needsReRegister = false;
+            await RegisterPhotoInputs();
+        }
+    }
+
+    private async Task RegisterPhotoInputs()
+    {
+        if (_dotNetRef is null) return;
+        for (int i = 0; i < _photoCount; i++)
+        {
+            try
+            {
+                await JS.InvokeVoidAsync("templateCollageHelper.register",
+                    $"tcPhotoInput_{i}", _dotNetRef, "OnSinglePhotoReceived");
+            }
+            catch { /* element may not exist yet */ }
+        }
+    }
+
+    public void Dispose()
+    {
+        _dotNetRef?.Dispose();
+    }
+
+    private void EnsurePhotoSlots()
+    {
+        while (_uploadedPhotos.Count < _photoCount) _uploadedPhotos.Add(null);
+        while (_processedPhotos.Count < _photoCount) _processedPhotos.Add(null);
+        // Auto-assign slots
+        for (int i = 0; i < _photoCount; i++)
+        {
+            if (!_slotAssignments.ContainsKey(i))
+                _slotAssignments[i] = i + 1;
+        }
+    }
+
+    private void ChangePhotoCount(int delta)
+    {
+        var newCount = Math.Clamp(_photoCount + delta, 1, 10);
+        if (newCount == _photoCount) return;
+        _photoCount = newCount;
+        EnsurePhotoSlots();
+        _needsReRegister = true;
+    }
+
+    // ── File Input Handlers ──
+
+    private async Task ClickTemplateInput()
+    {
+        await JS.InvokeVoidAsync("templateCollageHelper.click", "tcTemplateInput");
+    }
+
+    [JSInvokable]
+    public async Task OnTemplateFileReceived(List<FileData> files)
+    {
+        if (files is null || files.Count == 0) return;
+        _errorMessage = null;
+        _statusMessage = null;
+
+        try
+        {
+            var f = files[0];
+            _templateBytes = Convert.FromBase64String(f.Base64);
+            _templateMime = GetMimeType(f.Name);
+            _templateDataUrl = $"data:{_templateMime};base64,{f.Base64}";
+
+            // Clear previous state
+            _analysis = null;
+            _processedPhotos = new List<PhotoItem?>();
+            _collageResultBytes = null;
+            _collageResultDataUrl = null;
+            _slotAssignments.Clear();
+            EnsurePhotoSlots();
+
+            StateHasChanged();
+
+            // Auto-analyze the template
+            await AnalyzeTemplate();
+        }
+        catch (Exception ex)
+        {
+            Logger.LogError(ex, "Template upload failed");
+            _errorMessage = "Template upload failed. Please try again.";
+        }
+        StateHasChanged();
+    }
+
+    [JSInvokable]
+    public async Task OnSinglePhotoReceived(List<FileData> files)
+    {
+        if (files is null || files.Count == 0) return;
+        _errorMessage = null;
+
+        // Find which slot this file input belongs to by checking which slot is empty
+        // The JS callback doesn't tell us which input triggered it, so we find first empty slot
+        // or allow overwrite of the last available slot
+        try
+        {
+            var f = files[0];
+            var bytes = Convert.FromBase64String(f.Base64);
+            var mime = GetMimeType(f.Name);
+            var item = new PhotoItem
+            {
+                FileName = f.Name,
+                Bytes = bytes,
+                MimeType = mime,
+                DataUrl = $"data:{mime};base64,{f.Base64}"
+            };
+
+            // Find which input was clicked — scan for first null or match by count
+            var slotIdx = -1;
+            for (int i = 0; i < _photoCount; i++)
+            {
+                if (i >= _uploadedPhotos.Count || _uploadedPhotos[i] is null)
+                {
+                    slotIdx = i;
+                    break;
+                }
+            }
+
+            // If all slots filled, this was likely a re-upload via a specific slot click
+            // We use the _pendingSlotIndex if available
+            if (slotIdx < 0) slotIdx = _pendingSlotIndex;
+            if (slotIdx < 0 || slotIdx >= _photoCount) return;
+
+            EnsurePhotoSlots();
+            _uploadedPhotos[slotIdx] = item;
+
+            // Clear processed version if re-uploading
+            if (slotIdx < _processedPhotos.Count)
+                _processedPhotos[slotIdx] = null;
+
+            _pendingSlotIndex = -1;
+        }
+        catch (Exception ex)
+        {
+            Logger.LogError(ex, "Photo upload failed");
+            _errorMessage = "Photo upload failed. Please try again.";
+        }
+        StateHasChanged();
+    }
+
+    private int _pendingSlotIndex = -1;
+
+    private async Task ClickPhotoInput(int index)
+    {
+        _pendingSlotIndex = index;
+        await JS.InvokeVoidAsync("templateCollageHelper.click", $"tcPhotoInput_{index}");
+    }
+
+    public class FileData
+    {
+        public string Name { get; set; } = "";
+        public string Base64 { get; set; } = "";
+    }
+
+    // ── Template Analysis ──
+
+    private async Task AnalyzeTemplate()
+    {
+        if (_templateBytes is null) return;
+
+        _isAnalyzing = true;
+        _errorMessage = null;
+        StateHasChanged();
+
+        try
+        {
+            _analysis = await CollageService.AnalyzeTemplateAsync(_templateBytes, _templateMime!);
+
+            // Auto-set photo count from detected slots
+            if (_analysis.PhotoSlotCount > 0 && _analysis.PhotoSlotCount <= 10)
+            {
+                _photoCount = _analysis.PhotoSlotCount;
+                EnsurePhotoSlots();
+                _needsReRegister = true;
+            }
+
+            _statusMessage = $"Template analyzed: {_analysis.PhotoSlotCount} photo slots detected. Upload your photos!";
+
+            if (_toast is not null)
+                _ = _toast.ShowAsync("Template analyzed successfully!");
+        }
+        catch (Exception ex)
+        {
+            Logger.LogError(ex, "Template analysis failed");
+            _errorMessage = "Template analysis failed. Please try again.";
+        }
+        finally
+        {
+            _isAnalyzing = false;
+            StateHasChanged();
+        }
+    }
+
+    // ── Photo Processing ──
+
+    private async Task ProcessSinglePhoto(int index)
+    {
+        if (_analysis is null || index < 0 || index >= _uploadedPhotos.Count || _isProcessing) return;
+        if (_uploadedPhotos[index] is null) return;
+
+        _isProcessing = true;
+        _currentProcessingIndex = index;
+        _errorMessage = null;
+        _statusMessage = $"Processing photo {index + 1}...";
+        StateHasChanged();
+
+        try
+        {
+            var photo = _uploadedPhotos[index]!;
+            var processedBytes = await CollageService.ProcessPhotoWithThemeAsync(
+                photo.Bytes, photo.MimeType, _analysis, 1024, 1024);
+
+            var base64 = Convert.ToBase64String(processedBytes);
+            EnsurePhotoSlots();
+            _processedPhotos[index] = new PhotoItem
+            {
+                FileName = $"themed_{photo.FileName}",
+                Bytes = processedBytes,
+                MimeType = "image/png",
+                DataUrl = $"data:image/png;base64,{base64}"
+            };
+
+            _statusMessage = $"Photo {index + 1} processed!";
+            if (_toast is not null)
+                _ = _toast.ShowAsync($"Photo {index + 1} processed!");
+        }
+        catch (Exception ex)
+        {
+            Logger.LogError(ex, "Processing failed for photo {Index}", index);
+            _errorMessage = $"Processing failed for photo {index + 1}. Please try again.";
+        }
+        finally
+        {
+            _isProcessing = false;
+            _currentProcessingIndex = -1;
+            StateHasChanged();
+        }
+    }
+
+    private async Task ProcessAllPhotos()
+    {
+        if (_analysis is null || _isProcessing) return;
+
+        _isProcessing = true;
+        _errorMessage = null;
+        _statusMessage = null;
+        StateHasChanged();
+
+        try
+        {
+            for (int i = 0; i < Math.Min(_photoCount, _uploadedPhotos.Count); i++)
+            {
+                if (_uploadedPhotos[i] is null) continue;
+                if (i < _processedPhotos.Count && _processedPhotos[i] is not null) continue; // skip already processed
+
+                _currentProcessingIndex = i;
+                _statusMessage = $"Processing photo {i + 1} of {_photoCount}...";
+                StateHasChanged();
+
+                var photo = _uploadedPhotos[i]!;
+                var processedBytes = await CollageService.ProcessPhotoWithThemeAsync(
+                    photo.Bytes, photo.MimeType, _analysis, 1024, 1024);
+
+                var base64 = Convert.ToBase64String(processedBytes);
+                EnsurePhotoSlots();
+                _processedPhotos[i] = new PhotoItem
+                {
+                    FileName = $"themed_{photo.FileName}",
+                    Bytes = processedBytes,
+                    MimeType = "image/png",
+                    DataUrl = $"data:image/png;base64,{base64}"
+                };
+
+                StateHasChanged();
+            }
+
+            var total = _processedPhotos.Count(p => p is not null);
+            _statusMessage = $"All {total} photos processed! Assign slots and generate.";
+
+            if (_toast is not null)
+                _ = _toast.ShowAsync($"{total} photos processed!");
+        }
+        catch (Exception ex)
+        {
+            Logger.LogError(ex, "Photo processing failed at index {Index}", _currentProcessingIndex);
+            _errorMessage = $"Processing failed on photo {_currentProcessingIndex + 1}. Please try again.";
+        }
+        finally
+        {
+            _isProcessing = false;
+            _currentProcessingIndex = -1;
+            StateHasChanged();
+        }
+    }
+
+    private async Task ReprocessPhoto(int index)
+    {
+        if (_analysis is null || index < 0 || index >= _uploadedPhotos.Count || _isProcessing) return;
+        if (_uploadedPhotos[index] is null) return;
+
+        // Clear processed version first
+        if (index < _processedPhotos.Count)
+            _processedPhotos[index] = null;
+
+        await ProcessSinglePhoto(index);
+    }
+
+    // ── Slot Assignment ──
+
+    private int GetSlotAssignment(int photoIndex)
+    {
+        return _slotAssignments.TryGetValue(photoIndex, out var slot) ? slot : photoIndex + 1;
+    }
+
+    private void SetSlotAssignment(int photoIndex, ChangeEventArgs e)
+    {
+        if (int.TryParse(e.Value?.ToString(), out var slot))
+        {
+            _slotAssignments[photoIndex] = slot;
+        }
+    }
+
+    private bool IsSlotTaken(int slotNumber, int excludePhotoIndex)
+    {
+        return _slotAssignments.Any(kvp =>
+            kvp.Key != excludePhotoIndex &&
+            kvp.Value == slotNumber &&
+            kvp.Key < _processedPhotos.Count &&
+            _processedPhotos[kvp.Key] is not null);
+    }
+
+    // ── Collage Generation ──
+
+    private async Task GenerateCollage()
+    {
+        if (_templateBytes is null || _isGeneratingCollage) return;
+
+        var validPhotos = _processedPhotos.Where(p => p is not null).ToList();
+        if (validPhotos.Count == 0) return;
+
+        // Debit coins
+        var authState2 = await AuthState.GetAuthenticationStateAsync();
+        var uidStr = authState2.User.FindFirstValue(System.Security.Claims.ClaimTypes.NameIdentifier);
+        if (int.TryParse(uidStr, out var userId2) && !authState2.User.IsInRole("SuperAdmin"))
+        {
+            var cost = ArtForgeAI.Models.FeatureAccess.GetCost("MosaicPoster");
+            if (!await CoinService.DebitCoinsAsync(userId2, cost, ArtForgeAI.Models.CoinTransactionType.GenerationSpend, "Template Collage generation"))
+            {
+                _errorMessage = "Insufficient coins. Please purchase more coins.";
+                return;
+            }
+        }
+
+        _isGeneratingCollage = true;
+        _errorMessage = null;
+        _statusMessage = "Generating collage — this may take a moment...";
+        StateHasChanged();
+
+        try
+        {
+            // Build ordered list based on slot assignments
+            var orderedPhotos = new List<(byte[] bytes, int slot)>();
+            for (int i = 0; i < _processedPhotos.Count; i++)
+            {
+                if (_processedPhotos[i] is null) continue;
+                var slot = GetSlotAssignment(i);
+                orderedPhotos.Add((_processedPhotos[i]!.Bytes, slot));
+            }
+            orderedPhotos = orderedPhotos.OrderBy(x => x.slot).ToList();
+
+            var photoBytes = orderedPhotos.Select(x => x.bytes).ToList();
+            var slotDescriptions = orderedPhotos.Select(x => $"Slot {x.slot}").ToList();
+
+            _collageResultBytes = await CollageService.GenerateCollageAsync(
+                _templateBytes, _templateMime!,
+                photoBytes, "image/png",
+                1024, 1440,
+                slotDescriptions);
+
+            var base64 = Convert.ToBase64String(_collageResultBytes);
+            _collageResultDataUrl = $"data:image/png;base64,{base64}";
+            _statusMessage = "Collage generated! Download or regenerate.";
+
+            if (_toast is not null)
+                _ = _toast.ShowAsync("Collage generated!");
+        }
+        catch (Exception ex)
+        {
+            Logger.LogError(ex, "Collage generation failed");
+            _errorMessage = "Collage generation failed. Please try again.";
+        }
+        finally
+        {
+            _isGeneratingCollage = false;
+            StateHasChanged();
+        }
+    }
+
+    // ── Downloads ──
+
+    private async Task DownloadCollage()
+    {
+        if (_collageResultBytes is null) return;
+        var base64 = Convert.ToBase64String(_collageResultBytes);
+        var fileName = $"template_collage_{DateTime.Now:yyyyMMdd_HHmmss}.png";
+        await JS.InvokeVoidAsync("downloadFileFromBytes", fileName, "image/png", base64);
+    }
+
+    private async Task DownloadProcessedPhoto(int index)
+    {
+        if (index < 0 || index >= _processedPhotos.Count || _processedPhotos[index] is null) return;
+        var photo = _processedPhotos[index]!;
+        var base64 = Convert.ToBase64String(photo.Bytes);
+        var fileName = $"themed_photo_{index + 1}_{DateTime.Now:yyyyMMdd_HHmmss}.png";
+        await JS.InvokeVoidAsync("downloadFileFromBytes", fileName, "image/png", base64);
+    }
+
+    private async Task EnhanceAndDownload()
+    {
+        if (_collageResultBytes is null || _isEnhancing) return;
+
+        _isEnhancing = true;
+        _enhanceProgress = 0;
+        _errorMessage = null;
+        StateHasChanged();
+
+        try
+        {
+            var outputDir = Path.Combine(Env.WebRootPath, "generated");
+            Directory.CreateDirectory(outputDir);
+            var tempPath = Path.Combine(outputDir, $"tc_temp_{Guid.NewGuid():N}.png");
+            await File.WriteAllBytesAsync(tempPath, _collageResultBytes);
+
+            var progress = new Progress<int>(pct =>
+            {
+                _enhanceProgress = pct;
+                InvokeAsync(StateHasChanged);
+            });
+
+            var enhancedPath = await ImageEnhancer.EnhanceImageAsync(tempPath, progress);
+            var enhancedFullPath = Path.IsPathRooted(enhancedPath)
+                ? enhancedPath
+                : Path.Combine(Env.WebRootPath, enhancedPath.Replace('/', Path.DirectorySeparatorChar));
+            var enhancedBytes = await File.ReadAllBytesAsync(enhancedFullPath);
+            var enhancedBase64 = Convert.ToBase64String(enhancedBytes);
+            var fileName = $"template_collage_4x_{DateTime.Now:yyyyMMdd_HHmmss}.png";
+            await JS.InvokeVoidAsync("downloadFileFromBytes", fileName, "image/png", enhancedBase64);
+
+            try { File.Delete(tempPath); } catch { }
+
+            if (_toast is not null)
+                _ = _toast.ShowAsync("Enhanced 4x PNG downloaded!");
+        }
+        catch (Exception ex)
+        {
+            Logger.LogError(ex, "Collage 4x enhance failed");
+            _errorMessage = "Enhancement failed. Please try again.";
+        }
+        finally
+        {
+            _isEnhancing = false;
+            StateHasChanged();
+        }
+    }
+
+    // ── Helpers ──
+
+    private void RemoveTemplate()
+    {
+        _templateBytes = null;
+        _templateMime = null;
+        _templateDataUrl = null;
+        _analysis = null;
+        _uploadedPhotos = new List<PhotoItem?>();
+        _processedPhotos = new List<PhotoItem?>();
+        _slotAssignments.Clear();
+        _collageResultBytes = null;
+        _collageResultDataUrl = null;
+        _statusMessage = null;
+        _errorMessage = null;
+        _photoCount = 5;
+        EnsurePhotoSlots();
+    }
+
+    private void RemovePhoto(int index)
+    {
+        if (index >= 0 && index < _uploadedPhotos.Count)
+        {
+            _uploadedPhotos[index] = null;
+            if (index < _processedPhotos.Count)
+                _processedPhotos[index] = null;
+        }
+    }
+
+    private int GetUnprocessedCount()
+    {
+        return Enumerable.Range(0, Math.Min(_photoCount, _uploadedPhotos.Count))
+            .Count(i => _uploadedPhotos[i] is not null &&
+                        (i >= _processedPhotos.Count || _processedPhotos[i] is null));
+    }
+
+    private int GetProcessedCount() => _processedPhotos.Count(p => p is not null);
+
+    private int GetTotalPhotoCount() => Math.Min(_photoCount, _uploadedPhotos.Count(p => p is not null));
+
+    private int GetProcessingPercent()
+    {
+        var total = GetTotalPhotoCount();
+        return total > 0 ? (GetProcessedCount() * 100) / total : 0;
+    }
+
+    private static string GetMimeType(string fileName)
+    {
+        var ext = Path.GetExtension(fileName).ToLowerInvariant();
+        return ext switch
+        {
+            ".jpg" or ".jpeg" => "image/jpeg",
+            ".png" => "image/png",
+            ".webp" => "image/webp",
+            ".gif" => "image/gif",
+            _ => "image/png"
+        };
+    }
+
+    private class PhotoItem
+    {
+        public string FileName { get; set; } = "";
+        public byte[] Bytes { get; set; } = Array.Empty<byte>();
+        public string MimeType { get; set; } = "image/png";
+        public string DataUrl { get; set; } = "";
+    }
+}

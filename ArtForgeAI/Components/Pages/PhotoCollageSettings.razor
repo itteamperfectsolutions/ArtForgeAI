@@ -1,0 +1,521 @@
+@page "/photo-collage-settings"
+@rendermode InteractiveServer
+@attribute [Authorize(Roles = "SuperAdmin")]
+@inject ICollageTemplateService TemplateService
+@inject IGeminiImageService GeminiService
+@inject IImageStorageService ImageStorage
+@inject IWebHostEnvironment Env
+@inject IJSRuntime JS
+@inject ILogger<PhotoCollageSettings> Logger
+
+<PageTitle>ArtForge AI - Collage Template Settings</PageTitle>
+
+<div class="page-header">
+    <h2>Collage Template Settings</h2>
+    <p>Manage photo collage templates</p>
+</div>
+
+<div class="settings-tab-content">
+    <div class="settings-section" style="margin-bottom:0;">
+        <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:0.75rem;flex-wrap:wrap;gap:0.5rem;">
+            <h3 style="margin-bottom:0;border-bottom:none;padding-bottom:0;">Collage Templates</h3>
+            <div style="display:flex;gap:0.4rem;flex-wrap:wrap;">
+                <button class="btn-secondary btn-sm" @onclick="OpenAddModal">&#43; Add Template</button>
+                <button class="btn-primary-gradient btn-sm" @onclick="GenerateAllThumbnails"
+                        disabled="@(_batchGenerating || _generatingId > 0)">
+                    @if (_batchGenerating)
+                    {
+                        <span>&#9203; @_batchCompleted / @_batchTotal...</span>
+                    }
+                    else
+                    {
+                        <span>&#10024; Generate All Thumbnails</span>
+                    }
+                </button>
+            </div>
+        </div>
+
+        @* Active / Inactive pills *@
+        @{
+            var activeCount = _templates.Count(t => t.IsActive);
+            var inactiveCount = _templates.Count(t => !t.IsActive);
+        }
+        <div class="style-pill-tabs">
+            <button class="style-pill @(_subTab == "active" ? "active" : "")"
+                    @onclick='() => _subTab = "active"'>
+                <span class="style-pill-dot active-dot"></span> Active
+                <span class="style-pill-count">@activeCount</span>
+            </button>
+            <button class="style-pill @(_subTab == "inactive" ? "active" : "")"
+                    @onclick='() => _subTab = "inactive"'>
+                <span class="style-pill-dot inactive-dot"></span> Inactive
+                <span class="style-pill-count">@inactiveCount</span>
+            </button>
+        </div>
+
+        @* Search *@
+        <div class="qs-search-bar" style="margin-top:0.5rem;">
+            <span class="qs-search-icon">&#128269;</span>
+            <input type="text" class="qs-search-input" placeholder="Search templates..."
+                   @bind="_searchQuery" @bind:event="oninput" />
+            @if (!string.IsNullOrEmpty(_searchQuery))
+            {
+                <button class="qs-search-clear" @onclick="() => _searchQuery = string.Empty">&times;</button>
+            }
+        </div>
+
+        @if (_batchGenerating)
+        {
+            <div style="margin:0.75rem 0;">
+                <div class="enhance-progress-bar" style="border:1px solid var(--border-color);border-radius:var(--radius-sm);height:20px;">
+                    <div class="enhance-progress-fill" style="width:@(_batchTotal > 0 ? (int)((double)_batchCompleted / _batchTotal * 100) : 0)%;background:var(--accent-gradient);"></div>
+                    <span class="enhance-progress-text">@_batchCompleted / @_batchTotal</span>
+                </div>
+            </div>
+        }
+
+        @* ── Template Cards (no inline edit) ── *@
+        @{
+            var filtered = GetFilteredTemplates().ToList();
+            var grouped = filtered.GroupBy(t => t.Category).OrderBy(g => g.Key).ToArray();
+        }
+
+        @if (_subTab == "active")
+        {
+            @foreach (var group in grouped.Where(g => g.Any(t => t.IsActive)))
+            {
+                <div class="admin-completed-category-header">@group.Key</div>
+                <div class="admin-completed-grid">
+                    @foreach (var t in group.Where(t => t.IsActive))
+                    {
+                        var tmpl = t;
+                        <div class="admin-completed-card">
+                            <div class="admin-completed-thumb">
+                                @if (!string.IsNullOrEmpty(tmpl.ThumbnailPath))
+                                {
+                                    <img src="/@tmpl.ThumbnailPath" alt="@tmpl.Name" />
+                                }
+                                else
+                                {
+                                    <div class="admin-style-thumb-placeholder" style="width:100%;height:100%;display:flex;align-items:center;justify-content:center;">
+                                        <span style="font-size:1.8rem;">@tmpl.IconEmoji</span>
+                                    </div>
+                                }
+                                @if (_generatingId == tmpl.Id || _batchActiveIds.Contains(tmpl.Id))
+                                {
+                                    <div class="admin-style-thumb-overlay">
+                                        <div class="loading-spinner" style="width:16px;height:16px;margin:0;border-width:2px;"></div>
+                                    </div>
+                                }
+                            </div>
+                            <div class="admin-completed-info">
+                                <div class="admin-completed-top">
+                                    <span class="admin-completed-name">@tmpl.IconEmoji @tmpl.Name</span>
+                                    <label class="toggle-switch" style="transform:scale(0.65);">
+                                        <input type="checkbox" checked="@tmpl.IsActive"
+                                               @onchange="() => ToggleActive(tmpl)" />
+                                        <span class="toggle-slider"></span>
+                                    </label>
+                                </div>
+                                <div class="admin-completed-actions">
+                                    <button class="btn-secondary btn-sm admin-compact-btn" @onclick="() => GenerateThumbnail(tmpl)"
+                                            disabled="@(_generatingId > 0)" title="Generate thumbnail">&#127912;</button>
+                                    <label class="btn-secondary btn-sm admin-upload-label admin-compact-btn" title="Upload thumbnail">
+                                        &#128247;
+                                        <InputFile OnChange="(e) => UploadThumbnail(e, tmpl.Id)" accept=".jpg,.jpeg,.png,.webp" style="display:none" />
+                                    </label>
+                                    <button class="btn-secondary btn-sm admin-compact-btn" @onclick="() => OpenEditModal(tmpl)" title="Edit">&#9998;</button>
+                                    <button class="btn-danger btn-sm admin-compact-btn" @onclick="() => DeleteTemplate(tmpl.Id)" title="Delete">&#128465;</button>
+                                </div>
+                            </div>
+                        </div>
+                    }
+                </div>
+            }
+        }
+        else
+        {
+            var inactiveTemplates = filtered.Where(t => !t.IsActive).ToList();
+            @if (inactiveTemplates.Count == 0)
+            {
+                <div style="text-align:center;padding:2rem;color:var(--text-muted);font-size:0.85rem;">No inactive templates</div>
+            }
+            <div class="admin-completed-grid">
+                @foreach (var t in inactiveTemplates)
+                {
+                    var tmpl = t;
+                    <div class="admin-completed-card inactive">
+                        <div class="admin-completed-thumb">
+                            @if (!string.IsNullOrEmpty(tmpl.ThumbnailPath))
+                            {
+                                <img src="/@tmpl.ThumbnailPath" alt="@tmpl.Name" />
+                            }
+                            else
+                            {
+                                <div class="admin-style-thumb-placeholder" style="width:100%;height:100%;display:flex;align-items:center;justify-content:center;">
+                                    <span style="font-size:1.8rem;">@tmpl.IconEmoji</span>
+                                </div>
+                            }
+                        </div>
+                        <div class="admin-completed-info">
+                            <div class="admin-completed-top">
+                                <span class="admin-completed-name">@tmpl.IconEmoji @tmpl.Name</span>
+                                <label class="toggle-switch" style="transform:scale(0.65);">
+                                    <input type="checkbox" checked="@tmpl.IsActive"
+                                           @onchange="() => ToggleActive(tmpl)" />
+                                    <span class="toggle-slider"></span>
+                                </label>
+                            </div>
+                            <div class="admin-completed-actions">
+                                <button class="btn-secondary btn-sm admin-compact-btn" @onclick="() => OpenEditModal(tmpl)">&#9998;</button>
+                                <button class="btn-danger btn-sm admin-compact-btn" @onclick="() => DeleteTemplate(tmpl.Id)">&#128465;</button>
+                            </div>
+                        </div>
+                    </div>
+                }
+            </div>
+        }
+    </div>
+</div>
+
+@* ═══ Add / Edit Modal ═══ *@
+@if (_showModal)
+{
+    <div class="qs-modal-overlay">
+        <div class="qs-modal" style="max-width:650px;max-height:90vh;overflow-y:auto;" @onclick:stopPropagation="true">
+            <div class="qs-modal-header">
+                <span>@(_modalEditId > 0 ? "Edit" : "Add") Collage Template</span>
+                <button class="qs-modal-close" @onclick="CloseModal">&times;</button>
+            </div>
+            <div class="qs-placeholder-body">
+                <div style="display:flex;gap:0.5rem;flex-wrap:wrap;">
+                    <div class="qs-field" style="flex:1;min-width:120px;">
+                        <label>Name</label>
+                        <input type="text" @bind="_formName" maxlength="100" />
+                    </div>
+                    <div class="qs-field" style="flex:1;min-width:120px;">
+                        <label>Category</label>
+                        <input type="text" @bind="_formCategory" maxlength="50" placeholder="Birthday, Portrait..." />
+                    </div>
+                    <div class="qs-field" style="width:60px;">
+                        <label>Emoji</label>
+                        <input type="text" @bind="_formEmoji" maxlength="10" />
+                    </div>
+                </div>
+                <div class="qs-field">
+                    <label>Description</label>
+                    <input type="text" @bind="_formDesc" maxlength="500" />
+                </div>
+                <div style="display:flex;gap:0.5rem;flex-wrap:wrap;">
+                    <div class="qs-field" style="flex:1;min-width:100px;">
+                        <label>Color Theme</label>
+                        <input type="text" @bind="_formColorTheme" placeholder="pink, gold, warm tones..." />
+                    </div>
+                    <div class="qs-field" style="flex:1;min-width:100px;">
+                        <label>Mood</label>
+                        <input type="text" @bind="_formMood" placeholder="festive, elegant..." />
+                    </div>
+                </div>
+                <div style="display:flex;gap:0.5rem;flex-wrap:wrap;">
+                    <div class="qs-field" style="flex:1;min-width:100px;">
+                        <label>Title / Text Overlay</label>
+                        <input type="text" @bind="_formTextOverlay" maxlength="200" placeholder="Happy Birthday" />
+                    </div>
+                    <div class="qs-field" style="width:70px;">
+                        <label>Slots</label>
+                        <input type="number" @bind="_formSlotCount" min="2" max="10" />
+                    </div>
+                    <div class="qs-field" style="width:90px;">
+                        <label>Master Idx</label>
+                        <input type="number" @bind="_formMasterSlot" min="0" max="9" />
+                    </div>
+                </div>
+                <div class="qs-field">
+                    <label>Decorative Elements</label>
+                    <textarea @bind="_formDecorations" rows="2" placeholder="balloons, confetti, sparkles..."></textarea>
+                </div>
+                <div class="qs-field">
+                    <label>Layout Description <span style="color:var(--text-muted);font-size:0.7rem;">(detailed Gemini prompt)</span></label>
+                    <textarea @bind="_formLayout" rows="4" placeholder="Center: large circular frame... Top-left: tilted frame..."></textarea>
+                </div>
+                <div class="qs-field">
+                    <label>Slot Descriptions <span style="color:var(--text-muted);font-size:0.7rem;">(JSON array)</span></label>
+                    <textarea @bind="_formSlotJson" rows="3" placeholder='["Center - hero portrait","Left - side angle"]'></textarea>
+                </div>
+                <div style="display:flex;gap:1rem;flex-wrap:wrap;margin-top:0.3rem;">
+                    <label style="display:flex;align-items:center;gap:0.25rem;font-size:0.82rem;">
+                        <input type="checkbox" @bind="_formAskName" /> Ask Name
+                    </label>
+                    <label style="display:flex;align-items:center;gap:0.25rem;font-size:0.82rem;">
+                        <input type="checkbox" @bind="_formAskOccasion" /> Ask Occasion
+                    </label>
+                    <label style="display:flex;align-items:center;gap:0.25rem;font-size:0.82rem;">
+                        <input type="checkbox" @bind="_formAskDate" /> Ask Date
+                    </label>
+                    <label style="display:flex;align-items:center;gap:0.25rem;font-size:0.82rem;">
+                        <input type="checkbox" @bind="_formAskMessage" /> Ask Message
+                    </label>
+                </div>
+            </div>
+            <div class="qs-modal-footer">
+                <button class="btn-primary-gradient" @onclick="SaveModal"
+                        disabled="@(string.IsNullOrWhiteSpace(_formName))">
+                    @(_modalEditId > 0 ? "Update" : "Create")
+                </button>
+                <button class="btn-secondary" @onclick="CloseModal">&times; Cancel</button>
+            </div>
+            @if (!string.IsNullOrEmpty(_modalError))
+            {
+                <div style="padding:0.5rem 1rem;color:var(--danger);font-size:0.82rem;">@_modalError</div>
+            }
+        </div>
+    </div>
+}
+
+<Toast @ref="_toast" />
+
+@code {
+    private List<ArtForgeAI.Models.CollageTemplate> _templates = new();
+    private string _subTab = "active";
+    private string _searchQuery = string.Empty;
+    private Toast? _toast;
+
+    // Modal state
+    private bool _showModal;
+    private int _modalEditId; // 0 = add, >0 = edit
+    private string _formName = "", _formDesc = "", _formCategory = "Birthday", _formEmoji = "🎂";
+    private int _formSlotCount = 5, _formMasterSlot;
+    private string _formColorTheme = "", _formMood = "", _formTextOverlay = "";
+    private string _formDecorations = "", _formLayout = "", _formSlotJson = "[]";
+    private bool _formAskName = true, _formAskOccasion = true, _formAskDate, _formAskMessage = true;
+    private string? _modalError;
+
+    // Keep these for edit (preserve fields not in the form)
+    private string? _editThumbnailPath;
+    private bool _editIsActive = true;
+    private int _editSortOrder;
+    private DateTime _editCreatedAt;
+
+    // Thumbnail generation
+    private int _generatingId;
+    private bool _batchGenerating;
+    private int _batchCompleted, _batchTotal;
+    private HashSet<int> _batchActiveIds = new();
+
+    protected override async Task OnInitializedAsync() => await LoadTemplates();
+
+    private async Task LoadTemplates() => _templates = await TemplateService.GetAllAsync();
+
+    private IEnumerable<ArtForgeAI.Models.CollageTemplate> GetFilteredTemplates()
+    {
+        if (string.IsNullOrWhiteSpace(_searchQuery)) return _templates;
+        return _templates.Where(t =>
+            t.Name.Contains(_searchQuery, StringComparison.OrdinalIgnoreCase) ||
+            t.Category.Contains(_searchQuery, StringComparison.OrdinalIgnoreCase));
+    }
+
+    // ── Modal: Add ──
+    private void OpenAddModal()
+    {
+        _modalEditId = 0;
+        _formName = _formDesc = _formColorTheme = _formMood = _formTextOverlay = _formDecorations = _formLayout = "";
+        _formCategory = "Birthday"; _formEmoji = "🎂"; _formSlotCount = 5; _formMasterSlot = 0;
+        _formSlotJson = "[\"Center - hero portrait, looking at camera, warm smile\",\"Left - three-quarter angle, different expression\",\"Right - close-up face, warm glow\",\"Top - profile view, serene expression\",\"Bottom - medium shot, looking over shoulder\"]";
+        _formAskName = true; _formAskOccasion = true; _formAskDate = false; _formAskMessage = true;
+        _editThumbnailPath = null; _editIsActive = true; _editSortOrder = 0; _editCreatedAt = DateTime.UtcNow;
+        _modalError = null;
+        _showModal = true;
+    }
+
+    // ── Modal: Edit (pre-fill with existing values) ──
+    private void OpenEditModal(ArtForgeAI.Models.CollageTemplate t)
+    {
+        _modalEditId = t.Id;
+        _formName = t.Name;
+        _formDesc = t.Description;
+        _formCategory = t.Category;
+        _formEmoji = t.IconEmoji;
+        _formSlotCount = t.SlotCount;
+        _formMasterSlot = t.MasterSlotIndex;
+        _formColorTheme = t.ColorTheme;
+        _formMood = t.Mood;
+        _formTextOverlay = t.TextOverlay;
+        _formDecorations = t.DecorativeElements;
+        _formLayout = t.LayoutDescription ?? "";
+        _formSlotJson = t.SlotDescriptionsJson;
+        _formAskName = t.AskName;
+        _formAskOccasion = t.AskOccasion;
+        _formAskDate = t.AskDate;
+        _formAskMessage = t.AskMessage;
+        _editThumbnailPath = t.ThumbnailPath;
+        _editIsActive = t.IsActive;
+        _editSortOrder = t.SortOrder;
+        _editCreatedAt = t.CreatedAtUtc;
+        _modalError = null;
+        _showModal = true;
+    }
+
+    private void CloseModal() { _showModal = false; _modalError = null; }
+
+    private async Task SaveModal()
+    {
+        if (string.IsNullOrWhiteSpace(_formName)) { _modalError = "Name is required."; return; }
+
+        var template = new ArtForgeAI.Models.CollageTemplate
+        {
+            Id = _modalEditId,
+            Name = _formName.Trim(),
+            Description = _formDesc.Trim(),
+            Category = _formCategory.Trim(),
+            IconEmoji = _formEmoji.Trim(),
+            SlotCount = _formSlotCount,
+            MasterSlotIndex = _formMasterSlot,
+            SlotDescriptionsJson = _formSlotJson.Trim(),
+            ColorTheme = _formColorTheme.Trim(),
+            Mood = _formMood.Trim(),
+            TextOverlay = _formTextOverlay.Trim(),
+            DecorativeElements = _formDecorations.Trim(),
+            LayoutDescription = string.IsNullOrWhiteSpace(_formLayout) ? null : _formLayout.Trim(),
+            AskName = _formAskName,
+            AskOccasion = _formAskOccasion,
+            AskDate = _formAskDate,
+            AskMessage = _formAskMessage,
+            ThumbnailPath = _editThumbnailPath,
+            IsActive = _editIsActive,
+            SortOrder = _editSortOrder,
+            CreatedAtUtc = _editCreatedAt
+        };
+
+        try
+        {
+            if (_modalEditId > 0)
+                await TemplateService.UpdateAsync(template);
+            else
+                await TemplateService.CreateAsync(template);
+
+            _showModal = false;
+            await LoadTemplates();
+            if (_toast is not null) _ = _toast.ShowAsync(_modalEditId > 0 ? "Template updated!" : "Template created!");
+        }
+        catch (Exception ex)
+        {
+            Logger.LogError(ex, "Failed to save collage template");
+            _modalError = "Save failed. Please try again.";
+        }
+    }
+
+    // ── Toggle / Delete ──
+    private async Task ToggleActive(ArtForgeAI.Models.CollageTemplate t)
+    {
+        t.IsActive = !t.IsActive;
+        await TemplateService.UpdateAsync(t);
+        await LoadTemplates();
+    }
+
+    private async Task DeleteTemplate(int id)
+    {
+        await TemplateService.DeleteAsync(id);
+        await LoadTemplates();
+        if (_toast is not null) _ = _toast.ShowAsync("Deleted.");
+    }
+
+    // ── Thumbnail Generation ──
+    private async Task GenerateThumbnail(ArtForgeAI.Models.CollageTemplate t)
+    {
+        if (_generatingId > 0) return;
+        _generatingId = t.Id;
+        StateHasChanged();
+        try
+        {
+            var layout = t.LayoutDescription ?? "Attractive collage layout with multiple photo frames";
+            var prompt = $"Create a professional collage poster PREVIEW/SAMPLE thumbnail for a '{t.Name}' template. " +
+                $"Theme: {t.Category}. Color palette: {t.ColorTheme}. Mood: {t.Mood}. " +
+                $"Title text: '{t.TextOverlay}' in a stylish decorative font. " +
+                $"Decorations: {t.DecorativeElements}. Layout: {layout}. " +
+                "Show PLACEHOLDER photo frames (empty frames or generic silhouettes) in the layout positions. " +
+                "This is a TEMPLATE PREVIEW. Fill frames with subtle gradient placeholders or generic portrait silhouettes. " +
+                "Showcase the template look: colors, decorations, text placement, frame arrangement. High-quality output.";
+            var (_, imgBytes) = await GeminiService.GenerateImageAsync(prompt, 512, 768);
+            var dir = Path.Combine(Env.WebRootPath, "collage-templates");
+            Directory.CreateDirectory(dir);
+            var fileName = $"ct_{t.Id}_{Guid.NewGuid():N}.png";
+            await File.WriteAllBytesAsync(Path.Combine(dir, fileName), imgBytes);
+            t.ThumbnailPath = $"collage-templates/{fileName}";
+            await TemplateService.UpdateAsync(t);
+            await LoadTemplates();
+            if (_toast is not null) _ = _toast.ShowAsync($"Thumbnail generated for {t.Name}!");
+        }
+        catch (Exception ex) { Logger.LogError(ex, "Thumbnail generation failed for {Name}", t.Name); }
+        finally { _generatingId = 0; StateHasChanged(); }
+    }
+
+    private async Task UploadThumbnail(InputFileChangeEventArgs e, int templateId)
+    {
+        var file = e.File;
+        if (file is null) return;
+        try
+        {
+            var dir = Path.Combine(Env.WebRootPath, "collage-templates");
+            Directory.CreateDirectory(dir);
+            var fileName = $"ct_{templateId}_{Guid.NewGuid():N}{Path.GetExtension(file.Name)}";
+            await using var stream = file.OpenReadStream(10 * 1024 * 1024);
+            await using var fs = File.Create(Path.Combine(dir, fileName));
+            await stream.CopyToAsync(fs);
+            var tmpl = _templates.FirstOrDefault(t => t.Id == templateId);
+            if (tmpl is not null)
+            {
+                tmpl.ThumbnailPath = $"collage-templates/{fileName}";
+                await TemplateService.UpdateAsync(tmpl);
+                await LoadTemplates();
+                if (_toast is not null) _ = _toast.ShowAsync("Thumbnail uploaded!");
+            }
+        }
+        catch (Exception ex) { Logger.LogError(ex, "Thumbnail upload failed"); }
+    }
+
+    private async Task GenerateAllThumbnails()
+    {
+        var pending = _templates.Where(t => t.IsActive && string.IsNullOrEmpty(t.ThumbnailPath)).ToList();
+        if (pending.Count == 0) return;
+        _batchGenerating = true; _batchCompleted = 0; _batchTotal = pending.Count;
+        _batchActiveIds.Clear(); StateHasChanged();
+        var semaphore = new SemaphoreSlim(2);
+        var tasks = pending.Select(async t =>
+        {
+            await semaphore.WaitAsync();
+            try
+            {
+                _batchActiveIds.Add(t.Id); await InvokeAsync(StateHasChanged);
+                await GenerateThumbnailInternal(t);
+                _batchActiveIds.Remove(t.Id);
+                Interlocked.Increment(ref _batchCompleted);
+                await InvokeAsync(StateHasChanged);
+            }
+            finally { semaphore.Release(); }
+        });
+        await Task.WhenAll(tasks);
+        _batchGenerating = false; await LoadTemplates(); StateHasChanged();
+        if (_toast is not null) _ = _toast.ShowAsync($"Generated {_batchCompleted} thumbnails!");
+    }
+
+    private async Task GenerateThumbnailInternal(ArtForgeAI.Models.CollageTemplate t)
+    {
+        try
+        {
+            var batchLayout = t.LayoutDescription ?? "Collage with multiple frames";
+            var prompt = $"Create a professional '{t.Category}' collage poster TEMPLATE PREVIEW. " +
+                $"Color palette: {t.ColorTheme}. Mood: {t.Mood}. Title: '{t.TextOverlay}'. " +
+                $"Decorations: {t.DecorativeElements}. Layout: {batchLayout}. " +
+                "Show empty placeholder photo frames with subtle gradient fills or generic silhouettes. " +
+                "Showcase the template design: colors, decorations, text, frame arrangement.";
+            var (_, imgBytes) = await GeminiService.GenerateImageAsync(prompt, 512, 768);
+            var dir = Path.Combine(Env.WebRootPath, "collage-templates");
+            Directory.CreateDirectory(dir);
+            var fileName = $"ct_{t.Id}_{Guid.NewGuid():N}.png";
+            await File.WriteAllBytesAsync(Path.Combine(dir, fileName), imgBytes);
+            t.ThumbnailPath = $"collage-templates/{fileName}";
+            await TemplateService.UpdateAsync(t);
+        }
+        catch (Exception ex) { Logger.LogWarning(ex, "Batch thumbnail failed for {Name}", t.Name); }
+    }
+}
