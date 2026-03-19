@@ -18,14 +18,15 @@ public static class FeatureAccess
     public const string NegativeScan = "NegativeScan";
     public const string AutoEnhance = "AutoEnhance";
     public const string PhotoCollages = "PhotoCollages";
+    public const string Merger = "Merger";
 
     /// <summary>Plan name to allowed features mapping</summary>
     public static readonly Dictionary<string, string[]> PlanFeatures = new()
     {
         ["Free"] = [QuickStyle],
         ["Starter"] = [QuickStyle, Home, StyleTransfer, StyleRemix, Gallery],
-        ["Pro"] = [QuickStyle, Home, StyleTransfer, StyleRemix, Gallery, MosaicPoster, PassportPhoto, ImageViewer, Settings, NegativeScan, AutoEnhance, PhotoCollages],
-        ["Enterprise"] = [QuickStyle, Home, StyleTransfer, StyleRemix, Gallery, MosaicPoster, PassportPhoto, ImageViewer, Settings, PhotoExpand, GangSheet, ShapeCutSheet, NegativeScan, AutoEnhance, PhotoCollages]
+        ["Pro"] = [QuickStyle, Home, StyleTransfer, StyleRemix, Gallery, MosaicPoster, PassportPhoto, ImageViewer, Settings, NegativeScan, AutoEnhance, PhotoCollages, Merger],
+        ["Enterprise"] = [QuickStyle, Home, StyleTransfer, StyleRemix, Gallery, MosaicPoster, PassportPhoto, ImageViewer, Settings, PhotoExpand, GangSheet, ShapeCutSheet, NegativeScan, AutoEnhance, PhotoCollages, Merger]
     };
 
     /// <summary>Coin cost per generation for each feature</summary>
@@ -42,14 +43,15 @@ public static class FeatureAccess
         [StyleRemix] = 3,
         [NegativeScan] = 2,
         [AutoEnhance] = 3,
-        [PhotoCollages] = 5
+        [PhotoCollages] = 5,
+        [Merger] = 3
     };
 
     /// <summary>All feature keys</summary>
     public static readonly string[] AllFeatures =
     [
         QuickStyle, Home, StyleTransfer, StyleRemix, Gallery, MosaicPoster,
-        PassportPhoto, ImageViewer, Settings, PhotoExpand, GangSheet, ShapeCutSheet, NegativeScan, AutoEnhance, PhotoCollages
+        PassportPhoto, ImageViewer, Settings, PhotoExpand, GangSheet, ShapeCutSheet, NegativeScan, AutoEnhance, PhotoCollages, Merger
     ];
 
     public static int GetCost(string featureKey) =>

@@ -1,0 +1,551 @@
+@page "/merger"
+@rendermode InteractiveServer
+@attribute [Authorize]
+@inject IImageGenerationService ImageGenService
+@inject IImageStorageService ImageStorage
+@inject ILogger<Merger> Logger
+@inject ISubscriptionService SubscriptionService
+@inject ICoinService CoinService
+@inject AuthenticationStateProvider AuthState
+@inject NavigationManager Nav
+@inject IJSRuntime JS
+@inject IWebHostEnvironment Env
+@inject IImageEnhancerService ImageEnhancer
+
+<PageTitle>ArtForge AI - Photo Merger</PageTitle>
+
+<div class="page-header page-header-lg">
+    <h2>Photo Merger</h2>
+    <p>Upload multiple photos — AI merges them into one studio-quality image side by side</p>
+</div>
+
+<div class="create-layout">
+    @* ── Left column: Upload & Settings ── *@
+    <div class="create-left">
+        <div class="card">
+            <div class="card-body">
+
+                @* Upload area *@
+                <div class="mb-3">
+                    <label class="form-label">Upload Photos (2–4)</label>
+                    @if (_uploadedPaths.Count > 0)
+                    {
+                        <div class="ref-thumbnails">
+                            @foreach (var (path, idx) in _uploadedPaths.Select((p, i) => (p, i)))
+                            {
+                                <div class="ref-thumb">
+                                    <span class="ref-thumb-number">@(idx + 1)</span>
+                                    <img src="/@path" alt="Image @(idx + 1)" />
+                                    <button class="ref-thumb-remove"
+                                            @onclick="() => RemoveImage(path)"
+                                            disabled="@_isGenerating">&#10005;</button>
+                                </div>
+                            }
+                            @if (_uploadedPaths.Count < 4)
+                            {
+                                <label class="ref-thumb-add @(_isGenerating ? "disabled" : "")">
+                                    <span>+</span>
+                                    <InputFile OnChange="HandleFileUpload"
+                                               accept=".jpg,.jpeg,.png,.webp"
+                                               multiple
+                                               disabled="@_isGenerating"
+                                               style="display:none" />
+                                </label>
+                            }
+                        </div>
+                    }
+                    else
+                    {
+                        <label class="upload-area upload-area-compact @(_isGenerating ? "disabled" : "")">
+                            <span class="upload-icon">&#128247;</span>
+                            <span>Click to select 2–4 photos</span>
+                            <span style="font-size: 0.7rem; color: var(--text-muted);">JPG, PNG, WEBP up to 10MB each</span>
+                            <InputFile OnChange="HandleFileUpload"
+                                       accept=".jpg,.jpeg,.png,.webp"
+                                       multiple
+                                       disabled="@_isGenerating"
+                                       style="display:none" />
+                        </label>
+                    }
+                </div>
+
+                @* Layout style *@
+                <div class="mb-3">
+                    <label class="form-label">Layout Style</label>
+                    <select class="form-select" @bind="_layoutStyle" @bind:after="OnLayoutChanged" disabled="@_isGenerating">
+                        <option value="side-by-side">Side by Side</option>
+                        <option value="staggered-profile">Staggered Profile (depth layered)</option>
+                        <option value="v-formation">V-Formation (center front)</option>
+                        <option value="close-group">Close Group Huddle</option>
+                    </select>
+                    <p style="font-size: 0.7rem; color: var(--text-muted); margin-top: 0.25rem;">
+                        @(_layoutStyle switch {
+                            "side-by-side" => "All people standing next to each other facing the camera",
+                            "staggered-profile" => "People layered in depth, all facing the same direction — cinematic profile portrait",
+                            "v-formation" => "One person front-center, others slightly behind on each side",
+                            "close-group" => "Tight group photo — heads close together, warm and intimate",
+                            _ => ""
+                        })
+                    </p>
+                </div>
+
+                @* Output orientation *@
+                <div class="mb-3">
+                    <label class="form-label">Output Orientation</label>
+                    <div class="pp-orientation-row">
+                        <button class="pp-orient-btn @(_orientation == "landscape" ? "selected" : "")"
+                                @onclick='() => _orientation = "landscape"' disabled="@_isGenerating">
+                            <span style="font-size: 1.1rem;">&#9644;</span> Landscape
+                        </button>
+                        <button class="pp-orient-btn @(_orientation == "portrait" ? "selected" : "")"
+                                @onclick='() => _orientation = "portrait"' disabled="@_isGenerating">
+                            <span style="font-size: 1.1rem;">&#9645;</span> Portrait
+                        </button>
+                        <button class="pp-orient-btn @(_orientation == "square" ? "selected" : "")"
+                                @onclick='() => _orientation = "square"' disabled="@_isGenerating">
+                            <span style="font-size: 1.1rem;">&#9632;</span> Square
+                        </button>
+                    </div>
+                </div>
+
+                @* Background *@
+                <div class="mb-3">
+                    <label class="form-label">Background</label>
+                    <select class="form-select" @bind="_bgStyle" disabled="@_isGenerating">
+                        <option value="studio-white">Studio White</option>
+                        <option value="studio-grey">Studio Grey</option>
+                        <option value="studio-gradient">Studio Gradient (light to dark grey)</option>
+                        <option value="studio-dark">Studio Dark / Black</option>
+                        <option value="outdoor-garden">Outdoor Garden</option>
+                        <option value="outdoor-sunset">Golden Sunset</option>
+                        <option value="indoor-elegant">Elegant Indoor</option>
+                    </select>
+                </div>
+
+                @* Black & White toggle *@
+                <div class="pp-toggle-row">
+                    <label class="pp-toggle">
+                        <input type="checkbox" @bind="_blackAndWhite" disabled="@_isGenerating" />
+                        <span class="pp-toggle-slider"></span>
+                    </label>
+                    <span class="pp-toggle-label">Black &amp; White</span>
+                </div>
+
+                <hr style="margin: 0.5rem 0; border-color: var(--border-color);" />
+
+                @* Generate button *@
+                <button class="btn-primary-gradient"
+                        style="width: 100%; justify-content: center; padding: 0.55rem;"
+                        @onclick="GenerateMerge"
+                        disabled="@(_isGenerating || _uploadedPaths.Count < 2)">
+                    @if (_isGenerating)
+                    {
+                        <span class="processing-spinner" style="width:18px;height:18px;margin-right:0.5rem;"></span>
+                        <span>@_processingStatus</span>
+                    }
+                    else
+                    {
+                        <span>&#10024; Merge Photos</span>
+                    }
+                </button>
+
+                @if (_uploadedPaths.Count > 0 && _uploadedPaths.Count < 2)
+                {
+                    <p style="font-size: 0.75rem; color: var(--text-muted); margin-top: 0.35rem; text-align: center;">
+                        Upload at least 2 photos to merge
+                    </p>
+                }
+            </div>
+        </div>
+
+        @if (!string.IsNullOrEmpty(_errorMessage))
+        {
+            <div class="card" style="margin-top: 0.75rem; border-left: 3px solid var(--danger);">
+                <div class="card-body" style="padding: 0.75rem 1rem; color: var(--danger); font-size: 0.85rem;">
+                    <strong>Error:</strong> @_errorMessage
+                </div>
+            </div>
+        }
+    </div>
+
+    @* ── Right column: Result ── *@
+    <div class="create-right">
+        @if (_result?.Success == true && _result.LocalImagePath is not null)
+        {
+            <div class="right-panel-card">
+                <div class="right-panel-label">Merged Result</div>
+                <div class="ref-image-wrap">
+                    <img src="@ImageStorage.GetWebPath(_result.LocalImagePath)?v=@_imgVersion"
+                         alt="Merged result"
+                         style="max-width:100%; border-radius: 8px;" />
+                </div>
+                <div class="pp-download-bar" style="margin-top: 0.75rem;">
+                    <button class="btn-primary-gradient" style="font-size: 0.85rem; padding: 0.4rem 0.85rem;"
+                            @onclick='() => DownloadAs("png")'>
+                        &#128424; Download PNG
+                    </button>
+                    <button class="btn-secondary" style="font-size: 0.85rem; padding: 0.4rem 0.85rem;"
+                            @onclick='() => DownloadAs("jpg")'>
+                        Download JPG
+                    </button>
+                    @if (ImageEnhancer.IsAvailable)
+                    {
+                        <button class="btn-enhance" @onclick="EnhanceAndDownload"
+                                disabled="@(_isEnhancing || _isGenerating)">
+                            @if (_isEnhancing)
+                            {
+                                <span>Enhancing...</span>
+                            }
+                            else
+                            {
+                                <span>&#9889; Enhance 4x</span>
+                            }
+                        </button>
+                    }
+                </div>
+                @if (_isEnhancing)
+                {
+                    <div class="enhance-progress-bar">
+                        <div class="enhance-progress-fill" style="width: @(_enhanceProgress)%"></div>
+                        <span class="enhance-progress-text">@(_enhanceProgress)%</span>
+                    </div>
+                }
+            </div>
+        }
+    </div>
+</div>
+
+@code {
+    // ── State ──
+    private List<string> _uploadedPaths = [];
+    private string _layoutStyle = "side-by-side";
+    private string _orientation = "landscape";
+    private string _bgStyle = "studio-white";
+    private bool _blackAndWhite;
+
+    private void OnLayoutChanged()
+    {
+        // Default orientation based on layout
+        _orientation = _layoutStyle switch
+        {
+            "staggered-profile" => "portrait",
+            "close-group" => "square",
+            _ => "landscape"
+        };
+        // Default background for staggered profile
+        if (_layoutStyle == "staggered-profile" && _bgStyle.StartsWith("studio-w"))
+            _bgStyle = "studio-dark";
+    }
+    private GenerationResult? _result;
+    private bool _isGenerating;
+    private bool _isEnhancing;
+    private int _enhanceProgress;
+    private string _processingStatus = "Merging...";
+    private string? _errorMessage;
+    private long _imgVersion;
+
+    // ── Lifecycle ──
+
+    protected override async Task OnInitializedAsync()
+    {
+        var authState = await AuthState.GetAuthenticationStateAsync();
+        if (!authState.User.IsInRole("SuperAdmin"))
+        {
+            var uidStr = authState.User.FindFirstValue(System.Security.Claims.ClaimTypes.NameIdentifier);
+            if (int.TryParse(uidStr, out var uid))
+            {
+                if (!await SubscriptionService.HasFeatureAccessAsync(uid, FeatureAccess.Merger))
+                {
+                    Nav.NavigateTo("/pricing", forceLoad: true);
+                    return;
+                }
+            }
+        }
+    }
+
+    // ── Upload ──
+
+    private async Task HandleFileUpload(InputFileChangeEventArgs e)
+    {
+        _errorMessage = null;
+        var remaining = 4 - _uploadedPaths.Count;
+        var files = e.GetMultipleFiles(remaining);
+
+        foreach (var file in files)
+        {
+            if (_uploadedPaths.Count >= 4) break;
+
+            if (file.Size > 10 * 1024 * 1024)
+            {
+                _errorMessage = $"'{file.Name}' exceeds 10MB limit.";
+                continue;
+            }
+
+            try
+            {
+                using var stream = file.OpenReadStream(10 * 1024 * 1024);
+                var path = await ImageStorage.SaveUploadedFileAsync(stream, file.Name);
+                _uploadedPaths.Add(path);
+            }
+            catch (Exception ex)
+            {
+                Logger.LogError(ex, "Upload failed for {File}", file.Name);
+                _errorMessage = $"Failed to upload '{file.Name}'.";
+            }
+        }
+        StateHasChanged();
+    }
+
+    private void RemoveImage(string path)
+    {
+        _uploadedPaths.Remove(path);
+        _result = null;
+    }
+
+    // ── Generate ──
+
+    private async Task GenerateMerge()
+    {
+        if (_uploadedPaths.Count < 2) return;
+
+        // Debit coins
+        var authState = await AuthState.GetAuthenticationStateAsync();
+        var uidStr = authState.User.FindFirstValue(System.Security.Claims.ClaimTypes.NameIdentifier);
+        if (int.TryParse(uidStr, out var userId) && !authState.User.IsInRole("SuperAdmin"))
+        {
+            var cost = FeatureAccess.GetCost(FeatureAccess.Merger);
+            if (!await CoinService.DebitCoinsAsync(userId, cost, CoinTransactionType.GenerationSpend, "Photo Merger"))
+            {
+                _errorMessage = "Insufficient coins. Please top up.";
+                return;
+            }
+        }
+
+        _isGenerating = true;
+        _processingStatus = "Analyzing photos...";
+        _errorMessage = null;
+        _result = null;
+        StateHasChanged();
+
+        try
+        {
+            var imageCount = _uploadedPaths.Count;
+            var bgDesc = _bgStyle switch
+            {
+                "studio-white" => "a clean, pure white professional studio backdrop with soft even lighting",
+                "studio-grey" => "a neutral medium grey professional studio backdrop with soft even lighting",
+                "studio-gradient" => "a smooth gradient studio backdrop transitioning from light grey at the top to darker grey at the bottom",
+                "studio-dark" => "a deep dark black/charcoal professional studio backdrop with dramatic low-key lighting",
+                "outdoor-garden" => "a beautiful outdoor garden with lush greenery, soft natural daylight, and gentle bokeh",
+                "outdoor-sunset" => "a warm golden-hour outdoor setting with soft sunset light and warm amber tones",
+                "indoor-elegant" => "an elegant indoor setting with rich warm lighting, subtle texture, and a premium feel",
+                _ => "a clean white professional studio backdrop"
+            };
+
+            var layoutInstructions = _layoutStyle switch
+            {
+                "staggered-profile" => $@"ARRANGEMENT — STAGGERED PROFILE (DEPTH LAYERED):
+- ALL {imageCount} people facing the SAME direction (towards the right) in PROFILE or THREE-QUARTER PROFILE view.
+- Arrange them in DEPTH — layered from back to front. Image 1 person at the BACK (furthest), then each subsequent person progressively closer to the camera and slightly lower in frame.
+- Each person's face should be clearly visible in profile — no face blocked or hidden by another person.
+- Slight overlap of shoulders/bodies is natural — the person in front partially overlaps the person behind.
+- The person closest to the camera (front) should be the most prominent, with each person behind slightly smaller due to natural perspective.
+- Everyone should be shot from CHEST/SHOULDERS UP — this is a portrait composition, not full body.
+- The layering creates a dramatic cascading depth effect — like a premium family or group portrait.",
+
+                "v-formation" => $@"ARRANGEMENT — V-FORMATION (CENTER FRONT):
+- Place one person (Image 1) front and center, slightly closer to the camera.
+- Place the remaining people slightly behind and to each side, forming a natural V or triangle shape.
+- Everyone facing the camera with natural posture.
+- The front person is the focal point — slightly larger in frame due to being closer.
+- Natural spacing — shoulders may slightly overlap for a cohesive group feel.",
+
+                "close-group" => $@"ARRANGEMENT — CLOSE GROUP HUDDLE:
+- All people very close together — heads nearly touching, cheeks close.
+- Shot from CHEST UP or SHOULDERS UP — tight intimate framing.
+- Everyone looking at the camera with warm, genuine expressions.
+- Heads at slightly different heights for visual interest — some tilted slightly.
+- The composition should feel warm, connected, and intimate — like a selfie-style group portrait but with studio quality.",
+
+                _ => $@"ARRANGEMENT — SIDE BY SIDE:
+- Place people side by side in the order the images are provided (Image 1 on the left, Image 2 next, etc.)
+- Natural spacing between people — close enough to look like a group photo but not overlapping.
+- Everyone facing the camera with natural, relaxed posture."
+            };
+
+            var framingRule = _layoutStyle == "staggered-profile" || _layoutStyle == "close-group"
+                ? @"FRAMING RULE:
+- This is a CHEST-UP / SHOULDERS-UP portrait composition — do NOT show full body.
+- All people must have CONSISTENT framing — same scale relationship, natural perspective depth."
+                : @"FRAMING RULE:
+- Analyze ALL source images. If ALL images show full body, output a FULL BODY group shot.
+- If ANY image shows only upper body / bust / chest-up, then output a BUST / CHEST-UP group shot for ALL people (crop everyone consistently to the same framing).
+- All people must have CONSISTENT framing — same crop level, same scale, same distance from camera.";
+
+            var lightingStyle = _bgStyle == "studio-dark"
+                ? @"LIGHTING:
+- Dramatic low-key studio lighting — strong directional key light from one side creating defined shadows.
+- Subtle rim/hair light to separate subjects from the dark background.
+- Rich contrast — deep blacks in shadows, clean highlights on faces.
+- Cinematic, moody, and dramatic while keeping faces clearly visible and detailed."
+                : @"LIGHTING:
+- Professional, even studio lighting on all subjects — soft key light, fill light, subtle rim/hair light.
+- Consistent lighting direction and intensity across all subjects.
+- Natural shadows — no harsh or conflicting shadow directions.
+- The lighting on every person must match as if they were all in the same room at the same time.";
+
+            var bwSection = _blackAndWhite
+                ? "BLACK AND WHITE (MANDATORY): The ENTIRE output image must be in PURE BLACK AND WHITE — full monochrome, ZERO color. Rich tonal range — deep true blacks, clean bright whites, and smooth mid-grey gradations. Fine-art black and white photography aesthetic — emphasize texture, contrast, and form. Skin tones should render as beautiful luminous grey tones with natural tonal variation. No sepia, no color tinting, no selective color — PURE grayscale only."
+                : "";
+            var colorMatch = _blackAndWhite ? "Tonal consistency" : "Color-matched";
+
+            var prompt = $@"PHOTO MERGER — STUDIO-QUALITY COMBINED PORTRAIT
+
+TASK: You are given {imageCount} separate photographs of different people. Create ONE single photograph showing ALL {imageCount} people together as if they were photographed in a professional studio session.
+
+CRITICAL IDENTITY RULES:
+- Preserve EVERY person's EXACT facial features — same face shape, eyes, nose, lips, jawline, skin tone, expression.
+- Do NOT modify, beautify, smooth, reshape, or stylize ANY face.
+- Maintain each person's EXACT original hair color, hairstyle, and facial hair.
+- Maintain each person's EXACT original skin tone and undertone — no lightening, darkening, or smoothing.
+
+CLOTHING RULE:
+- Keep each person in their EXACT original clothing as shown in their source photo.
+- Do NOT change, swap, or modify any clothing, accessories, or jewelry.
+
+{framingRule}
+
+{layoutInstructions}
+
+BACKGROUND: {bgDesc}.
+
+{lightingStyle}
+
+{bwSection}
+
+QUALITY:
+- Output must look like a REAL professional studio photograph — NOT AI-generated, NOT composite, NOT collaged.
+- Sharp focus on all faces, natural depth of field.
+- {colorMatch} across all subjects — consistent white balance and exposure.
+- High clarity and detail — professional print quality.
+
+STRICT RULES:
+- Do NOT add extra people beyond those in the source images.
+- Do NOT swap faces between subjects.
+- Do NOT add text, watermarks, names, dates, or branding.
+- Do NOT add artistic effects, filters, or stylization.
+- The final image must be PHOTOREALISTIC — a viewer should believe all people were in the same room.";
+
+            // Determine output dimensions based on orientation and image count
+            int w, h;
+            switch (_orientation)
+            {
+                case "portrait":
+                    w = 1080; h = 1440;
+                    break;
+                case "square":
+                    w = 1024; h = 1024;
+                    break;
+                default: // landscape
+                    w = imageCount <= 2 ? 1440 : 1920;
+                    h = imageCount <= 2 ? 1080 : 1080;
+                    break;
+            }
+
+            _processingStatus = "Merging with AI...";
+            StateHasChanged();
+
+            var request = new GenerationRequest
+            {
+                Prompt = prompt,
+                Width = w,
+                Height = h,
+                SizeName = _orientation == "landscape" ? "Landscape" : _orientation == "portrait" ? "Portrait" : "Square",
+                EnhancePrompt = false,
+                ReferenceImagePaths = _uploadedPaths,
+                Provider = ImageProvider.Gemini,
+                SkipMultiImageComposition = true // our prompt already handles composition
+            };
+
+            _result = await ImageGenService.GenerateImageAsync(request);
+
+            if (_result.Success)
+            {
+                _imgVersion = DateTimeOffset.UtcNow.ToUnixTimeMilliseconds();
+            }
+            else
+            {
+                _errorMessage = _result.ErrorMessage ?? "Generation failed. Please try again.";
+            }
+        }
+        catch (Exception ex)
+        {
+            Logger.LogError(ex, "Merger generation failed");
+            _errorMessage = "Generation failed. Please try again.";
+        }
+        finally
+        {
+            _isGenerating = false;
+            _processingStatus = "Merging...";
+            StateHasChanged();
+        }
+    }
+
+    // ── Downloads ──
+
+    private async Task DownloadAs(string format)
+    {
+        if (_result?.LocalImagePath is null) return;
+        try
+        {
+            var webPath = await ImageStorage.PrepareHighResDownloadAsync(_result.LocalImagePath, format);
+            var fileName = $"artforge_merged_{DateTime.Now:yyyyMMdd_HHmmss}.{format}";
+            await JS.InvokeVoidAsync("downloadFile", $"/{webPath}", fileName);
+        }
+        catch (Exception ex)
+        {
+            Logger.LogError(ex, "Download failed");
+            _errorMessage = "Download failed.";
+        }
+    }
+
+    private async Task EnhanceAndDownload()
+    {
+        if (_result?.LocalImagePath is null || _isEnhancing) return;
+        _isEnhancing = true;
+        _enhanceProgress = 0;
+        _errorMessage = null;
+        StateHasChanged();
+
+        try
+        {
+            var fullPath = System.IO.Path.Combine(Env.WebRootPath,
+                _result.LocalImagePath.Replace('/', System.IO.Path.DirectorySeparatorChar));
+
+            var progress = new Progress<int>(pct =>
+            {
+                _enhanceProgress = pct;
+                InvokeAsync(StateHasChanged);
+            });
+
+            var enhancedPath = await ImageEnhancer.EnhanceImageAsync(fullPath, progress);
+            var enhancedFullPath = System.IO.Path.IsPathRooted(enhancedPath)
+                ? enhancedPath
+                : System.IO.Path.Combine(Env.WebRootPath, enhancedPath.Replace('/', System.IO.Path.DirectorySeparatorChar));
+            var enhancedBytes = await File.ReadAllBytesAsync(enhancedFullPath);
+            var enhancedBase64 = Convert.ToBase64String(enhancedBytes);
+            var fileName = $"artforge_merged_4x_{DateTime.Now:yyyyMMdd_HHmmss}.png";
+            await JS.InvokeVoidAsync("downloadFileFromBytes", fileName, "image/png", enhancedBase64);
+        }
+        catch (Exception ex)
+        {
+            Logger.LogError(ex, "Enhancement failed");
+            _errorMessage = "Enhancement failed.";
+        }
+        finally
+        {
+            _isEnhancing = false;
+            StateHasChanged();
+        }
+    }
+}

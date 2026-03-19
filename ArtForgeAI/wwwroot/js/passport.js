@@ -767,6 +767,24 @@ window.passportPhoto = (function () {
         return offscreen.toDataURL(mime, 0.95);
     }
 
+    // Export cropped passport photo as transparent PNG (preserving alpha channel)
+    function exportPassportPhotoTransparent() {
+        if (!cropImg || !cropImg.naturalWidth) return null;
+        var rect = getCropRect();
+        var sx = Math.round(rect.x * cropNaturalW);
+        var sy = Math.round(rect.y * cropNaturalH);
+        var sw = Math.round(rect.w * cropNaturalW);
+        var sh = Math.round(rect.h * cropNaturalH);
+        if (sw < 1 || sh < 1) return null;
+        var offscreen = document.createElement("canvas");
+        offscreen.width = photoW;
+        offscreen.height = photoH;
+        var octx = offscreen.getContext("2d");
+        // Do NOT fill background — keep transparent
+        octx.drawImage(cropImg, sx, sy, sw, sh, 0, 0, photoW, photoH);
+        return offscreen.toDataURL("image/png");
+    }
+
     // Trigger a browser download from a data URL
     function triggerDownload(dataUrl, filename) {
         var a = document.createElement("a");
@@ -856,6 +874,7 @@ window.passportPhoto = (function () {
         renderSheet: renderSheet,
         exportPng: exportPng,
         exportPassportPhoto: exportPassportPhoto,
+        exportPassportPhotoTransparent: exportPassportPhotoTransparent,
         downloadSheetPng: downloadSheetPng,
         downloadPassportPhoto: downloadPassportPhoto,
         getGridInfo: getGridInfo,

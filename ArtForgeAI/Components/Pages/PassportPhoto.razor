@@ -190,12 +190,18 @@
                                     @for (int i = 0; i < _bgColors.Length; i++)
                                     {
                                         var color = _bgColors[i];
+                                        var isTransparent = color.Hex == "transparent";
+                                        var isSelected = _selectedBgColor == color.Hex;
                                         <span @onclick="() => OnBgColorChanged(color.Hex)"
                                               title="@color.Name"
                                               style="display:inline-block; width:28px; height:28px; border-radius:50%;
-                                                     background-color:@(color.Hex); cursor:pointer; flex-shrink:0;
-                                                     border: @(_selectedBgColor == color.Hex ? "3px solid #6366f1" : "2px solid #888");
-                                                     box-shadow: @(_selectedBgColor == color.Hex ? "0 0 0 2px rgba(99,102,241,0.35)" : "0 1px 2px rgba(0,0,0,0.2)");"></span>
+                                                     @(isTransparent
+                                                         ? "background: conic-gradient(#ccc 25%, #fff 25% 50%, #ccc 50% 75%, #fff 75%);"
+                                                           + "background-size: 10px 10px;"
+                                                         : $"background-color:{color.Hex};")
+                                                     cursor:pointer; flex-shrink:0;
+                                                     border: @(isSelected ? "3px solid #6366f1" : "2px solid #888");
+                                                     box-shadow: @(isSelected ? "0 0 0 2px rgba(99,102,241,0.35)" : "0 1px 2px rgba(0,0,0,0.2)");"></span>
                                     }
                                 </div>
                             </div>
@@ -247,6 +253,12 @@
                     <button class="btn-secondary" style="font-size: 0.85rem; padding: 0.4rem 0.85rem;" @onclick="StartNew">
                         &#10024; Process Another
                     </button>
+                    @if (_removeBg && _transparentPngCache != null)
+                    {
+                        <button class="btn-secondary" style="font-size: 0.85rem; padding: 0.4rem 0.85rem;" @onclick="DownloadTransparentPng">
+                            Download PNG (No BG)
+                        </button>
+                    }
                     @if (ImageEnhancer.IsAvailable)
                     {
                         <button class="btn-enhance" @onclick="EnhanceAndDownload" disabled="@(_isEnhancing || _isProcessing)">
@@ -409,6 +421,7 @@
     private record BgColor(string Name, string Hex);
     private static readonly BgColor[] _bgColors = new[]
     {
+        new BgColor("Transparent", "transparent"),
         new BgColor("White",      "#FFFFFF"),
         new BgColor("Light Grey", "#D3D3D3"),
         new BgColor("Light Blue", "#ADD8E6"),
@@ -693,7 +706,15 @@
         _selectedBgColor = hex;
         _enhancedDataUrl = null; // base changed, invalidate sharpen cache
 
-        _bgRemovedDataUrl = await Task.Run(() => CompositeOnColour(_transparentPngCache, hex));
+        if (hex == "transparent")
+        {
+            // Use the transparent PNG directly (no compositing)
+            _bgRemovedDataUrl = "data:image/png;base64," + Convert.ToBase64String(_transparentPngCache);
+        }
+        else
+        {
+            _bgRemovedDataUrl = await Task.Run(() => CompositeOnColour(_transparentPngCache, hex));
+        }
         await SwapToCurrentImage();
     }
 
@@ -1217,6 +1238,28 @@
             await JS.InvokeVoidAsync("passportPhoto.downloadPassportPhoto", "jpg", "passport_photo_35x45mm.jpg");
         }
         catch (Exception ex) { Logger.LogError(ex, "Download failed"); _errorMessage = "Download failed."; }
+    }
+
+    private async Task DownloadTransparentPng()
+    {
+        if (_transparentPngCache == null) return;
+        try
+        {
+            // Export the cropped region from the transparent PNG cache (preserving alpha)
+            var croppedTransparent = await JS.InvokeAsync<string>("passportPhoto.exportPassportPhotoTransparent");
+            if (!string.IsNullOrEmpty(croppedTransparent))
+            {
+                var base64 = croppedTransparent[(croppedTransparent.IndexOf(",", StringComparison.Ordinal) + 1)..];
+                await JS.InvokeVoidAsync("downloadFileFromBytes", "passport_photo_transparent.png", "image/png", base64);
+            }
+            else
+            {
+                // Fallback: download the full transparent PNG without cropping
+                var base64 = Convert.ToBase64String(_transparentPngCache);
+                await JS.InvokeVoidAsync("downloadFileFromBytes", "passport_photo_transparent.png", "image/png", base64);
+            }
+        }
+        catch (Exception ex) { Logger.LogError(ex, "Transparent download failed"); _errorMessage = "Download failed."; }
     }
 
     private async Task DownloadPrintSheet()

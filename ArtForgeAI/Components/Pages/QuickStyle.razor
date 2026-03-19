@@ -342,7 +342,7 @@
     // Guard against result-close re-triggering generation
     private DateTime _resultClosedAt = DateTime.MinValue;
 
-    private static readonly string[] _categoryOrder = ["Artistic", "Fun", "Professional", "Abstract", "Mythological", "Regional", "Memorial", "PhotoCollage", "PhotoArts"];
+    private static readonly string[] _categoryOrder = ["Artistic", "Fun", "Professional", "Abstract", "Mythological", "Regional", "Memorial", "PhotoCollage", "PhotoArts", "Trendy Photo Collage"];
 
     private IGrouping<string, StylePreset>[] GetFilteredGroups()
     {
@@ -916,7 +916,7 @@
         sb.Append(prompt);
 
         // 3. Gender adaptation + person count + multi-panel rules
-        sb.Append(" RULES: Detect the subject's gender from the source photo and adapt all attire, jewelry, and styling accordingly — use saree/lehenga for women, dhoti/sherwani/kurta for men, or age-appropriate alternatives for children. Show ONLY the exact number of people from the source photo — no extra people. If multiple panels/scenes, each panel must be a completely different scene, pose, outfit, angle, and setting. CRITICAL: In every panel or frame, the face must have clear, sharp, photorealistic facial features — eyes, nose, mouth, and jawline must all be clearly defined and recognizable. Never leave faces blank, blurry, or stylized beyond recognition.");
+        sb.Append(" RULES: Detect the subject's gender from the source photo and adapt all attire, jewelry, and styling accordingly — use saree/lehenga for women, dhoti/sherwani/kurta for men, or age-appropriate alternatives for children. ABSOLUTE PERSON COUNT (ZERO TOLERANCE): Count the EXACT number of people in the source photo. The output MUST contain EXACTLY that number — if 1 person in source, show ONLY 1 person (do NOT add a partner, spouse, or companion). If 2 people, show EXACTLY 2. NEVER fabricate or add people not present in the source image. This overrides any style that implies couples or groups — adapt the style to match the actual person count. If multiple panels/scenes, each panel must be a completely different scene, pose, outfit, angle, and setting. CRITICAL: In every panel or frame, the face must have clear, sharp, photorealistic facial features — eyes, nose, mouth, and jawline must all be clearly defined and recognizable. Never leave faces blank, blurry, or stylized beyond recognition.");
 
         // 4. Quality and format
         sb.Append(" OUTPUT: Highest quality, photorealistic detail, exact 2:3 portrait aspect ratio.");

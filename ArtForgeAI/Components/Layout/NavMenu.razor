@@ -92,6 +92,10 @@
                 <span class="nav-icon">&#9986;</span>
                 Shape Cut Sheet
             </NavLink>
+            <NavLink class="nav-item" href="merger">
+                <span class="nav-icon">&#129520;</span>
+                Photo Merger
+            </NavLink>
             <NavLink class="nav-item" href="negative-scan">
                 <span class="nav-icon">&#127902;</span>
                 Negative Scan
@@ -192,6 +196,13 @@
                 <NavLink class="nav-item" href="shape-cut">
                     <span class="nav-icon">&#9986;</span>
                     Shape Cut Sheet
+                </NavLink>
+            }
+            @if (_accessibleFeatures.Contains("Merger"))
+            {
+                <NavLink class="nav-item" href="merger">
+                    <span class="nav-icon">&#129520;</span>
+                    Photo Merger
                 </NavLink>
             }
             @if (_accessibleFeatures.Contains("NegativeScan"))

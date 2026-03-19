@@ -311,21 +311,139 @@ public sealed class OnnxBgRemovalService : IDisposable
         return mask;
     }
 
-    /// <summary>Apply the segmentation mask as alpha channel to the image.</summary>
+    /// <summary>Apply the segmentation mask as alpha channel with edge erosion and aggressive defringe.</summary>
     private static void ApplyMask(Image<Rgba32> image, float[,] mask)
     {
+        int w = image.Width, h = image.Height;
+
+        // Step 1: Erode the mask edges — shrink the mask boundary inward by a few pixels
+        // This trims the outermost semi-transparent fringe that contains background color
+        var eroded = ErodeMask(mask, w, h, erosionPasses: 2);
+
+        // Step 2: Sharpen the alpha transition — push semi-transparent values toward 0 or 1
+        // This reduces the soft fringe zone where background bleeds through
+        for (int y = 0; y < h; y++)
+        {
+            for (int x = 0; x < w; x++)
+            {
+                float m = eroded[y, x];
+                if (m <= 0.02f) { eroded[y, x] = 0f; continue; }
+                if (m >= 0.92f) { eroded[y, x] = 1f; continue; }
+                // Apply a contrast curve to sharpen the transition
+                // Remap [0.15, 0.85] → [0, 1] then apply power curve
+                float normalized = Math.Clamp((m - 0.15f) / 0.70f, 0f, 1f);
+                eroded[y, x] = MathF.Pow(normalized, 0.6f); // slightly aggressive sharpening
+            }
+        }
+
+        // Step 3: Apply alpha and defringe RGB in a single pass
+        // For edge pixels, fully replace RGB with nearby foreground color
+        const float opaqueThresh = 0.95f;
+        const int sampleRadius = 5;
+
         image.ProcessPixelRows(accessor =>
         {
-            for (int y = 0; y < accessor.Height; y++)
+            for (int y = 0; y < h; y++)
             {
                 var row = accessor.GetRowSpan(y);
-                for (int x = 0; x < accessor.Width; x++)
+                for (int x = 0; x < w; x++)
                 {
-                    byte alpha = (byte)(Math.Clamp(mask[y, x], 0f, 1f) * 255);
-                    row[x] = new Rgba32(row[x].R, row[x].G, row[x].B, alpha);
+                    float m = eroded[y, x];
+
+                    if (m <= 0f)
+                    {
+                        row[x] = new Rgba32(0, 0, 0, 0);
+                        continue;
+                    }
+
+                    byte alpha = (byte)(Math.Clamp(m, 0f, 1f) * 255);
+
+                    if (m >= opaqueThresh)
+                    {
+                        // Fully opaque — keep original RGB
+                        row[x] = new Rgba32(row[x].R, row[x].G, row[x].B, alpha);
+                        continue;
+                    }
+
+                    // Semi-transparent edge pixel: replace RGB with nearby foreground color
+                    int rSum = 0, gSum = 0, bSum = 0, count = 0;
+                    int yStart = Math.Max(0, y - sampleRadius);
+                    int yEnd = Math.Min(h - 1, y + sampleRadius);
+                    int xStart = Math.Max(0, x - sampleRadius);
+                    int xEnd = Math.Min(w - 1, x + sampleRadius);
+
+                    for (int sy = yStart; sy <= yEnd; sy++)
+                    {
+                        var sampleRow = accessor.GetRowSpan(sy);
+                        for (int sx = xStart; sx <= xEnd; sx++)
+                        {
+                            if (eroded[sy, sx] >= opaqueThresh)
+                            {
+                                var sp = sampleRow[sx];
+                                rSum += sp.R;
+                                gSum += sp.G;
+                                bSum += sp.B;
+                                count++;
+                            }
+                        }
+                    }
+
+                    if (count > 0)
+                    {
+                        // Fully replace RGB with foreground color (aggressive defringe)
+                        row[x] = new Rgba32(
+                            (byte)(rSum / count),
+                            (byte)(gSum / count),
+                            (byte)(bSum / count),
+                            alpha);
+                    }
+                    else
+                    {
+                        // No nearby opaque pixels found — make transparent to avoid orphan fringe
+                        row[x] = new Rgba32(0, 0, 0, 0);
+                    }
                 }
             }
         });
+    }
+
+    /// <summary>Erode the mask by reducing edge values — minimum filter over a 3x3 kernel, repeated N times.</summary>
+    private static float[,] ErodeMask(float[,] mask, int w, int h, int erosionPasses)
+    {
+        var current = (float[,])mask.Clone();
+        var temp = new float[h, w];
+
+        for (int pass = 0; pass < erosionPasses; pass++)
+        {
+            for (int y = 0; y < h; y++)
+            {
+                for (int x = 0; x < w; x++)
+                {
+                    float minVal = current[y, x];
+
+                    // Check 3x3 neighbourhood
+                    for (int dy = -1; dy <= 1; dy++)
+                    {
+                        int ny = y + dy;
+                        if (ny < 0 || ny >= h) continue;
+                        for (int dx = -1; dx <= 1; dx++)
+                        {
+                            int nx = x + dx;
+                            if (nx < 0 || nx >= w) continue;
+                            if (current[ny, nx] < minVal)
+                                minVal = current[ny, nx];
+                        }
+                    }
+
+                    temp[y, x] = minVal;
+                }
+            }
+
+            // Swap buffers
+            (current, temp) = (temp, current);
+        }
+
+        return current;
     }
 
     public void Dispose()

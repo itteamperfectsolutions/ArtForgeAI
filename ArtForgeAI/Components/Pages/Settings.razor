@@ -314,6 +314,7 @@
                         <option value="Super Heroes">Super Heroes</option>
                         <option value="Anime &amp; Gaming">Anime &amp; Gaming</option>
                         <option value="K-Culture">K-Culture</option>
+                        <option value="Trendy Photo Collage">Trendy Photo Collage</option>
                     </select>
                     <input class="form-input" style="width: 50px;" @bind="_newStyleEmoji" placeholder="Emoji" />
                     <input class="form-input" style="width: 80px;" @bind="_newStyleAccent" placeholder="#hex" />
@@ -1151,7 +1152,7 @@
     private HashSet<int> _bulkSelectedIds = [];
     private string? _bulkAssignMessage;
     private string _styleSearchQuery = string.Empty;
-    private static readonly string[] _categoryOrder = ["Artistic", "Fun", "Professional", "Abstract", "Mythological", "Regional", "PhotoCollage", "PhotoArts", "Cartoon Characters", "Super Heroes", "Anime & Gaming", "K-Culture"];
+    private static readonly string[] _categoryOrder = ["Artistic", "Fun", "Professional", "Abstract", "Mythological", "Regional", "PhotoCollage", "PhotoArts", "Cartoon Characters", "Super Heroes", "Anime & Gaming", "K-Culture", "Trendy Photo Collage"];
 
     private IEnumerable<StylePreset> FilterStyles(IEnumerable<StylePreset> styles)
     {
