@@ -28,6 +28,15 @@ x86/
 ## ONNX models (large binary files)
 *.onnx
 
+## License & security keys (never commit)
+*.lic
+license.lic
+private.key
+public.key
+public.xml
+integrity.manifest
+LicenseGenerator/keys/
+
 ## Windows artifacts
 nul
 /ArtForgeAI/wwwroot/downloads

@@ -435,16 +435,27 @@
             var files = e.GetMultipleFiles(20);
             foreach (var file in files)
             {
-                if (file.Size > 10 * 1024 * 1024)
+                if (file.Size > ImageUploadHelper.MaxReadSize)
                 {
-                    _errorMessage = $"File '{file.Name}' exceeds 10MB limit, skipped.";
+                    _errorMessage = $"File '{file.Name}' exceeds {ImageUploadHelper.FormatFileSize(ImageUploadHelper.MaxReadSize)} limit, skipped.";
                     continue;
                 }
 
                 try
                 {
-                    using var stream = file.OpenReadStream(10 * 1024 * 1024);
-                    var uploadedPath = await ImageStorage.SaveUploadedFileAsync(stream, file.Name);
+                    string uploadedPath;
+                    if (file.Size > ImageUploadHelper.DefaultMaxUploadSize)
+                    {
+                        using var readMs = new MemoryStream();
+                        await file.OpenReadStream(ImageUploadHelper.MaxReadSize).CopyToAsync(readMs);
+                        using var compressed = ImageUploadHelper.CompressToFit(readMs.ToArray(), file.Name);
+                        uploadedPath = await ImageStorage.SaveUploadedFileAsync(compressed, file.Name);
+                    }
+                    else
+                    {
+                        using var stream = file.OpenReadStream(ImageUploadHelper.MaxReadSize);
+                        uploadedPath = await ImageStorage.SaveUploadedFileAsync(stream, file.Name);
+                    }
 
                     var design = new DesignItem
                     {

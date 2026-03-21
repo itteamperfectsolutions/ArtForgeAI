@@ -1,0 +1,12 @@
+{
+  "profiles": {
+    "LicenseServer": {
+      "commandName": "Project",
+      "launchBrowser": true,
+      "environmentVariables": {
+        "ASPNETCORE_ENVIRONMENT": "Development"
+      },
+      "applicationUrl": "https://localhost:55829;http://localhost:55830"
+    }
+  }
+}

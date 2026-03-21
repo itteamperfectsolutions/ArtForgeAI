@@ -47,63 +47,26 @@
 
         @if (_isSuperAdmin)
         {
-            @* ── SuperAdmin sees all features ── *@
-            <NavLink class="nav-item" href="" Match="NavLinkMatch.All">
-                <span class="nav-icon">&#127912;</span>
-                Create
-            </NavLink>
-            <NavLink class="nav-item" href="auto-enhance">
-                <span class="nav-icon">&#9889;</span>
-                Auto Enhance
-            </NavLink>
-            <NavLink class="nav-item" href="style-transfer">
-                <span class="nav-icon">&#10024;</span>
-                Style Transfer
-            </NavLink>
-            <NavLink class="nav-item" href="style-remix">
-                <span class="nav-icon">&#127912;</span>
-                Style Remix
-            </NavLink>
-            <NavLink class="nav-item" href="mosaic-poster">
-                <span class="nav-icon">&#129513;</span>
-                Mosaic Poster
-            </NavLink>
-            <NavLink class="nav-item" href="template-collage">
-                <span class="nav-icon">&#127912;</span>
-                Template Collage
-            </NavLink>
-            <NavLink class="nav-item" href="photo-collages">
-                <span class="nav-icon">&#128444;</span>
-                Photo Collages
-            </NavLink>
-            <NavLink class="nav-item" href="passport-photo">
-                <span class="nav-icon">&#128247;</span>
-                Passport Photo
-            </NavLink>
-            <NavLink class="nav-item" href="photo-size-expand">
-                <span class="nav-icon">&#128200;</span>
-                Photo Expand
-            </NavLink>
-            <NavLink class="nav-item" href="gang-sheet">
-                <span class="nav-icon">&#128424;</span>
-                Gang Sheet
-            </NavLink>
-            <NavLink class="nav-item" href="shape-cut">
-                <span class="nav-icon">&#9986;</span>
-                Shape Cut Sheet
-            </NavLink>
-            <NavLink class="nav-item" href="merger">
-                <span class="nav-icon">&#129520;</span>
-                Photo Merger
-            </NavLink>
-            <NavLink class="nav-item" href="negative-scan">
-                <span class="nav-icon">&#127902;</span>
-                Negative Scan
-            </NavLink>
-            <NavLink class="nav-item" href="image-viewer">
-                <span class="nav-icon">&#128065;</span>
-                Image Viewer
-            </NavLink>
+            @* ── SuperAdmin: usage-sorted feature links ── *@
+            @foreach (var item in _orderedNavItems)
+            {
+                @if (item.Href == "")
+                {
+                    <NavLink class="nav-item" href="" Match="NavLinkMatch.All">
+                        <span class="nav-icon">@((MarkupString)item.Icon)</span>
+                        @item.Label
+                    </NavLink>
+                }
+                else
+                {
+                    <NavLink class="nav-item" href="@item.Href">
+                        <span class="nav-icon">@((MarkupString)item.Icon)</span>
+                        @item.Label
+                    </NavLink>
+                }
+            }
+
+            @* ── Gallery always after features ── *@
             <NavLink class="nav-item" href="gallery">
                 <span class="nav-icon">&#128444;</span>
                 Gallery
@@ -123,93 +86,34 @@
         }
         else
         {
-            @* ── Regular users see plan-gated features ── *@
-            @if (_accessibleFeatures.Contains("Home"))
+            @* ── Regular users: usage-sorted, plan-gated features ── *@
+            @foreach (var item in _orderedNavItems)
             {
-                <NavLink class="nav-item" href="" Match="NavLinkMatch.All">
-                    <span class="nav-icon">&#127912;</span>
-                    Create
-                </NavLink>
+                @if (_accessibleFeatures.Contains(item.FeatureKey))
+                {
+                    @if (item.Href == "")
+                    {
+                        <NavLink class="nav-item" href="" Match="NavLinkMatch.All">
+                            <span class="nav-icon">@((MarkupString)item.Icon)</span>
+                            @item.Label
+                        </NavLink>
+                    }
+                    else
+                    {
+                        <NavLink class="nav-item" href="@item.Href">
+                            <span class="nav-icon">@((MarkupString)item.Icon)</span>
+                            @item.Label
+                        </NavLink>
+                    }
+                }
             }
-            @if (_accessibleFeatures.Contains("AutoEnhance"))
+
+            @* ── Always-visible utility links for regular users ── *@
+            @if (_accessibleFeatures.Contains("Gallery"))
             {
-                <NavLink class="nav-item" href="auto-enhance">
-                    <span class="nav-icon">&#9889;</span>
-                    Auto Enhance
-                </NavLink>
-            }
-            @if (_accessibleFeatures.Contains("StyleTransfer"))
-            {
-                <NavLink class="nav-item" href="style-transfer">
-                    <span class="nav-icon">&#10024;</span>
-                    Style Transfer
-                </NavLink>
-            }
-            @if (_accessibleFeatures.Contains("StyleRemix"))
-            {
-                <NavLink class="nav-item" href="style-remix">
-                    <span class="nav-icon">&#127912;</span>
-                    Style Remix
-                </NavLink>
-            }
-            @if (_accessibleFeatures.Contains("MosaicPoster"))
-            {
-                <NavLink class="nav-item" href="mosaic-poster">
-                    <span class="nav-icon">&#129513;</span>
-                    Mosaic Poster
-                </NavLink>
-                <NavLink class="nav-item" href="template-collage">
-                    <span class="nav-icon">&#127912;</span>
-                    Template Collage
-                </NavLink>
-            }
-            @if (_accessibleFeatures.Contains("PhotoCollages"))
-            {
-                <NavLink class="nav-item" href="photo-collages">
+                <NavLink class="nav-item" href="gallery">
                     <span class="nav-icon">&#128444;</span>
-                    Photo Collages
-                </NavLink>
-            }
-            @if (_accessibleFeatures.Contains("PassportPhoto"))
-            {
-                <NavLink class="nav-item" href="passport-photo">
-                    <span class="nav-icon">&#128247;</span>
-                    Passport Photo
-                </NavLink>
-            }
-            @if (_accessibleFeatures.Contains("PhotoExpand"))
-            {
-                <NavLink class="nav-item" href="photo-size-expand">
-                    <span class="nav-icon">&#128200;</span>
-                    Photo Expand
-                </NavLink>
-            }
-            @if (_accessibleFeatures.Contains("GangSheet"))
-            {
-                <NavLink class="nav-item" href="gang-sheet">
-                    <span class="nav-icon">&#128424;</span>
-                    Gang Sheet
-                </NavLink>
-            }
-            @if (_accessibleFeatures.Contains("ShapeCutSheet"))
-            {
-                <NavLink class="nav-item" href="shape-cut">
-                    <span class="nav-icon">&#9986;</span>
-                    Shape Cut Sheet
-                </NavLink>
-            }
-            @if (_accessibleFeatures.Contains("Merger"))
-            {
-                <NavLink class="nav-item" href="merger">
-                    <span class="nav-icon">&#129520;</span>
-                    Photo Merger
-                </NavLink>
-            }
-            @if (_accessibleFeatures.Contains("NegativeScan"))
-            {
-                <NavLink class="nav-item" href="negative-scan">
-                    <span class="nav-icon">&#127902;</span>
-                    Negative Scan
+                    Gallery
                 </NavLink>
             }
             @if (_accessibleFeatures.Contains("ImageViewer"))
@@ -219,22 +123,7 @@
                     Image Viewer
                 </NavLink>
             }
-            @if (_accessibleFeatures.Contains("Gallery"))
-            {
-                <NavLink class="nav-item" href="gallery">
-                    <span class="nav-icon">&#128444;</span>
-                    Gallery
-                </NavLink>
-            }
-            @if (_accessibleFeatures.Contains("Settings"))
-            {
-                <NavLink class="nav-item" href="settings">
-                    <span class="nav-icon">&#9881;</span>
-                    Settings
-                </NavLink>
-            }
 
-            @* ── Regular users: Wallet, Pricing, Referrals, My Plan ── *@
             <NavLink class="nav-item" href="wallet">
                 <span class="nav-icon">&#128176;</span>
                 Wallet
@@ -254,6 +143,14 @@
                 <span class="nav-icon">&#11088;</span>
                 My Plan
             </NavLink>
+
+            @if (_accessibleFeatures.Contains("Settings"))
+            {
+                <NavLink class="nav-item" href="settings">
+                    <span class="nav-icon">&#9881;</span>
+                    Settings
+                </NavLink>
+            }
         }
     </div>
 
@@ -278,7 +175,55 @@
     private int _coinBalance;
     private string _planName = "Free";
     private bool _isSuperAdmin;
+    private int _userId;
     private List<string> _accessibleFeatures = new();
+    private List<NavItem> _orderedNavItems = new();
+
+    // ── Nav item definition ──
+    private record NavItem(string FeatureKey, string Href, string Icon, string Label);
+
+    // ── All sortable feature nav items (excludes QuickStyle, Gallery, Settings, ImageViewer — those are pinned) ──
+    private static readonly NavItem[] AllFeatureNavItems =
+    [
+        new("Home",         "",                  "&#127912;",  "Create"),
+        new("AutoEnhance",  "auto-enhance",      "&#9889;",    "Auto Enhance"),
+        new("StyleTransfer", "style-transfer",   "&#10024;",   "Style Transfer"),
+        new("StyleRemix",   "style-remix",       "&#127912;",  "Style Remix"),
+        new("MosaicPoster", "mosaic-poster",     "&#129513;",  "Mosaic Poster"),
+        new("MosaicPoster", "template-collage",  "&#127912;",  "Template Collage"),
+        new("PhotoCollages","photo-collages",    "&#128444;",  "Photo Collages"),
+        new("PassportPhoto","passport-photo",    "&#128247;",  "Passport Photo"),
+        new("PhotoExpand",  "photo-size-expand", "&#128200;",  "Photo Expand"),
+        new("GangSheet",    "gang-sheet",        "&#128424;",  "Gang Sheet"),
+        new("ShapeCutSheet","shape-cut",         "&#9986;",    "Shape Cut Sheet"),
+        new("Merger",       "merger",            "&#129520;",  "Photo Merger"),
+        new("EmbroideryArt","embroidery-art",    "&#129525;",  "Embroidery Art"),
+        new("NegativeScan", "negative-scan",     "&#127902;",  "Negative Scan"),
+        new("BackgroundRemoval", "background-removal", "&#9986;", "BG Removal"),
+    ];
+
+    // ── Maps coin transaction descriptions to feature keys ──
+    private static readonly Dictionary<string, string> DescriptionToFeatureKey = new(StringComparer.OrdinalIgnoreCase)
+    {
+        ["Home image generation"]        = "Home",
+        ["Quick Style generation"]       = "QuickStyle",
+        ["Auto Enhance"]                 = "AutoEnhance",
+        ["Style Transfer generation"]    = "StyleTransfer",
+        ["Style Remix generation"]       = "StyleRemix",
+        ["Mosaic Poster export"]         = "MosaicPoster",
+        ["Template Collage generation"]  = "MosaicPoster",
+        ["Photo Collage composition"]    = "PhotoCollages",
+        ["Passport Photo generation"]    = "PassportPhoto",
+        ["AI Passport Adjust"]           = "PassportPhoto",
+        ["Photo Expand generation"]      = "PhotoExpand",
+        ["Gang Sheet generation"]        = "GangSheet",
+        ["Shape Cut Sheet generation"]   = "ShapeCutSheet",
+        ["Photo Merger"]                 = "Merger",
+        ["Embroidery Art"]               = "EmbroideryArt",
+        ["Negative Scan conversion"]     = "NegativeScan",
+        ["Negative Scan AI enhancement"] = "NegativeScan",
+        ["Background Removal"]           = "BackgroundRemoval",
+    };
 
     protected override async Task OnInitializedAsync()
     {
@@ -290,6 +235,8 @@
             var userIdStr = user.FindFirstValue(System.Security.Claims.ClaimTypes.NameIdentifier);
             if (int.TryParse(userIdStr, out var userId) && userId > 0)
             {
+                _userId = userId;
+
                 // Check SuperAdmin via DB lookup (cookie claims may be stale)
                 var dbUser = await AuthService.GetUserByIdAsync(userId);
                 _isSuperAdmin = dbUser?.Role == ArtForgeAI.Models.AppRole.SuperAdmin;
@@ -304,11 +251,43 @@
                     _planName = await SubscriptionService.GetCurrentPlanNameAsync(userId);
                     _accessibleFeatures = await SubscriptionService.GetAccessibleFeaturesAsync(userId);
                 }
+
+                // Get usage-based ordering
+                _orderedNavItems = await BuildOrderedNavItems(userId);
+            }
+            else
+            {
+                _orderedNavItems = AllFeatureNavItems.ToList();
             }
         }
         catch
         {
             _accessibleFeatures = ArtForgeAI.Models.FeatureAccess.PlanFeatures["Free"].ToList();
+            _orderedNavItems = AllFeatureNavItems.ToList();
         }
+    }
+
+    private async Task<List<NavItem>> BuildOrderedNavItems(int userId)
+    {
+        var usageOrder = await CoinService.GetFeatureUsageOrderAsync(userId);
+
+        // Map usage descriptions to feature keys with ordering rank
+        var featureRank = new Dictionary<string, int>();
+        for (int i = 0; i < usageOrder.Count; i++)
+        {
+            if (DescriptionToFeatureKey.TryGetValue(usageOrder[i], out var featureKey))
+            {
+                featureRank.TryAdd(featureKey, i); // first occurrence wins
+            }
+        }
+
+        // Sort: features with usage data first (by rank), then remaining features in default order
+        var sorted = AllFeatureNavItems
+            .Select((item, defaultIndex) => (item, defaultIndex))
+            .OrderBy(x => featureRank.TryGetValue(x.item.FeatureKey, out var rank) ? rank : 1000 + x.defaultIndex)
+            .Select(x => x.item)
+            .ToList();
+
+        return sorted;
     }
 }

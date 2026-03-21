@@ -21,6 +21,7 @@ public class GeminiImageService : IGeminiImageService
 
     public async Task<(string? text, byte[] imageBytes)> GenerateImageAsync(string prompt, int width, int height)
     {
+        prompt = SanitizePrompt(prompt);
         var requestBody = new
         {
             contents = new[]
@@ -49,6 +50,7 @@ public class GeminiImageService : IGeminiImageService
     public async Task<(string? text, byte[] imageBytes)> EditImageAsync(
         string prompt, List<(byte[] data, string mimeType)> images, int width, int height)
     {
+        prompt = SanitizePrompt(prompt);
         // Build parts: labeled reference images first, then text prompt last.
         // Placing images before the text prompt gives Gemini visual context
         // before it reads the composition instructions.
@@ -134,6 +136,7 @@ public class GeminiImageService : IGeminiImageService
 
     private async Task<string> SendAnalyzeToModelAsync(byte[] imageData, string mimeType, string textPrompt, string model)
     {
+        textPrompt = SanitizePrompt(textPrompt);
         var url = $"https://generativelanguage.googleapis.com/v1beta/models/{model}:generateContent?key={_options.ApiKey}";
 
         var requestBody = new
@@ -184,7 +187,16 @@ public class GeminiImageService : IGeminiImageService
         if (candidates.GetArrayLength() == 0)
             throw new InvalidOperationException($"Gemini ({model}) returned no candidates.");
 
-        var parts = candidates[0].GetProperty("content").GetProperty("parts");
+        var firstCandidate = candidates[0];
+
+        if (!firstCandidate.TryGetProperty("content", out var candidateContent)
+            || !candidateContent.TryGetProperty("parts", out var parts))
+        {
+            var reason = firstCandidate.TryGetProperty("finishReason", out var fr)
+                ? fr.GetString() : "unknown";
+            throw new InvalidOperationException(
+                $"Gemini ({model}) blocked the request (reason: {reason}). Try rephrasing your prompt.");
+        }
 
         foreach (var part in parts.EnumerateArray())
         {
@@ -196,6 +208,12 @@ public class GeminiImageService : IGeminiImageService
 
         return string.Empty;
     }
+
+    /// <summary>Strip \r\n and collapse whitespace so prompts are clean single-line text.</summary>
+    private static string SanitizePrompt(string prompt) =>
+        System.Text.RegularExpressions.Regex.Replace(
+            prompt.Replace("\r\n", " ").Replace("\r", " ").Replace("\n", " "),
+            @"\s{2,}", " ").Trim();
 
     /// <summary>
     /// Sends the request to the primary model, falling back to FallbackImageModel on failure.
@@ -245,7 +263,18 @@ public class GeminiImageService : IGeminiImageService
         if (candidates.GetArrayLength() == 0)
             throw new InvalidOperationException($"Gemini ({model}) returned no candidates.");
 
-        var parts = candidates[0].GetProperty("content").GetProperty("parts");
+        var firstCandidate = candidates[0];
+
+        // When Gemini blocks a response (e.g. safety filters), the candidate
+        // has finishReason but no "content" property — handle gracefully.
+        if (!firstCandidate.TryGetProperty("content", out var candidateContent)
+            || !candidateContent.TryGetProperty("parts", out var parts))
+        {
+            var reason = firstCandidate.TryGetProperty("finishReason", out var fr)
+                ? fr.GetString() : "unknown";
+            throw new InvalidOperationException(
+                $"Gemini ({model}) blocked the request (reason: {reason}). Try rephrasing your prompt.");
+        }
 
         foreach (var part in parts.EnumerateArray())
         {
@@ -253,7 +282,8 @@ public class GeminiImageService : IGeminiImageService
             {
                 textResult = textProp.GetString();
             }
-            else if (part.TryGetProperty("inlineData", out var inlineData))
+            else if (part.TryGetProperty("inlineData", out var inlineData)
+                     || part.TryGetProperty("inline_data", out inlineData))
             {
                 var base64 = inlineData.GetProperty("data").GetString();
                 if (base64 is not null)

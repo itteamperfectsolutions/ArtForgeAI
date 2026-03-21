@@ -38,6 +38,14 @@
                         </div>
                     </div>
                 }
+                <div style="display:flex;align-items:center;gap:0.4rem;margin-top:0.5rem;justify-content:center;">
+                    <label style="font-size:0.78rem;color:var(--text-muted);">Print DPI:</label>
+                    <select class="form-select" style="width:auto;font-size:0.8rem;padding:0.25rem 0.5rem;" @bind="_selectedDpi">
+                        <option value="300">300 DPI</option>
+                        <option value="600">600 DPI</option>
+                        <option value="1200">1200 DPI</option>
+                    </select>
+                </div>
                 <div class="preview-actions">
                     <button class="btn-secondary" @onclick="DownloadPng">
                         &#11015; PNG
@@ -101,6 +109,7 @@
     private int _enhanceProgress;
     private bool _isColorEnhancing;
     private long _imgVersion;
+    private int _selectedDpi = 300;
 
     private void ToggleZoom() => _zoomed = !_zoomed;
 
@@ -130,8 +139,8 @@
 
         try
         {
-            var webPath = await ImageStorage.PrepareHighResDownloadAsync(Generation.LocalImagePath, format);
-            var fileName = $"artforge_{Generation.Id}.{format}";
+            var webPath = await ImageStorage.PrepareHighResDownloadAsync(Generation.LocalImagePath, format, dpi: _selectedDpi);
+            var fileName = $"artforge_{Generation.Id}_{_selectedDpi}dpi.{format}";
             await JS.InvokeVoidAsync("downloadFile", $"/{webPath}", fileName);
         }
         catch (Exception ex)

@@ -122,7 +122,8 @@ Return ONLY the JSON, no explanation.";
                          "The face must be symmetrically centered, with both eyes at the same height. " +
                          "Correct any head tilt, rotation, or turn. " +
                          "Do NOT change any facial features, identity, skin tone, hair color, or eye color. " +
-                         "The result must be the EXACT same person. Keep the background unchanged.";
+                         "The result must be the EXACT same person. Keep the background unchanged. " +
+                         "MANDATORY: Preserve 1:1 pixel-perfect facial geometry and features; do not alter, redraw, or enhance eyes, nose, mouth, teeth, or expression—apply color and lighting adjustments only to the surrounding pixels.";
 
             var images = new List<(byte[] data, string mimeType)> { (imageBytes, mimeType) };
             var (_, resultBytes) = await _gemini.EditImageAsync(prompt, images, 0, 0);

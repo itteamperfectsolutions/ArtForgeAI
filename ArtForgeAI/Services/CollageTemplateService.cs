@@ -124,7 +124,8 @@ Instructions:
 - Remove the original background and replace with a themed background using the color palette ({template.ColorTheme})
 - Add subtle themed decorations in the BACKGROUND ONLY: {template.DecorativeElements}
 - Apply color grading to match the {template.Mood} mood
-- Output a high-quality, sharp, photorealistic photo";
+- Output a high-quality, sharp, photorealistic photo
+- MANDATORY: Preserve 1:1 pixel-perfect facial geometry and features; do not alter, redraw, or enhance eyes, nose, mouth, teeth, or expression—apply color and lighting adjustments only to the surrounding pixels";
         }
         else
         {
@@ -142,7 +143,8 @@ CRITICAL RULES:
 4. BACKGROUND: Remove original background. Use a fresh themed background with the color palette ({template.ColorTheme}) and subtle decorations ({template.DecorativeElements}).
 5. FRAMING: {slotDesc} — make this framing distinctly different from other slots.
 6. Do NOT add any props, accessories, or objects that weren't in the original photo.
-7. Output a high-quality, sharp, photorealistic photo that looks like a different shot from the same photo session.";
+7. Output a high-quality, sharp, photorealistic photo that looks like a different shot from the same photo session.
+8. MANDATORY: Preserve 1:1 pixel-perfect facial geometry and features; do not alter, redraw, or enhance eyes, nose, mouth, teeth, or expression—apply color and lighting adjustments only to the surrounding pixels.";
         }
 
         var images = new List<(byte[] data, string mimeType)> { (masterPhoto, mimeType) };

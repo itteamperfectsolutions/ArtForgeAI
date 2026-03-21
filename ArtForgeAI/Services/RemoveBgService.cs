@@ -274,11 +274,21 @@ public sealed class RemoveBgService
         if (candidates.GetArrayLength() == 0)
             throw new InvalidOperationException($"Gemini ({model}) returned no candidates for background removal.");
 
-        var parts = candidates[0].GetProperty("content").GetProperty("parts");
+        var firstCandidate = candidates[0];
+
+        if (!firstCandidate.TryGetProperty("content", out var candidateContent)
+            || !candidateContent.TryGetProperty("parts", out var parts))
+        {
+            var reason = firstCandidate.TryGetProperty("finishReason", out var fr)
+                ? fr.GetString() : "unknown";
+            throw new InvalidOperationException(
+                $"Gemini ({model}) blocked the background removal request (reason: {reason}). Try a different image.");
+        }
 
         foreach (var part in parts.EnumerateArray())
         {
-            if (part.TryGetProperty("inlineData", out var inlineData))
+            if (part.TryGetProperty("inlineData", out var inlineData)
+                || part.TryGetProperty("inline_data", out inlineData))
             {
                 var base64 = inlineData.GetProperty("data").GetString();
                 if (base64 is not null)

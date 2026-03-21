@@ -34,4 +34,11 @@ public class CoinTransaction
     public string? ReferenceId { get; set; }
 
     public DateTime CreatedAt { get; set; } = DateTime.UtcNow;
+
+    /// <summary>
+    /// HMAC-SHA256 integrity hash — detects direct database tampering.
+    /// Computed from (UserId, Amount, BalanceAfter, Type, CreatedAt) using a server-side secret.
+    /// </summary>
+    [MaxLength(64)]
+    public string? IntegrityHash { get; set; }
 }

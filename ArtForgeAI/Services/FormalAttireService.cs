@@ -65,11 +65,13 @@ public class FormalAttireService : IFormalAttireService
             $"with a {genderLabel} {fitDesc} {resolvedSuitColor} formal suit with a crisp white dress shirt and {resolvedTieColor} tie. " +
             "Remove any visible necklaces, pendants, chains, scarves, or decorative accessories — the neckline must show ONLY the shirt collar and tie. " +
             "Do NOT alter the face, hair, skin tone, or any facial features. " +
-            "Preserve the exact biometric facial identity. Keep the background as-is.",
+            "Preserve the exact biometric facial identity. Keep the background as-is. " +
+            "MANDATORY: Preserve 1:1 pixel-perfect facial geometry and features; do not alter, redraw, or enhance eyes, nose, mouth, teeth, or expression—apply color and lighting adjustments only to the surrounding pixels.",
 
             $"For a passport photo: Put this person in a clean {resolvedSuitColor} formal business suit with white shirt and {resolvedTieColor} tie. " +
             "Remove all jewelry, necklaces, and accessories from the neck area. " +
-            "Do not change the person's face or identity at all. Keep background unchanged."
+            "Do not change the person's face or identity at all. Keep background unchanged. " +
+            "MANDATORY: Preserve 1:1 pixel-perfect facial geometry and features; do not alter, redraw, or enhance eyes, nose, mouth, teeth, or expression—apply color and lighting adjustments only to the surrounding pixels."
         };
 
         var images = new List<(byte[] data, string mimeType)> { (imageBytes, mimeType) };

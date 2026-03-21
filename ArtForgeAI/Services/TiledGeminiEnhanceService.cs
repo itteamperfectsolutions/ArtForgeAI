@@ -90,7 +90,8 @@ public class TiledGeminiEnhanceService
             var (_, resultBytes) = await _gemini.EditImageAsync(
                 "Enhance this image. Improve sharpness, reduce noise, restore clarity, and improve colors. " +
                 "Output the EXACT same image content with better quality. " +
-                "Do NOT change, move, add, or remove anything. Keep every detail and the layout exactly in place.",
+                "Do NOT change, move, add, or remove anything. Keep every detail and the layout exactly in place. " +
+                "MANDATORY: Preserve 1:1 pixel-perfect facial geometry and features; do not alter, redraw, or enhance eyes, nose, mouth, teeth, or expression—apply color and lighting adjustments only to the surrounding pixels.",
                 new List<(byte[] data, string mimeType)> { (sendBytes, "image/png") },
                 sendWidth, sendHeight);
 

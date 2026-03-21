@@ -1,3 +1,5 @@
 <Solution>
   <Project Path="ArtForgeAI/ArtForgeAI.csproj" />
+  <Project Path="LicenseGenerator/LicenseGenerator.csproj" />
+  <Project Path="LicenseServer/LicenseServer.csproj" />
 </Solution>

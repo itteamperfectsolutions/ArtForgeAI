@@ -12,4 +12,9 @@ public interface ICoinService
     Task<int> GetTransactionCountAsync(int userId);
     Task GrantSignupBonusAsync(int userId);
     Task GrantDailyLoginBonusAsync(int userId);
+
+    /// <summary>
+    /// Returns feature descriptions ordered by usage count (today first, then yesterday as fallback).
+    /// </summary>
+    Task<List<string>> GetFeatureUsageOrderAsync(int userId);
 }

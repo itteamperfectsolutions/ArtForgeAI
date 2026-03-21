@@ -8,11 +8,13 @@ public class CoinService : ICoinService
 {
     private readonly IDbContextFactory<AppDbContext> _dbFactory;
     private readonly IConfiguration _config;
+    private readonly TransactionIntegrityService _integrity;
 
-    public CoinService(IDbContextFactory<AppDbContext> dbFactory, IConfiguration config)
+    public CoinService(IDbContextFactory<AppDbContext> dbFactory, IConfiguration config, TransactionIntegrityService integrity)
     {
         _dbFactory = dbFactory;
         _config = config;
+        _integrity = integrity;
     }
 
     public async Task<int> GetBalanceAsync(int userId)
@@ -35,15 +37,18 @@ public class CoinService : ICoinService
         if (rows == 0) return false;
 
         var user = await db.AppUsers.FindAsync(userId);
+        var now = DateTime.UtcNow;
+        var balanceAfter = user?.CoinBalance ?? amount;
         var tx = new CoinTransaction
         {
             UserId = userId,
             Type = type,
             Amount = amount,
-            BalanceAfter = user?.CoinBalance ?? amount,
+            BalanceAfter = balanceAfter,
             Description = description,
             ReferenceId = referenceId,
-            CreatedAt = DateTime.UtcNow
+            CreatedAt = now,
+            IntegrityHash = _integrity.ComputeTransactionHash(userId, amount, balanceAfter, (int)type, now)
         };
         db.CoinTransactions.Add(tx);
         await db.SaveChangesAsync();
@@ -63,15 +68,18 @@ public class CoinService : ICoinService
         if (rows == 0) return false;
 
         var user = await db.AppUsers.FindAsync(userId);
+        var now = DateTime.UtcNow;
+        var balanceAfter = user?.CoinBalance ?? 0;
         var tx = new CoinTransaction
         {
             UserId = userId,
             Type = type,
             Amount = -amount,
-            BalanceAfter = user?.CoinBalance ?? 0,
+            BalanceAfter = balanceAfter,
             Description = description,
             ReferenceId = referenceId,
-            CreatedAt = DateTime.UtcNow
+            CreatedAt = now,
+            IntegrityHash = _integrity.ComputeTransactionHash(userId, -amount, balanceAfter, (int)type, now)
         };
         db.CoinTransactions.Add(tx);
         await db.SaveChangesAsync();
@@ -122,5 +130,41 @@ public class CoinService : ICoinService
 
         var bonus = _config.GetValue("Coins:DailyLoginBonus", 1);
         await CreditCoinsAsync(userId, bonus, CoinTransactionType.DailyLogin, "Daily login reward");
+    }
+
+    public async Task<List<string>> GetFeatureUsageOrderAsync(int userId)
+    {
+        await using var db = await _dbFactory.CreateDbContextAsync();
+
+        var todayUtc = DateTime.UtcNow.Date;
+        var yesterdayUtc = todayUtc.AddDays(-1);
+
+        // Get today's usage grouped by description, ordered by count desc
+        var todayUsage = await db.CoinTransactions
+            .Where(t => t.UserId == userId
+                     && t.Type == CoinTransactionType.GenerationSpend
+                     && t.Description != null
+                     && t.CreatedAt >= todayUtc)
+            .GroupBy(t => t.Description!)
+            .Select(g => new { Feature = g.Key, Count = g.Count() })
+            .OrderByDescending(x => x.Count)
+            .ToListAsync();
+
+        if (todayUsage.Count > 0)
+            return todayUsage.Select(x => x.Feature).ToList();
+
+        // Fallback to yesterday's usage
+        var yesterdayUsage = await db.CoinTransactions
+            .Where(t => t.UserId == userId
+                     && t.Type == CoinTransactionType.GenerationSpend
+                     && t.Description != null
+                     && t.CreatedAt >= yesterdayUtc
+                     && t.CreatedAt < todayUtc)
+            .GroupBy(t => t.Description!)
+            .Select(g => new { Feature = g.Key, Count = g.Count() })
+            .OrderByDescending(x => x.Count)
+            .ToListAsync();
+
+        return yesterdayUsage.Select(x => x.Feature).ToList();
     }
 }

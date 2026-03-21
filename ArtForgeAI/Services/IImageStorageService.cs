@@ -9,6 +9,7 @@ public interface IImageStorageService
     Task<string> PrepareHighResDownloadAsync(string localPath, string format, int targetWidth = 3600, int targetHeight = 5400, int dpi = 300);
     Task<string> SavePresetThumbnailAsync(BinaryData imageBytes, string fileName);
     Task<string> SavePresetThumbnailFromStreamAsync(Stream fileStream, string fileName);
+    Task<byte[]> EmbedDpiAsync(byte[] imageBytes, int dpi);
     Task<bool> DeleteImageAsync(string localPath);
     string GetWebPath(string localPath);
 }

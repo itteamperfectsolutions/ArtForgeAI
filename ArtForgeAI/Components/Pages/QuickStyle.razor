@@ -214,27 +214,6 @@
     </div>
 }
 
-@* ── Image too large — compression confirmation ── *@
-@if (_pendingCompression)
-{
-    <div class="qs-modal-overlay">
-        <div class="qs-modal qs-placeholder-modal">
-            <div class="qs-modal-header">
-                <span>Image Too Large</span>
-                <button class="qs-modal-close" @onclick="CancelCompression">&times;</button>
-            </div>
-            <div class="qs-placeholder-body">
-                <p>Your image (@FormatFileSize(_pendingFileSize)) exceeds the @FormatFileSize(ImageUploadHelper.DefaultMaxUploadSize) limit.</p>
-                <p>It will be resized to fit within the limit while preserving quality. No compression artifacts will be added.</p>
-            </div>
-            <div class="qs-modal-footer">
-                <button class="btn-primary-gradient" @onclick="AcceptCompression">Resize &amp; Continue</button>
-                <button class="btn-secondary" @onclick="CancelCompression">&times; Cancel</button>
-            </div>
-        </div>
-    </div>
-}
-
 @* ── Result popup modal ── *@
 @if (_result is not null && _result.Success)
 {
@@ -253,6 +232,14 @@
                 </div>
             </div>
             <div class="qs-modal-footer">
+                <div style="display:flex;align-items:center;gap:0.4rem;justify-content:center;width:100%;margin-bottom:0.4rem;">
+                    <label style="font-size:0.78rem;color:var(--text-muted);">Print DPI:</label>
+                    <select class="form-select" style="width:auto;font-size:0.8rem;padding:0.25rem 0.5rem;" @bind="_selectedDpi">
+                        <option value="300">300 DPI</option>
+                        <option value="600">600 DPI</option>
+                        <option value="1200">1200 DPI</option>
+                    </select>
+                </div>
                 <button class="btn-primary-gradient" @onclick="DownloadPng">&#11015; Download PNG</button>
                 <button class="btn-secondary" @onclick="DownloadJpg">&#11015; Download JPG</button>
                 @if (ImageEnhancer.IsAvailable)
@@ -306,6 +293,7 @@
     private GenerationResult? _result;
     private bool _isProcessing;
     private bool _isEnhancing;
+    private int _selectedDpi = 300;
     private int _enhanceProgress;
     private bool _isColorEnhancing;
     private long _imgVersion;
@@ -332,12 +320,6 @@
     private bool _pendingSilhouetteOptions;
     private string _silhouetteOrientation = "side"; // "front" or "side"
     private string _silhouetteBodyType = "bust"; // "full" or "bust"
-
-    // Image compression confirmation state
-    private bool _pendingCompression;
-    private long _pendingFileSize;
-    private InputFileChangeEventArgs? _pendingFileEvent;
-    private StylePreset? _pendingFileStyle;
 
     // Guard against result-close re-triggering generation
     private DateTime _resultClosedAt = DateTime.MinValue;
@@ -476,18 +458,9 @@
         if ((DateTime.UtcNow - _resultClosedAt).TotalMilliseconds < 600) return;
 
         // If file exceeds max upload size, ask user to confirm compression
-        if (file.Size > ImageUploadHelper.DefaultMaxUploadSize)
+        if (file.Size > ImageUploadHelper.MaxReadSize)
         {
-            if (file.Size > ImageUploadHelper.MaxReadSize)
-            {
-                _error = $"File is too large ({FormatFileSize(file.Size)}). Maximum allowed is {FormatFileSize(ImageUploadHelper.MaxReadSize)}.";
-                StateHasChanged();
-                return;
-            }
-            _pendingFileSize = file.Size;
-            _pendingFileEvent = e;
-            _pendingFileStyle = style;
-            _pendingCompression = true;
+            _error = $"File is too large ({FormatFileSize(file.Size)}). Maximum allowed is {FormatFileSize(ImageUploadHelper.MaxReadSize)}.";
             StateHasChanged();
             return;
         }
@@ -499,8 +472,18 @@
 
         try
         {
-            using var stream = file.OpenReadStream(ImageUploadHelper.MaxReadSize);
-            _sourcePath = await ImageStorage.SaveUploadedFileAsync(stream, file.Name);
+            if (file.Size > ImageUploadHelper.DefaultMaxUploadSize)
+            {
+                using var readMs = new MemoryStream();
+                await file.OpenReadStream(ImageUploadHelper.MaxReadSize).CopyToAsync(readMs);
+                using var compressed = ImageUploadHelper.CompressToFit(readMs.ToArray(), file.Name);
+                _sourcePath = await ImageStorage.SaveUploadedFileAsync(compressed, file.Name);
+            }
+            else
+            {
+                using var stream = file.OpenReadStream(ImageUploadHelper.MaxReadSize);
+                _sourcePath = await ImageStorage.SaveUploadedFileAsync(stream, file.Name);
+            }
 
             // If Silhouette Contour, show face/body options modal first
             if (style.Name == "Silhouette Contour")
@@ -1144,88 +1127,6 @@
         _selectedStyle = null;
     }
 
-    private async Task AcceptCompression()
-    {
-        if (_pendingFileEvent is null || _pendingFileStyle is null) return;
-
-        _pendingCompression = false;
-        _selectedStyle = _pendingFileStyle;
-        _error = null;
-        _result = null;
-        _placeholderError = null;
-
-        try
-        {
-            var file = _pendingFileEvent.File;
-            using var stream = file.OpenReadStream(ImageUploadHelper.MaxReadSize);
-            using var ms = new MemoryStream();
-            await stream.CopyToAsync(ms);
-            var rawBytes = ms.ToArray();
-
-            // Resize dimensions to bring file size under the limit (no quality reduction)
-            using var outMs = ImageUploadHelper.CompressToFit(rawBytes, file.Name);
-            _sourcePath = await ImageStorage.SaveUploadedFileAsync(outMs, file.Name);
-            Logger.LogInformation("Compressed oversized image: {OrigSize} → {NewSize}",
-                ImageUploadHelper.FormatFileSize(_pendingFileSize), ImageUploadHelper.FormatFileSize(outMs.Length));
-
-            _pendingFileEvent = null;
-            _pendingFileStyle = null;
-
-            // Continue with the normal flow
-            var style = _selectedStyle;
-
-            if (style.Name == "Silhouette Contour")
-            {
-                _silhouetteOrientation = "side";
-                _silhouetteBodyType = "bust";
-                _pendingSilhouetteOptions = true;
-                StateHasChanged();
-                return;
-            }
-
-            if (style.Category == "Memorial")
-            {
-                _memorialName = string.Empty;
-                _memorialDob = null;
-                _memorialDod = null;
-                _pendingPlaceholders = true;
-                StateHasChanged();
-                return;
-            }
-
-            if (HasPlaceholders(style))
-            {
-                _occasionText = string.Empty;
-                _messageText = string.Empty;
-                _calendarDate = null;
-                _numberValue = null;
-                _dateText = string.Empty;
-                _datePickerValue = null;
-                _memorialName = string.Empty;
-                _memorialDob = null;
-                _memorialDod = null;
-                _pendingPlaceholders = true;
-                StateHasChanged();
-                return;
-            }
-
-            await RunGeneration(style.PromptTemplate);
-        }
-        catch (Exception ex)
-        {
-            Logger.LogError(ex, "Image compression failed");
-            _error = "Failed to compress the image. Please try a smaller file.";
-            StateHasChanged();
-        }
-    }
-
-    private void CancelCompression()
-    {
-        _pendingCompression = false;
-        _pendingFileEvent = null;
-        _pendingFileStyle = null;
-    }
-
     private static string FormatFileSize(long bytes) => ImageUploadHelper.FormatFileSize(bytes);
 
     private Task DownloadPng() => DownloadAs("png");
@@ -1236,9 +1137,8 @@
         if (_result?.LocalImagePath is null) return;
         try
         {
-            // Prepare high-res print-ready file (12x18 @ 300 DPI) and download via HTTP streaming
-            var webPath = await ImageStorage.PrepareHighResDownloadAsync(_result.LocalImagePath, format);
-            var fileName = $"artforge_quick_{_selectedStyle?.Name ?? "style"}_{_result.GenerationId}.{format}";
+            var webPath = await ImageStorage.PrepareHighResDownloadAsync(_result.LocalImagePath, format, dpi: _selectedDpi);
+            var fileName = $"artforge_quick_{_selectedStyle?.Name ?? "style"}_{_result.GenerationId}_{_selectedDpi}dpi.{format}";
             await JS.InvokeVoidAsync("downloadFile", $"/{webPath}", fileName);
         }
         catch (Exception ex)

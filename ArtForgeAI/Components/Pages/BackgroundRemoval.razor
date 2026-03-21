@@ -1,0 +1,407 @@
+@page "/background-removal"
+@rendermode InteractiveServer
+@attribute [Authorize]
+@using SixLabors.ImageSharp
+@inject IBackgroundRemovalService BgService
+@inject IImageStorageService ImageStorage
+@inject IJSRuntime JS
+@inject IWebHostEnvironment Env
+@inject ILogger<BackgroundRemoval> Logger
+@inject ISubscriptionService SubscriptionService
+@inject ICoinService CoinService
+@inject AuthenticationStateProvider AuthState
+@inject NavigationManager Nav
+
+<PageTitle>ArtForge AI - Background Removal</PageTitle>
+
+<div class="page-header page-header-lg">
+    <h2>Background Removal</h2>
+    <p>AI-powered background removal with U&#178;-Net + MODNet pipeline for clean, print-ready transparent images</p>
+</div>
+
+<div class="create-layout">
+    @* ── Left column ── *@
+    <div class="create-left">
+        <div class="card">
+            <div class="card-body">
+
+                @* Upload area *@
+                <div class="mb-3">
+                    <label class="form-label">Upload Image</label>
+                    @if (!string.IsNullOrEmpty(_uploadedPath))
+                    {
+                        <div style="position: relative;">
+                            <button class="ref-thumb-remove" @onclick="RemovePhoto" disabled="@_isProcessing"
+                                    style="position:absolute;top:4px;right:4px;z-index:20;">&#10005;</button>
+                            <img src="@_uploadedDataUrl" alt="Uploaded"
+                                 style="width:100%;border-radius:8px;object-fit:contain;max-height:280px;background:var(--bg-secondary);" />
+                        </div>
+                        @if (_sourceWidth > 0)
+                        {
+                            <p style="font-size: 0.72rem; color: var(--text-muted); margin: 0.35rem 0 0 0;">
+                                Source: @(_sourceWidth)&times;@(_sourceHeight) px
+                            </p>
+                        }
+                    }
+                    else
+                    {
+                        <label class="upload-area upload-area-compact @(_isUploading ? "disabled" : "")">
+                            <span class="upload-icon">&#9986;</span>
+                            <span>Upload a photo to remove background</span>
+                            <span style="font-size: 0.7rem; color: var(--text-muted); margin-left: 0.5rem;">JPG, PNG up to 10MB</span>
+                            <InputFile OnChange="HandleFileUpload" accept="image/*;capture=camera"
+                                       style="display:none" disabled="@(_isProcessing || _isUploading)" />
+                        </label>
+                    }
+                    @if (_isUploading)
+                    {
+                        <div class="upload-progress-bar" style="margin-top: 0.35rem;">
+                            <div class="upload-progress-fill" style="width: 50%"></div>
+                            <span class="upload-progress-text">Uploading...</span>
+                        </div>
+                    }
+                </div>
+
+                @if (!string.IsNullOrEmpty(_uploadedPath))
+                {
+                    <hr style="margin: 0.5rem 0; border-color: var(--border-color);" />
+
+                    @* Background color option *@
+                    <div class="mb-3">
+                        <label class="form-label">Background</label>
+                        <div class="ns-type-pills">
+                            <button class="ns-pill @(_bgOption == "transparent" ? "selected" : "")"
+                                    @onclick='() => _bgOption = "transparent"' disabled="@_isProcessing">
+                                &#9744; Transparent
+                            </button>
+                            <button class="ns-pill @(_bgOption == "white" ? "selected" : "")"
+                                    @onclick='() => _bgOption = "white"' disabled="@_isProcessing">
+                                &#9723; White
+                            </button>
+                            <button class="ns-pill @(_bgOption == "custom" ? "selected" : "")"
+                                    @onclick='() => _bgOption = "custom"' disabled="@_isProcessing">
+                                &#127912; Custom Color
+                            </button>
+                        </div>
+                    </div>
+
+                    @if (_bgOption == "custom")
+                    {
+                        <div class="mb-3">
+                            <label class="form-label">Pick Color</label>
+                            <input type="color" @bind="_customColor" class="form-control"
+                                   style="width: 60px; height: 36px; padding: 2px; cursor: pointer;" />
+                        </div>
+                    }
+
+                    @* Process button *@
+                    <button class="btn-primary-gradient w-100" @onclick="ProcessImage" disabled="@_isProcessing"
+                            style="margin-top: 0.5rem;">
+                        @if (_isProcessing)
+                        {
+                            <span class="loading-spinner" style="width:16px;height:16px;margin-right:0.4rem;display:inline-block;vertical-align:middle;"></span>
+                            <span>@_processingStatus</span>
+                        }
+                        else
+                        {
+                            <span>&#9986; Remove Background</span>
+                        }
+                    </button>
+
+                    <p style="font-size: 0.68rem; color: var(--text-muted); margin-top: 0.5rem;">
+                        Pipeline: U&#178;-Net (detection) &#8594; MODNet (alpha matting) &#8594; Edge Feathering &#8594; PNG Export
+                    </p>
+                }
+
+                @* Error *@
+                @if (!string.IsNullOrEmpty(_errorMessage))
+                {
+                    <div class="card" style="border-left: 3px solid var(--danger); margin-top: 0.75rem;">
+                        <div class="card-body" style="padding: 0.6rem 0.8rem;">
+                            <span style="color: var(--danger); font-size: 0.8rem;">Error: @_errorMessage</span>
+                        </div>
+                    </div>
+                }
+            </div>
+        </div>
+    </div>
+
+    @* ── Right column — Result ── *@
+    <div class="create-right">
+        @if (_resultTransparentPath is not null)
+        {
+            <div class="card">
+                <div class="card-body" style="text-align:center;">
+                    <h4 style="margin-bottom: 0.5rem; font-size: 0.9rem; color: var(--text-secondary);">RESULT</h4>
+
+                    @* Checkerboard background to show transparency *@
+                    <div style="display:inline-block; background: repeating-conic-gradient(#e0e0e0 0% 25%, #fff 0% 50%) 0 0 / 16px 16px;
+                                border-radius: 8px; overflow: hidden; border: 1px solid var(--border-color);">
+                        <img src="@($"/{_displayPath}?v={_imgVersion}")" alt="Result"
+                             style="max-width:100%; max-height:60vh; display:block;" />
+                    </div>
+
+                    @if (_resultWidth > 0)
+                    {
+                        <p style="font-size: 0.72rem; color: var(--text-muted); margin: 0.5rem 0 0 0;">
+                            @(_resultWidth)&times;@(_resultHeight) px
+                        </p>
+                    }
+
+                    @* DPI selector *@
+                    <div style="display:flex;align-items:center;gap:0.4rem;margin-top:0.75rem;justify-content:center;">
+                        <label style="font-size:0.78rem;color:var(--text-muted);">Print DPI:</label>
+                        <select class="form-select" style="width:auto;font-size:0.8rem;padding:0.25rem 0.5rem;" @bind="_selectedDpi">
+                            <option value="300">300 DPI</option>
+                            <option value="600">600 DPI</option>
+                            <option value="1200">1200 DPI</option>
+                        </select>
+                    </div>
+
+                    @* Download buttons *@
+                    <div style="display:flex; gap:0.5rem; justify-content:center; flex-wrap:wrap; margin-top:0.5rem;">
+                        <button class="btn-primary-gradient" @onclick="DownloadTransparentPng">
+                            &#11015; Download PNG (Transparent)
+                        </button>
+                        @if (_bgOption != "transparent")
+                        {
+                            <button class="btn-secondary" @onclick="DownloadColoredPng">
+                                &#11015; Download PNG (@(_bgOption == "white" ? "White BG" : "Colored BG"))
+                            </button>
+                        }
+                        <button class="btn-secondary" @onclick="CreateAnother">
+                            &#10227; New Image
+                        </button>
+                    </div>
+
+                    <div style="font-size: 0.68rem; color: var(--text-muted); margin-top: 0.75rem;">
+                        AI-generated mask — edge quality depends on image complexity. Re-upload with a cleaner background for best results.
+                    </div>
+                </div>
+            </div>
+        }
+        else if (!string.IsNullOrEmpty(_uploadedPath) && !_isProcessing)
+        {
+            <div class="card" style="text-align: center; padding: 3rem 1rem; color: var(--text-muted);">
+                <span style="font-size: 2.5rem;">&#9986;</span>
+                <p style="margin-top: 0.5rem;">Click "Remove Background" to process your image</p>
+            </div>
+        }
+    </div>
+</div>
+
+@code {
+    private string? _uploadedPath;
+    private string? _uploadedDataUrl;
+    private int _sourceWidth, _sourceHeight;
+    private bool _isUploading;
+    private bool _isProcessing;
+    private string _processingStatus = "";
+    private string? _errorMessage;
+
+    // Options
+    private string _bgOption = "transparent";
+    private string _customColor = "#00FF00";
+    private int _selectedDpi = 300;
+
+    // Result
+    private string? _resultTransparentPath;
+    private string? _resultColoredPath;
+    private byte[]? _resultTransparentBytes;
+    private string? _displayPath;
+    private int _resultWidth, _resultHeight;
+    private long _imgVersion;
+
+    protected override async Task OnInitializedAsync()
+    {
+        var authState = await AuthState.GetAuthenticationStateAsync();
+        if (!authState.User.IsInRole("SuperAdmin"))
+        {
+            var userIdStr = authState.User.FindFirstValue(System.Security.Claims.ClaimTypes.NameIdentifier);
+            if (int.TryParse(userIdStr, out var uid))
+            {
+                if (!await SubscriptionService.HasFeatureAccessAsync(uid, FeatureAccess.BackgroundRemoval))
+                {
+                    Nav.NavigateTo("/pricing", forceLoad: true);
+                    return;
+                }
+            }
+        }
+    }
+
+    private async Task HandleFileUpload(InputFileChangeEventArgs e)
+    {
+        var file = e.File;
+        if (file is null) return;
+
+        _isUploading = true;
+        _errorMessage = null;
+        _resultTransparentPath = null;
+        _resultColoredPath = null;
+        _resultTransparentBytes = null;
+        StateHasChanged();
+
+        try
+        {
+            using var stream = file.OpenReadStream(ImageUploadHelper.MaxReadSize);
+            _uploadedPath = await ImageStorage.SaveUploadedFileAsync(stream, file.Name);
+
+            // Read dimensions
+            var fullPath = Path.Combine(Env.WebRootPath,
+                _uploadedPath.Replace("/", Path.DirectorySeparatorChar.ToString()));
+            using var img = Image.Load(fullPath);
+            _sourceWidth = img.Width;
+            _sourceHeight = img.Height;
+
+            _uploadedDataUrl = $"/{_uploadedPath}";
+        }
+        catch (Exception ex)
+        {
+            Logger.LogError(ex, "File upload failed");
+            _errorMessage = "Upload failed: " + ex.Message;
+        }
+        finally
+        {
+            _isUploading = false;
+            StateHasChanged();
+        }
+    }
+
+    private async Task ProcessImage()
+    {
+        if (string.IsNullOrEmpty(_uploadedPath) || _isProcessing) return;
+
+        // Debit coins
+        var authState = await AuthState.GetAuthenticationStateAsync();
+        var uidStr = authState.User.FindFirstValue(System.Security.Claims.ClaimTypes.NameIdentifier);
+        if (int.TryParse(uidStr, out var userId) && !authState.User.IsInRole("SuperAdmin"))
+        {
+            var cost = FeatureAccess.GetCost(FeatureAccess.BackgroundRemoval);
+            if (!await CoinService.DebitCoinsAsync(userId, cost, CoinTransactionType.GenerationSpend, "Background Removal"))
+            {
+                _errorMessage = "Insufficient coins. Please purchase more coins.";
+                return;
+            }
+        }
+
+        _isProcessing = true;
+        _processingStatus = "Running U\u00B2-Net subject detection...";
+        _errorMessage = null;
+        _resultTransparentPath = null;
+        StateHasChanged();
+
+        try
+        {
+            _ = RotateStatus();
+
+            var bgColor = _bgOption switch
+            {
+                "white" => "white",
+                "custom" => _customColor,
+                _ => "white"
+            };
+
+            var result = await BgService.RemoveBackgroundAsync(_uploadedPath, bgColor);
+
+            _resultTransparentPath = result.TransparentImagePath;
+            _resultTransparentBytes = result.TransparentPngBytes;
+            _resultColoredPath = result.ColoredImagePath;
+            _displayPath = _bgOption == "transparent" ? _resultTransparentPath : _resultColoredPath;
+            _imgVersion++;
+
+            // Get result dimensions
+            using var resultImg = Image.Load(result.TransparentPngBytes);
+            _resultWidth = resultImg.Width;
+            _resultHeight = resultImg.Height;
+        }
+        catch (Exception ex)
+        {
+            Logger.LogError(ex, "Background removal failed");
+            _errorMessage = "Processing failed: " + ex.Message;
+        }
+        finally
+        {
+            _isProcessing = false;
+            StateHasChanged();
+        }
+    }
+
+    private async Task RotateStatus()
+    {
+        var messages = new[]
+        {
+            "Running U\u00B2-Net subject detection...",
+            "Refining edges with MODNet alpha matting...",
+            "Applying edge feathering...",
+            "Generating transparent PNG...",
+            "Almost done — finalising output..."
+        };
+
+        try
+        {
+            for (int i = 1; i < messages.Length && _isProcessing; i++)
+            {
+                await Task.Delay(3000);
+                if (!_isProcessing) break;
+                _processingStatus = messages[i];
+                await InvokeAsync(StateHasChanged);
+            }
+        }
+        catch (OperationCanceledException) { }
+    }
+
+    private async Task DownloadTransparentPng()
+    {
+        if (_resultTransparentBytes is null) return;
+        try
+        {
+            var dpiBytes = await ImageStorage.EmbedDpiAsync(_resultTransparentBytes, _selectedDpi);
+            var base64 = Convert.ToBase64String(dpiBytes);
+            await JS.InvokeVoidAsync("downloadFileFromBytes",
+                $"background_removed_transparent_{_selectedDpi}dpi.png", "image/png", base64);
+        }
+        catch (Exception ex)
+        {
+            Logger.LogError(ex, "Download failed");
+            _errorMessage = "Download failed.";
+        }
+    }
+
+    private async Task DownloadColoredPng()
+    {
+        if (_resultColoredPath is null) return;
+        try
+        {
+            var fullPath = Path.Combine(Env.WebRootPath,
+                _resultColoredPath.Replace("/", Path.DirectorySeparatorChar.ToString()));
+            var rawBytes = await File.ReadAllBytesAsync(fullPath);
+            var dpiBytes = await ImageStorage.EmbedDpiAsync(rawBytes, _selectedDpi);
+            var base64 = Convert.ToBase64String(dpiBytes);
+            var bgLabel = _bgOption == "white" ? "white" : "colored";
+            await JS.InvokeVoidAsync("downloadFileFromBytes",
+                $"background_removed_{bgLabel}_{_selectedDpi}dpi.png", "image/png", base64);
+        }
+        catch (Exception ex)
+        {
+            Logger.LogError(ex, "Download failed");
+            _errorMessage = "Download failed.";
+        }
+    }
+
+    private void RemovePhoto()
+    {
+        _uploadedPath = null;
+        _uploadedDataUrl = null;
+        _sourceWidth = 0;
+        _sourceHeight = 0;
+        _resultTransparentPath = null;
+        _resultColoredPath = null;
+        _resultTransparentBytes = null;
+        _errorMessage = null;
+    }
+
+    private void CreateAnother()
+    {
+        RemovePhoto();
+    }
+}

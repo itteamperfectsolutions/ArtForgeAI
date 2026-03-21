@@ -15,7 +15,8 @@ public class StylePreset
         "If the source has 2 people: output MUST show EXACTLY 2 people — no third person added. " +
         "If the source has 3 or more people: output MUST show EXACTLY that many people. " +
         "NEVER invent, fabricate, hallucinate, or add people who are not in the source photo. This rule overrides any style description that implies multiple people (e.g., 'couple', 'romantic pose') — if the source has 1 person, treat the style as a SOLO version. " +
-        "6) MULTI-PANEL: If multiple panels/scenes, each panel must show a completely different scene, pose, outfit, angle, and setting, but the face identity and expression in each panel must match the reference photo exactly. The person count rule applies to EVERY panel.";
+        "6) MULTI-PANEL: If multiple panels/scenes, each panel must show a completely different scene, pose, outfit, angle, and setting, but the face identity and expression in each panel must match the reference photo exactly. The person count rule applies to EVERY panel. " +
+        "7) MANDATORY: Preserve 1:1 pixel-perfect facial geometry and features; do not alter, redraw, or enhance eyes, nose, mouth, teeth, or expression—apply color and lighting adjustments only to the surrounding pixels.";
 
     public int Id { get; set; }
 

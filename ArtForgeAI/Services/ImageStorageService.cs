@@ -147,8 +147,9 @@ public class ImageStorageService : IImageStorageService
     }
 
     /// <summary>
-    /// Upscales the image to print-ready resolution (default 12x18 @ 300 DPI),
-    /// saves to a downloads folder, and returns the web path for direct HTTP download.
+    /// Upscales the image for print-ready resolution based on selected DPI.
+    /// Higher DPI = more pixels = sharper print at the same physical size.
+    /// Base: 300 DPI (1x), 600 DPI (2x pixels), 1200 DPI (4x pixels).
     /// </summary>
     public async Task<string> PrepareHighResDownloadAsync(string localPath, string format, int targetWidth = 3600, int targetHeight = 5400, int dpi = 300)
     {
@@ -159,13 +160,25 @@ public class ImageStorageService : IImageStorageService
         var imageBytes = await File.ReadAllBytesAsync(fullPath);
         using var image = Image.Load<Rgba32>(imageBytes);
 
-        // Upscale to target print dimensions using high-quality Lanczos resampler
-        image.Mutate(ctx => ctx.Resize(new ResizeOptions
+        // Scale target dimensions based on DPI (base = 300 DPI)
+        double dpiScale = dpi / 300.0;
+        int scaledWidth = (int)(targetWidth * dpiScale);
+        int scaledHeight = (int)(targetHeight * dpiScale);
+
+        // Only upscale — never downscale below the original
+        int finalWidth = Math.Max(image.Width, scaledWidth);
+        int finalHeight = Math.Max(image.Height, scaledHeight);
+
+        // Upscale to DPI-adjusted dimensions using high-quality Lanczos resampler
+        if (finalWidth > image.Width || finalHeight > image.Height)
         {
-            Size = new Size(targetWidth, targetHeight),
-            Mode = ResizeMode.Max,
-            Sampler = KnownResamplers.Lanczos3
-        }));
+            image.Mutate(ctx => ctx.Resize(new ResizeOptions
+            {
+                Size = new Size(finalWidth, finalHeight),
+                Mode = ResizeMode.Max,
+                Sampler = KnownResamplers.Lanczos3
+            }));
+        }
 
         // Set DPI metadata for print
         image.Metadata.HorizontalResolution = dpi;
@@ -207,6 +220,38 @@ public class ImageStorageService : IImageStorageService
             image.Width, image.Height, dpi, fileName);
 
         return $"downloads/{fileName}";
+    }
+
+    /// <summary>
+    /// Upscales the image based on DPI and embeds DPI metadata.
+    /// Higher DPI = more pixels for sharper prints at the same physical size.
+    /// Base: 300 DPI (1x), 600 DPI (2x pixels), 1200 DPI (4x pixels).
+    /// </summary>
+    public async Task<byte[]> EmbedDpiAsync(byte[] imageBytes, int dpi)
+    {
+        using var image = Image.Load<Rgba32>(imageBytes);
+
+        // Upscale pixels based on DPI (base = 300 DPI)
+        if (dpi > 300)
+        {
+            double scale = dpi / 300.0;
+            int newW = (int)(image.Width * scale);
+            int newH = (int)(image.Height * scale);
+            image.Mutate(ctx => ctx.Resize(newW, newH, KnownResamplers.Lanczos3));
+        }
+
+        image.Metadata.HorizontalResolution = dpi;
+        image.Metadata.VerticalResolution = dpi;
+        image.Metadata.ResolutionUnits = PixelResolutionUnit.PixelsPerInch;
+
+        using var ms = new MemoryStream();
+        var info = Image.Identify(imageBytes);
+        if (info?.Metadata?.DecodedImageFormat?.DefaultMimeType == "image/jpeg")
+            await image.SaveAsJpegAsync(ms, new JpegEncoder { Quality = 95 });
+        else
+            await image.SaveAsPngAsync(ms, new PngEncoder { CompressionLevel = PngCompressionLevel.BestSpeed });
+
+        return ms.ToArray();
     }
 
     public Task<bool> DeleteImageAsync(string localPath)

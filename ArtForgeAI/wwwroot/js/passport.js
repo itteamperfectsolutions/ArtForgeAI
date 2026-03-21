@@ -874,6 +874,8 @@ window.passportPhoto = (function () {
         renderSheet: renderSheet,
         exportPng: exportPng,
         exportPassportPhoto: exportPassportPhoto,
+        exportPassportPhotoDataUrl: exportPassportPhoto,
+        exportSheetDataUrl: exportPng,
         exportPassportPhotoTransparent: exportPassportPhotoTransparent,
         downloadSheetPng: downloadSheetPng,
         downloadPassportPhoto: downloadPassportPhoto,

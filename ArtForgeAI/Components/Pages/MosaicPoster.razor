@@ -261,6 +261,14 @@
                 <div class="mosaic-canvas-wrap">
                     <canvas id="mosaicCanvas"></canvas>
                 </div>
+                <div style="display:flex;align-items:center;gap:0.4rem;margin-top:0.5rem;justify-content:center;">
+                    <label style="font-size:0.78rem;color:var(--text-muted);">Print DPI:</label>
+                    <select class="form-select" style="width:auto;font-size:0.8rem;padding:0.25rem 0.5rem;" @bind="_selectedDpi">
+                        <option value="300">300 DPI</option>
+                        <option value="600">600 DPI</option>
+                        <option value="1200">1200 DPI</option>
+                    </select>
+                </div>
                 <div class="right-panel-actions">
                     <button class="btn-primary-gradient" @onclick="ExportPng" disabled="@_isProcessing">
                         &#11015; Download PNG
@@ -339,6 +347,7 @@
     private bool _isCanvasReady;
     private bool _isProcessing;
     private bool _isEnhancing;
+    private int _selectedDpi = 300;
     private int _enhanceProgress;
     private bool _isColorEnhancing;
     private string? _errorMessage;
@@ -791,8 +800,11 @@
             if (!string.IsNullOrEmpty(dataUrl))
             {
                 // dataUrl is "data:image/png;base64,..."
-                var base64 = dataUrl.Substring(dataUrl.IndexOf(",") + 1);
-                var fileName = $"mosaic_poster_{DateTime.Now:yyyyMMdd_HHmmss}.png";
+                var rawBase64 = dataUrl.Substring(dataUrl.IndexOf(",") + 1);
+                var rawBytes = Convert.FromBase64String(rawBase64);
+                var dpiBytes = await ImageStorage.EmbedDpiAsync(rawBytes, _selectedDpi);
+                var base64 = Convert.ToBase64String(dpiBytes);
+                var fileName = $"mosaic_poster_{_selectedDpi}dpi_{DateTime.Now:yyyyMMdd_HHmmss}.png";
                 await JS.InvokeVoidAsync("downloadFileFromBytes", fileName, "image/png", base64);
 
                 if (_toast is not null)

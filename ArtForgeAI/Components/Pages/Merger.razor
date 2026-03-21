@@ -179,7 +179,15 @@
                          alt="Merged result"
                          style="max-width:100%; border-radius: 8px;" />
                 </div>
-                <div class="pp-download-bar" style="margin-top: 0.75rem;">
+                <div style="display:flex;align-items:center;gap:0.4rem;margin-top:0.75rem;justify-content:center;">
+                    <label style="font-size:0.78rem;color:var(--text-muted);">Print DPI:</label>
+                    <select class="form-select" style="width:auto;font-size:0.8rem;padding:0.25rem 0.5rem;" @bind="_selectedDpi">
+                        <option value="300">300 DPI</option>
+                        <option value="600">600 DPI</option>
+                        <option value="1200">1200 DPI</option>
+                    </select>
+                </div>
+                <div class="pp-download-bar" style="margin-top: 0.5rem;">
                     <button class="btn-primary-gradient" style="font-size: 0.85rem; padding: 0.4rem 0.85rem;"
                             @onclick='() => DownloadAs("png")'>
                         &#128424; Download PNG
@@ -243,6 +251,7 @@
     private string _processingStatus = "Merging...";
     private string? _errorMessage;
     private long _imgVersion;
+    private int _selectedDpi = 300;
 
     // ── Lifecycle ──
 
@@ -275,16 +284,27 @@
         {
             if (_uploadedPaths.Count >= 4) break;
 
-            if (file.Size > 10 * 1024 * 1024)
+            if (file.Size > ImageUploadHelper.MaxReadSize)
             {
-                _errorMessage = $"'{file.Name}' exceeds 10MB limit.";
+                _errorMessage = $"'{file.Name}' exceeds {ImageUploadHelper.FormatFileSize(ImageUploadHelper.MaxReadSize)} limit.";
                 continue;
             }
 
             try
             {
-                using var stream = file.OpenReadStream(10 * 1024 * 1024);
-                var path = await ImageStorage.SaveUploadedFileAsync(stream, file.Name);
+                string path;
+                if (file.Size > ImageUploadHelper.DefaultMaxUploadSize)
+                {
+                    using var readMs = new MemoryStream();
+                    await file.OpenReadStream(ImageUploadHelper.MaxReadSize).CopyToAsync(readMs);
+                    using var compressed = ImageUploadHelper.CompressToFit(readMs.ToArray(), file.Name);
+                    path = await ImageStorage.SaveUploadedFileAsync(compressed, file.Name);
+                }
+                else
+                {
+                    using var stream = file.OpenReadStream(ImageUploadHelper.MaxReadSize);
+                    path = await ImageStorage.SaveUploadedFileAsync(stream, file.Name);
+                }
                 _uploadedPaths.Add(path);
             }
             catch (Exception ex)
@@ -434,7 +454,8 @@ STRICT RULES:
 - Do NOT swap faces between subjects.
 - Do NOT add text, watermarks, names, dates, or branding.
 - Do NOT add artistic effects, filters, or stylization.
-- The final image must be PHOTOREALISTIC — a viewer should believe all people were in the same room.";
+- The final image must be PHOTOREALISTIC — a viewer should believe all people were in the same room.
+- MANDATORY: Preserve 1:1 pixel-perfect facial geometry and features; do not alter, redraw, or enhance eyes, nose, mouth, teeth, or expression—apply color and lighting adjustments only to the surrounding pixels.";
 
             // Determine output dimensions based on orientation and image count
             int w, h;
@@ -498,8 +519,8 @@ STRICT RULES:
         if (_result?.LocalImagePath is null) return;
         try
         {
-            var webPath = await ImageStorage.PrepareHighResDownloadAsync(_result.LocalImagePath, format);
-            var fileName = $"artforge_merged_{DateTime.Now:yyyyMMdd_HHmmss}.{format}";
+            var webPath = await ImageStorage.PrepareHighResDownloadAsync(_result.LocalImagePath, format, dpi: _selectedDpi);
+            var fileName = $"artforge_merged_{_selectedDpi}dpi_{DateTime.Now:yyyyMMdd_HHmmss}.{format}";
             await JS.InvokeVoidAsync("downloadFile", $"/{webPath}", fileName);
         }
         catch (Exception ex)

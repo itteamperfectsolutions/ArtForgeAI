@@ -2,6 +2,7 @@ using System.Security.Claims;
 using System.Threading.RateLimiting;
 using ArtForgeAI.Components;
 using ArtForgeAI.Data;
+using ArtForgeAI.Middleware;
 using ArtForgeAI.Models;
 using ArtForgeAI.Services;
 using Microsoft.AspNetCore.Authentication;
@@ -51,8 +52,8 @@ builder.Services.Configure<ReplicateOptions>(
 // HTTP client for downloading images
 builder.Services.AddHttpClient();
 
-// Background removal — no-op stub for interface (Home/StyleTransfer guards)
-builder.Services.AddSingleton<IBackgroundRemovalService, NoOpBackgroundRemovalService>();
+// Background removal — full pipeline: U²-Net → MODNet → Edge Feathering → PNG
+builder.Services.AddSingleton<IBackgroundRemovalService, BgRemovalPipelineService>();
 
 // Background removal via Gemini AI (uses GeminiOptions already configured above)
 builder.Services.AddHttpClient<RemoveBgService>(client =>
@@ -94,6 +95,13 @@ builder.Services.AddScoped<PhotoExpandService>();
 builder.Services.AddScoped<TiledGeminiEnhanceService>();
 builder.Services.AddScoped<ITemplateCollageService, TemplateCollageService>();
 builder.Services.AddScoped<ICollageTemplateService, CollageTemplateService>();
+
+// ── Clone Protection: Multi-layer anti-piracy system ──
+builder.Services.AddSingleton<LicenseService>();              // Offline RSA-signed license
+builder.Services.AddSingleton<DomainLockService>();           // Domain/URL lock
+builder.Services.AddSingleton<TransactionIntegrityService>(); // HMAC-signed transactions
+builder.Services.AddSingleton<OnlineLicenseValidationService>(); // Online phone-home heartbeat
+builder.Services.AddHostedService<RuntimeProtectionHostedService>(); // Background security monitor
 
 // ── Coin, Subscription, Referral & Payment services ──
 builder.Services.AddScoped<ICoinService, CoinService>();
@@ -338,6 +346,18 @@ using (var scope = app.Services.CreateScope())
     catch (Exception ex)
     {
         app.Logger.LogWarning(ex, "CoinTransactions table creation failed (non-fatal)");
+    }
+
+    // Add IntegrityHash column for tamper detection on coin transactions
+    try
+    {
+        await db.Database.ExecuteSqlRawAsync(@"
+            IF NOT EXISTS (SELECT * FROM sys.columns WHERE object_id = OBJECT_ID('CoinTransactions') AND name = 'IntegrityHash')
+                ALTER TABLE CoinTransactions ADD IntegrityHash NVARCHAR(64) NULL;");
+    }
+    catch (Exception ex)
+    {
+        app.Logger.LogWarning(ex, "CoinTransactions IntegrityHash column failed (non-fatal)");
     }
 
     // Create CoinPacks table
@@ -2732,6 +2752,77 @@ app.Use(async (context, next) =>
 
 app.UseStaticFiles();
 app.UseRateLimiter();
+
+// ── Clone Protection Layer 1: Tamper detection (checks binary integrity) ──
+var tamperError = TamperDetectionService.VerifyIntegrity(app.Environment.IsProduction());
+if (tamperError != null)
+{
+    if (app.Environment.IsProduction())
+    {
+        app.Logger.LogCritical("TAMPER DETECTED: {Error}", tamperError);
+        Console.Error.WriteLine($"FATAL: Application integrity compromised.\n{tamperError}");
+        Environment.Exit(1);
+    }
+    else
+    {
+        app.Logger.LogWarning("Integrity check (dev mode): {Warning}", tamperError);
+    }
+}
+
+// ── Clone Protection Layer 2: Anti-debug/anti-decompilation scan ──
+var securityScan = AntiTamperService.PerformSecurityScan(app.Environment.IsProduction());
+if (securityScan != null)
+{
+    if (app.Environment.IsProduction())
+    {
+        app.Logger.LogCritical("SECURITY THREAT: {Threat}", securityScan);
+        Console.Error.WriteLine($"FATAL: Security threat detected.\n{securityScan}");
+        Environment.Exit(1);
+    }
+    else
+    {
+        app.Logger.LogWarning("Security scan (dev mode): {Warning}", securityScan);
+    }
+}
+
+// ── Clone Protection Layer 3: Online license activation (phone-home) ──
+{
+    var licenseService = app.Services.GetRequiredService<LicenseService>();
+    var offlineResult = licenseService.Validate();
+    if (offlineResult.IsValid && offlineResult.License != null)
+    {
+        var onlineService = app.Services.GetRequiredService<OnlineLicenseValidationService>();
+        var onlineResult = await onlineService.ActivateAsync(
+            offlineResult.License.LicenseId,
+            offlineResult.License.HardwareId);
+
+        if (!onlineResult.IsAllowed)
+        {
+            app.Logger.LogCritical("ONLINE LICENSE CHECK FAILED: {Message}", onlineResult.Message);
+            if (app.Environment.IsProduction())
+            {
+                Console.Error.WriteLine($"FATAL: License rejected by server.\n{onlineResult.Message}");
+                Environment.Exit(1);
+            }
+        }
+        else
+        {
+            app.Logger.LogInformation("License activated: {Status} — {Message}",
+                onlineResult.ValidationStatus, onlineResult.Message);
+        }
+    }
+}
+
+// ── Clone Protection Layer 4: License + Domain enforcement middleware (every request) ──
+app.UseMiddleware<LicenseMiddleware>();
+
+// ── License info endpoint (available even without valid license) ──
+app.MapGet("/api/license-info", () =>
+{
+    var hwid = HardwareFingerprintService.GetFingerprint();
+    return Results.Ok(new { HardwareId = hwid, ShortId = hwid[..16] });
+});
+
 app.UseAuthentication();
 app.UseAuthorization();
 app.UseAntiforgery();

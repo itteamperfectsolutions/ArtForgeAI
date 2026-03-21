@@ -178,6 +178,14 @@
                         @_recolorError
                     </div>
                 }
+                <div style="display:flex;align-items:center;gap:0.4rem;margin-top:0.5rem;justify-content:center;">
+                    <label style="font-size:0.78rem;color:var(--text-muted);">Print DPI:</label>
+                    <select class="form-select" style="width:auto;font-size:0.8rem;padding:0.25rem 0.5rem;" @bind="_selectedDpi">
+                        <option value="300">300 DPI</option>
+                        <option value="600">600 DPI</option>
+                        <option value="1200">1200 DPI</option>
+                    </select>
+                </div>
                 <div class="right-panel-actions">
                     <button class="btn-secondary" @onclick="DownloadPng">&#11015; PNG</button>
                     <button class="btn-secondary" @onclick="DownloadJpg">&#11015; JPG</button>
@@ -322,27 +330,6 @@
     </div>
 </div>
 
-@* ── Image too large — compression confirmation ── *@
-@if (_pendingCompression)
-{
-    <div class="qs-modal-overlay">
-        <div class="qs-modal qs-placeholder-modal">
-            <div class="qs-modal-header">
-                <span>Image Too Large</span>
-                <button class="qs-modal-close" @onclick="CancelCompression">&times;</button>
-            </div>
-            <div class="qs-placeholder-body">
-                <p>Your image (@ImageUploadHelper.FormatFileSize(_pendingFileSize)) exceeds the @ImageUploadHelper.FormatFileSize(ImageUploadHelper.DefaultMaxUploadSize) limit.</p>
-                <p>It will be resized to fit within the limit while preserving quality.</p>
-            </div>
-            <div class="qs-modal-footer">
-                <button class="btn-primary-gradient" @onclick="AcceptCompression">Resize &amp; Continue</button>
-                <button class="btn-secondary" @onclick="CancelCompression">&times; Cancel</button>
-            </div>
-        </div>
-    </div>
-}
-
 @* ── Placeholder text-input modal (greeting cards etc.) ── *@
 @if (_stPendingPlaceholders && _selectedStyle is not null)
 {
@@ -403,6 +390,7 @@
     private string? _errorMessage;
     private GenerationResult? _result;
     private Toast? _toast;
+    private int _selectedDpi = 300;
 
     // Upload state
     private bool _isUploading;
@@ -415,11 +403,6 @@
 
     // Fine-tune state
     private string _finetunePrompt = string.Empty;
-
-    // Image compression confirmation state
-    private bool _pendingCompression;
-    private long _pendingFileSize;
-    private InputFileChangeEventArgs? _pendingFileEvent;
 
     // Background options state
     private byte[]? _transparentImageBytes;
@@ -490,24 +473,18 @@
         var files = e.GetMultipleFiles(3);
         if (files.Count == 0) return;
 
-        // Check if any file exceeds the limit and needs compression confirmation
-        var oversizedFile = files.FirstOrDefault(f => f.Size > ImageUploadHelper.DefaultMaxUploadSize);
+        // Check if any file exceeds the hard limit
+        var oversizedFile = files.FirstOrDefault(f => f.Size > ImageUploadHelper.MaxReadSize);
         if (oversizedFile is not null)
         {
-            if (oversizedFile.Size > ImageUploadHelper.MaxReadSize)
-            {
-                _errorMessage = $"File \"{oversizedFile.Name}\" is too large ({ImageUploadHelper.FormatFileSize(oversizedFile.Size)}). Maximum allowed is {ImageUploadHelper.FormatFileSize(ImageUploadHelper.MaxReadSize)}.";
-                StateHasChanged();
-                return;
-            }
-            _pendingFileSize = oversizedFile.Size;
-            _pendingFileEvent = e;
-            _pendingCompression = true;
+            _errorMessage = $"File \"{oversizedFile.Name}\" is too large ({ImageUploadHelper.FormatFileSize(oversizedFile.Size)}). Maximum allowed is {ImageUploadHelper.FormatFileSize(ImageUploadHelper.MaxReadSize)}.";
             StateHasChanged();
             return;
         }
 
-        await ProcessFileUpload(files);
+        // Auto-compress any oversized files
+        var needsCompression = files.Any(f => f.Size > ImageUploadHelper.DefaultMaxUploadSize);
+        await ProcessFileUpload(files, compress: needsCompression);
     }
 
     private async Task ProcessFileUpload(IReadOnlyList<Microsoft.AspNetCore.Components.Forms.IBrowserFile> files, bool compress = false)
@@ -552,22 +529,6 @@
         _isUploading = false;
         _uploadProgress = 0;
         StateHasChanged();
-    }
-
-    private async Task AcceptCompression()
-    {
-        if (_pendingFileEvent is null) return;
-
-        _pendingCompression = false;
-        var files = _pendingFileEvent.GetMultipleFiles(3);
-        _pendingFileEvent = null;
-        await ProcessFileUpload(files, compress: true);
-    }
-
-    private void CancelCompression()
-    {
-        _pendingCompression = false;
-        _pendingFileEvent = null;
     }
 
     private async Task RemoveImage(string path)
@@ -848,8 +809,8 @@
         if (_result?.LocalImagePath is null) return;
         try
         {
-            var webPath = await ImageStorage.PrepareHighResDownloadAsync(_result.LocalImagePath, format);
-            var fileName = $"artforge_style_{_result.GenerationId}.{format}";
+            var webPath = await ImageStorage.PrepareHighResDownloadAsync(_result.LocalImagePath, format, dpi: _selectedDpi);
+            var fileName = $"artforge_style_{_result.GenerationId}_{_selectedDpi}dpi.{format}";
             await JS.InvokeVoidAsync("downloadFile", $"/{webPath}", fileName);
         }
         catch (Exception ex)
@@ -864,8 +825,9 @@
         if (_transparentImageBytes is null) return;
         try
         {
-            var base64 = Convert.ToBase64String(_transparentImageBytes);
-            var fileName = $"artforge_style_{_result?.GenerationId ?? 0}_transparent.png";
+            var dpiBytes = await ImageStorage.EmbedDpiAsync(_transparentImageBytes, _selectedDpi);
+            var base64 = Convert.ToBase64String(dpiBytes);
+            var fileName = $"artforge_style_{_result?.GenerationId ?? 0}_transparent_{_selectedDpi}dpi.png";
             await JS.InvokeVoidAsync("downloadFileFromBytes", fileName, "image/png", base64);
         }
         catch (Exception ex)

@@ -207,7 +207,8 @@ public class PhotoExpandService
                      "4) BACKGROUND: Only extend the background, environment, and surroundings. " +
                      "Match lighting, color grading, perspective, depth-of-field, and photographic style perfectly. " +
                      "5) REALISM: The result must look like a single natural photograph taken with a wider lens — NOT a collage, composite, or digitally manipulated image. " +
-                     "6) Do NOT add new people, text, watermarks, or logos.";
+                     "6) Do NOT add new people, text, watermarks, or logos. " +
+                     "7) MANDATORY: Preserve 1:1 pixel-perfect facial geometry and features; do not alter, redraw, or enhance eyes, nose, mouth, teeth, or expression—apply color and lighting adjustments only to the surrounding pixels.";
 
         if (!string.IsNullOrWhiteSpace(userHint))
             prompt += $" Additional context for the expanded areas: {userHint.Trim()}";

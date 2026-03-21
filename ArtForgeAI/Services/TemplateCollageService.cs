@@ -78,7 +78,8 @@ Instructions:
 - The subject should look like they naturally belong in the template
 - Keep the image high quality and sharp
 - Output the processed photo of the person with the themed background
-- The face must remain PHOTOREALISTIC and identical to the input";
+- The face must remain PHOTOREALISTIC and identical to the input
+- MANDATORY: Preserve 1:1 pixel-perfect facial geometry and features; do not alter, redraw, or enhance eyes, nose, mouth, teeth, or expression—apply color and lighting adjustments only to the surrounding pixels";
 
         var images = new List<(byte[] data, string mimeType)> { (photoBytes, mimeType) };
         var (_, resultBytes) = await _gemini.EditImageAsync(prompt, images, width, height);
@@ -124,6 +125,7 @@ Instructions:
 - Maintain color harmony throughout the entire composition
 - Keep text elements readable and in the same positions as the template
 - The final output should look like a professional, cohesive collage poster
+- MANDATORY: Preserve 1:1 pixel-perfect facial geometry and features; do not alter, redraw, or enhance eyes, nose, mouth, teeth, or expression—apply color and lighting adjustments only to the surrounding pixels
 - Output a complete, high-quality collage poster matching the template exactly";
 
         var (_, resultBytes) = await _gemini.EditImageAsync(prompt, images, width, height);
