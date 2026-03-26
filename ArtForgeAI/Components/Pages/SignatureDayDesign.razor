@@ -1,0 +1,353 @@
+@page "/signature-day"
+@rendermode InteractiveServer
+@attribute [Authorize]
+@inject IJSRuntime JS
+@inject IWebHostEnvironment Env
+@inject ILogger<SignatureDayDesign> Logger
+@inject ISubscriptionService SubscriptionService
+@inject AuthenticationStateProvider AuthState
+@inject NavigationManager Nav
+@implements IDisposable
+
+<PageTitle>ArtForge AI - Signature Day Design</PageTitle>
+
+<div class="page-header page-header-lg">
+    <h2>Signature Day Design</h2>
+    <p>Create stunning shaped photo collages &mdash; choose a template, upload photos, download your design</p>
+</div>
+
+<div class="create-layout">
+    @* ── Left column: controls ── *@
+    <div class="create-left">
+        <div class="card">
+            <div class="card-body">
+
+                @* Template Selection *@
+                <div class="mb-3">
+                    <label class="form-label">Choose Template</label>
+                    <div class="sdd-template-grid">
+                        @foreach (var tmpl in _templates)
+                        {
+                            <button class="sdd-template-btn @(tmpl.key == _selectedTemplate ? "sdd-template-active" : "")"
+                                    @onclick="() => SelectTemplate(tmpl.key)"
+                                    title="@tmpl.name (@tmpl.slots slots)">
+                                <canvas id="sdd-thumb-@tmpl.key" width="120" height="160" class="sdd-thumb-canvas"></canvas>
+                                <span class="sdd-template-name">@tmpl.name</span>
+                                <span class="sdd-template-slots">@tmpl.slots slots</span>
+                            </button>
+                        }
+                    </div>
+                </div>
+
+                <hr style="margin:0.5rem 0;border-color:var(--border-color);" />
+
+                @* Photo Upload *@
+                <div class="mb-3">
+                    <label class="form-label">
+                        Upload Photos
+                        <span style="font-size:0.7rem;color:var(--text-muted);margin-left:0.3rem;">
+                            (@_photoDataUrls.Count / @_currentSlotCount slots filled)
+                        </span>
+                    </label>
+                    <label class="upload-area upload-area-compact @(_isUploading ? "disabled" : "")">
+                        <span class="upload-icon">&#128247;</span>
+                        <span>@(_photoDataUrls.Count == 0 ? "Upload photos" : "Add more photos")</span>
+                        <span style="font-size:0.7rem;color:var(--text-muted);margin-left:0.5rem;">JPG, PNG up to 10MB each</span>
+                        <InputFile OnChange="HandleFileUpload" accept="image/*" multiple style="display:none" disabled="@_isUploading" />
+                    </label>
+                    @if (_isUploading)
+                    {
+                        <div class="upload-progress-bar" style="margin-top:0.35rem;">
+                            <div class="upload-progress-fill" style="width:@(_uploadProgress)%"></div>
+                            <span class="upload-progress-text">Uploading @_uploadStatus...</span>
+                        </div>
+                    }
+                </div>
+
+                @* Photo thumbnails *@
+                @if (_photoDataUrls.Count > 0)
+                {
+                    <div class="mb-3">
+                        <div class="sdd-photo-list">
+                            @for (var i = 0; i < _photoDataUrls.Count; i++)
+                            {
+                                var idx = i;
+                                <div class="sdd-photo-thumb">
+                                    <img src="@_photoDataUrls[idx]" alt="Photo @(idx + 1)" />
+                                    <button class="sdd-photo-remove" @onclick="() => RemovePhoto(idx)" title="Remove">&#10005;</button>
+                                    <span class="sdd-photo-index">@(idx + 1)</span>
+                                </div>
+                            }
+                        </div>
+                        <button class="btn-secondary" style="width:100%;margin-top:0.4rem;font-size:0.78rem;"
+                                @onclick="ClearAllPhotos">
+                            &#128465; Clear All Photos
+                        </button>
+                    </div>
+                }
+
+                <hr style="margin:0.5rem 0;border-color:var(--border-color);" />
+
+                @* Background Color *@
+                <div class="mb-3">
+                    <label class="form-label">Background Color</label>
+                    <div style="display:flex;gap:0.4rem;align-items:center;flex-wrap:wrap;">
+                        @foreach (var bg in _bgPresets)
+                        {
+                            <button class="sdd-color-btn @(bg.hex == _bgColor ? "sdd-color-active" : "")"
+                                    style="background:@bg.hex;"
+                                    @onclick="() => SetBackground(bg.hex)"
+                                    title="@bg.name"></button>
+                        }
+                        <input type="color" @bind="_bgColor" @bind:after="OnBgColorChanged"
+                               style="width:32px;height:32px;border:none;padding:0;cursor:pointer;border-radius:50%;" />
+                    </div>
+                </div>
+
+                @* Download buttons *@
+                @if (_photoDataUrls.Count > 0)
+                {
+                    <div style="display:flex;gap:0.4rem;margin-top:0.75rem;">
+                        <button class="btn-primary-gradient" style="flex:1;font-size:0.85rem;" @onclick="DownloadPng">
+                            &#128424; Download PNG
+                        </button>
+                        <button class="btn-secondary" style="flex:1;font-size:0.85rem;" @onclick="DownloadJpg">
+                            &#128424; Download JPG
+                        </button>
+                    </div>
+                    <p style="font-size:0.68rem;color:var(--text-muted);margin-top:0.25rem;text-align:center;">
+                        High resolution 1800 &times; 2400 px output
+                    </p>
+                }
+            </div>
+        </div>
+
+        @if (!string.IsNullOrEmpty(_errorMessage))
+        {
+            <div class="card" style="margin-top:0.75rem;border-left:3px solid var(--danger);">
+                <div class="card-body" style="padding:0.75rem 1rem;color:var(--danger);font-size:0.85rem;">
+                    <strong>Error:</strong> @_errorMessage
+                </div>
+            </div>
+        }
+    </div>
+
+    @* ── Right column: canvas preview ── *@
+    <div class="create-right" style="overflow-y:auto;justify-content:center;">
+        <div id="sddCanvasContainer" class="sdd-canvas-container">
+            <canvas id="sddCanvas"></canvas>
+        </div>
+    </div>
+</div>
+
+@code {
+    // ── Template metadata (must match JS template keys) ──
+    private readonly (string key, string name, int slots)[] _templates =
+    [
+        ("hexHoneycomb", "Hexagon Honeycomb", 39),
+        ("circleGalaxy", "Circle Galaxy", 17),
+        ("diamondMosaic", "Diamond Mosaic", 21),
+        ("mixedMosaic", "Mixed Mosaic", 19),
+        ("heartFrame", "Heart Frame", 14)
+    ];
+
+    // ── Background presets ──
+    private readonly (string name, string hex)[] _bgPresets =
+    [
+        ("Midnight", "#0d1117"),
+        ("Deep Black", "#050505"),
+        ("Dark Navy", "#0f0a1a"),
+        ("Charcoal", "#1a1a2e"),
+        ("Dark Slate", "#111318"),
+        ("Wine", "#1a0a10"),
+        ("Forest", "#0a1a0f"),
+        ("White", "#ffffff")
+    ];
+
+    // ── State ──
+    private string _selectedTemplate = "hexHoneycomb";
+    private string _bgColor = "#0d1117";
+    private List<string> _photoDataUrls = new();
+    private int _currentSlotCount = 39;
+    private bool _isUploading;
+    private int _uploadProgress;
+    private string _uploadStatus = "";
+    private string? _errorMessage;
+    private bool _initialized;
+
+    // ── Lifecycle ──
+
+    protected override async Task OnInitializedAsync()
+    {
+        var authState = await AuthState.GetAuthenticationStateAsync();
+        if (!authState.User.IsInRole("SuperAdmin"))
+        {
+            var userIdStr = authState.User.FindFirstValue(System.Security.Claims.ClaimTypes.NameIdentifier);
+            if (int.TryParse(userIdStr, out var uid))
+            {
+                if (!await SubscriptionService.HasFeatureAccessAsync(uid, ArtForgeAI.Models.FeatureAccess.SignatureDayDesign))
+                {
+                    Nav.NavigateTo("/pricing", forceLoad: true);
+                    return;
+                }
+            }
+        }
+    }
+
+    protected override async Task OnAfterRenderAsync(bool firstRender)
+    {
+        if (firstRender)
+        {
+            await Task.Delay(100); // Let DOM settle
+            await JS.InvokeVoidAsync("signatureDayHelper.init", "sddCanvas");
+            await JS.InvokeVoidAsync("signatureDayHelper.loadTemplate", _selectedTemplate, _bgColor);
+
+            // Render template thumbnails
+            foreach (var tmpl in _templates)
+            {
+                await JS.InvokeVoidAsync("signatureDayHelper.renderThumbnail", $"sdd-thumb-{tmpl.key}", tmpl.key);
+            }
+
+            _initialized = true;
+        }
+    }
+
+    // ── Template selection ──
+
+    private async Task SelectTemplate(string key)
+    {
+        _selectedTemplate = key;
+        _currentSlotCount = _templates.First(t => t.key == key).slots;
+        if (_initialized)
+        {
+            await JS.InvokeVoidAsync("signatureDayHelper.loadTemplate", key, _bgColor);
+            if (_photoDataUrls.Count > 0)
+            {
+                await JS.InvokeVoidAsync("signatureDayHelper.setPhotos", _photoDataUrls.ToArray());
+            }
+        }
+    }
+
+    // ── Background color ──
+
+    private async Task SetBackground(string hex)
+    {
+        _bgColor = hex;
+        if (_initialized)
+            await JS.InvokeVoidAsync("signatureDayHelper.setBackground", hex);
+    }
+
+    private async Task OnBgColorChanged()
+    {
+        if (_initialized)
+            await JS.InvokeVoidAsync("signatureDayHelper.setBackground", _bgColor);
+    }
+
+    // ── Photo upload ──
+
+    private async Task HandleFileUpload(InputFileChangeEventArgs e)
+    {
+        _isUploading = true;
+        _errorMessage = null;
+        _uploadProgress = 0;
+        StateHasChanged();
+
+        try
+        {
+            var files = e.GetMultipleFiles(30);
+            var total = files.Count;
+
+            for (var i = 0; i < total; i++)
+            {
+                var file = files[i];
+                _uploadStatus = $"{i + 1}/{total}";
+                _uploadProgress = (int)((double)(i) / total * 100);
+                StateHasChanged();
+
+                if (file.Size > ImageUploadHelper.MaxReadSize)
+                {
+                    Logger.LogWarning("File {Name} too large, skipping", file.Name);
+                    continue;
+                }
+
+                try
+                {
+                    using var ms = new MemoryStream();
+                    await file.OpenReadStream(ImageUploadHelper.MaxReadSize).CopyToAsync(ms);
+                    var bytes = ms.ToArray();
+
+                    // Compress if large
+                    if (bytes.Length > 500_000)
+                    {
+                        using var compressed = ImageUploadHelper.CompressToFit(bytes, file.Name, 800_000);
+                        bytes = compressed.ToArray();
+                    }
+
+                    var ext = file.Name.EndsWith(".png", StringComparison.OrdinalIgnoreCase) ? "png" : "jpeg";
+                    var dataUrl = $"data:image/{ext};base64,{Convert.ToBase64String(bytes)}";
+                    _photoDataUrls.Add(dataUrl);
+                }
+                catch (Exception ex)
+                {
+                    Logger.LogError(ex, "Failed to read {Name}", file.Name);
+                }
+            }
+
+            _uploadProgress = 100;
+            StateHasChanged();
+
+            // Push photos to JS canvas
+            if (_initialized && _photoDataUrls.Count > 0)
+            {
+                await JS.InvokeVoidAsync("signatureDayHelper.setPhotos", _photoDataUrls.ToArray());
+            }
+        }
+        catch (Exception ex)
+        {
+            Logger.LogError(ex, "Upload failed");
+            _errorMessage = "Upload failed: " + ex.Message;
+        }
+        finally
+        {
+            _isUploading = false;
+            _uploadProgress = 0;
+            _uploadStatus = "";
+            StateHasChanged();
+        }
+    }
+
+    private async Task RemovePhoto(int index)
+    {
+        if (index >= 0 && index < _photoDataUrls.Count)
+        {
+            _photoDataUrls.RemoveAt(index);
+            if (_initialized)
+                await JS.InvokeVoidAsync("signatureDayHelper.setPhotos", _photoDataUrls.ToArray());
+            StateHasChanged();
+        }
+    }
+
+    private async Task ClearAllPhotos()
+    {
+        _photoDataUrls.Clear();
+        if (_initialized)
+            await JS.InvokeVoidAsync("signatureDayHelper.setPhotos", Array.Empty<string>());
+        StateHasChanged();
+    }
+
+    // ── Downloads ──
+
+    private async Task DownloadPng()
+    {
+        await JS.InvokeVoidAsync("signatureDayHelper.downloadPng", "signature_day_design.png");
+    }
+
+    private async Task DownloadJpg()
+    {
+        await JS.InvokeVoidAsync("signatureDayHelper.downloadJpg", "signature_day_design.jpg");
+    }
+
+    // ── Cleanup ──
+
+    public void Dispose() { }
+}

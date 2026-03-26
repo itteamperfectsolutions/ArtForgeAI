@@ -1,0 +1,943 @@
+/* ================================================================
+   TACTILE MAXIMALISM — 2026 Trend
+   ================================================================
+   3D squishy/clay/chrome buttons, glossy inflatable elements,
+   clean white backgrounds, hyper-color accents (60-30-10),
+   bold friendly typography, subtle micro-interactions.
+   ================================================================ */
+
+/* ───────────────────────────────────────────
+   1. TYPOGRAPHY — Bold, Friendly Sans-Serif
+   ─────────────────────────────────────────── */
+html, body {
+    font-feature-settings: "kern" 1, "liga" 1;
+    letter-spacing: -0.005em;
+    -webkit-font-smoothing: antialiased;
+}
+
+h1, h2, h3, h4,
+.page-header h2,
+.sidebar-brand h1,
+.pricing-plan-name,
+.pricing-amount {
+    font-family: 'Plus Jakarta Sans', 'Inter', sans-serif;
+    font-weight: 800;
+    letter-spacing: -0.025em;
+}
+
+.page-header h2 {
+    line-height: 1.15;
+}
+
+.page-header p {
+    font-weight: 500;
+}
+
+/* ───────────────────────────────────────────
+   2. SQUISHY 3D BUTTONS — Glossy & Inflatable
+   ─────────────────────────────────────────── */
+
+/* Primary CTA: Raised 3D with gloss highlight */
+.btn-primary-gradient {
+    background: var(--accent-gradient);
+    border: none;
+    border-radius: var(--radius-md);
+    font-family: 'Plus Jakarta Sans', 'Inter', sans-serif;
+    font-weight: 700;
+    font-size: 0.84rem;
+    padding: 0.6rem 1.2rem;
+    color: white;
+    cursor: pointer;
+    position: relative;
+    box-shadow: var(--gloss-highlight-strong), var(--shadow-3d);
+    transition: all var(--transition-fast), transform var(--transition-bounce);
+    text-shadow: 0 1px 2px rgba(0, 0, 0, 0.15);
+    overflow: hidden;
+}
+
+/* Glossy sheen overlay */
+.btn-primary-gradient::before {
+    content: '';
+    position: absolute;
+    top: 0;
+    left: 0;
+    right: 0;
+    height: 50%;
+    background: linear-gradient(180deg, rgba(255,255,255,0.25) 0%, rgba(255,255,255,0) 100%);
+    border-radius: var(--radius-md) var(--radius-md) 50% 50%;
+    pointer-events: none;
+}
+
+.btn-primary-gradient:hover {
+    background: var(--accent-gradient-hover);
+    transform: translateY(-3px) scale(1.03);
+    box-shadow: var(--gloss-highlight-strong), var(--shadow-3d-hover);
+}
+
+.btn-primary-gradient:active:not(:disabled) {
+    transform: translateY(2px) scale(0.98);
+    box-shadow: var(--gloss-highlight), var(--shadow-3d-active);
+    transition-duration: 80ms;
+}
+
+.btn-primary-gradient:disabled {
+    opacity: 0.55;
+    cursor: not-allowed;
+    transform: none;
+    box-shadow: var(--shadow-sm);
+}
+
+/* Secondary: Soft raised pill */
+.btn-secondary {
+    border: 1px solid var(--border-color);
+    border-radius: var(--radius-md);
+    font-weight: 700;
+    box-shadow: var(--gloss-highlight), var(--shadow-sm);
+    transition: all var(--transition-fast), transform var(--transition-bounce);
+}
+
+.btn-secondary:hover {
+    transform: translateY(-2px);
+    box-shadow: var(--gloss-highlight), var(--shadow-md);
+    background: var(--bg-secondary);
+}
+
+.btn-secondary:active {
+    transform: translateY(1px);
+    box-shadow: var(--gloss-highlight), var(--shadow-3d-active);
+}
+
+/* Icon Button: Squishy circle */
+.btn-icon {
+    border: 1px solid var(--border-color);
+    border-radius: var(--radius-md);
+    box-shadow: var(--gloss-highlight), var(--shadow-sm);
+    transition: all var(--transition-fast), transform var(--transition-bounce);
+}
+
+.btn-icon:hover {
+    transform: translateY(-2px) scale(1.08);
+    box-shadow: var(--gloss-highlight), var(--shadow-md);
+    border-color: var(--accent-primary);
+    color: var(--accent-primary);
+}
+
+.btn-icon:active {
+    transform: scale(0.92);
+    box-shadow: var(--shadow-3d-active);
+}
+
+/* Danger Button: 3D raised */
+.btn-danger {
+    border-radius: var(--radius-md);
+    font-weight: 700;
+    box-shadow: var(--gloss-highlight), var(--shadow-3d);
+    transition: all var(--transition-fast), transform var(--transition-bounce);
+}
+
+.btn-danger:hover {
+    transform: translateY(-2px);
+    box-shadow: var(--gloss-highlight), var(--shadow-3d-hover);
+}
+
+.btn-danger:active {
+    transform: translateY(2px);
+    box-shadow: var(--shadow-3d-active);
+}
+
+/* Action buttons (retry, enhance, etc): Glossy outlined */
+.btn-retry-ai, .btn-enhance, .btn-color-enhance, .btn-transparent-download {
+    border-radius: var(--radius-md);
+    font-weight: 700;
+    box-shadow: var(--gloss-highlight), var(--shadow-sm);
+    transition: all var(--transition-fast), transform var(--transition-bounce);
+}
+
+.btn-retry-ai:hover, .btn-enhance:hover,
+.btn-color-enhance:hover, .btn-transparent-download:hover {
+    transform: translateY(-2px) scale(1.02);
+    box-shadow: var(--gloss-highlight), var(--shadow-md);
+}
+
+.btn-retry-ai:active, .btn-enhance:active,
+.btn-color-enhance:active, .btn-transparent-download:active {
+    transform: translateY(1px) scale(0.98);
+    box-shadow: var(--shadow-3d-active);
+}
+
+/* Regenerate Button: Squishy CTA */
+.btn-regenerate {
+    border-radius: var(--radius-md);
+    box-shadow: var(--gloss-highlight-strong), var(--shadow-3d);
+    position: relative;
+    overflow: hidden;
+}
+
+.btn-regenerate::before {
+    content: '';
+    position: absolute;
+    top: 0;
+    left: 0;
+    right: 0;
+    height: 50%;
+    background: linear-gradient(180deg, rgba(255,255,255,0.2) 0%, transparent 100%);
+    pointer-events: none;
+}
+
+.btn-regenerate:hover:not(:disabled) {
+    transform: translateY(-2px) scale(1.03);
+    box-shadow: var(--gloss-highlight-strong), var(--shadow-3d-hover);
+}
+
+.btn-regenerate:active:not(:disabled) {
+    transform: translateY(2px) scale(0.97);
+    box-shadow: var(--shadow-3d-active);
+}
+
+/* ───────────────────────────────────────────
+   3. MINIMALIST NAVIGATION — Clean & Sticky
+   ─────────────────────────────────────────── */
+
+.sidebar {
+    border-right: 1px solid var(--border-color);
+    box-shadow: var(--shadow-md);
+}
+
+.sidebar-brand {
+    padding: 1.1rem 0.85rem;
+    border-bottom: 1px solid var(--border-color);
+}
+
+.sidebar-brand .brand-icon {
+    width: 36px;
+    height: 36px;
+    border-radius: var(--radius-md);
+    box-shadow: var(--gloss-highlight-strong), var(--shadow-3d);
+    font-size: 1.3rem;
+    transition: transform var(--transition-spring);
+}
+
+.sidebar-brand .brand-icon:hover {
+    transform: scale(1.1) rotate(-5deg);
+}
+
+.sidebar-brand h1 {
+    font-size: 1.05rem;
+}
+
+/* Nav Items: Clean with subtle hover lift */
+.nav-item {
+    border-radius: var(--radius-md);
+    font-weight: 600;
+    font-size: 0.82rem;
+    padding: 0.55rem 0.8rem;
+    transition: all var(--transition-fast), transform var(--transition-bounce);
+}
+
+.nav-item:hover {
+    background: var(--bg-tertiary);
+    transform: translateX(2px);
+}
+
+.nav-item.active {
+    background: var(--accent-gradient);
+    color: white;
+    box-shadow: var(--gloss-highlight), var(--shadow-3d);
+    transform: translateX(3px);
+    font-weight: 700;
+}
+
+.nav-item.active::before {
+    content: '';
+    position: absolute;
+    top: 0;
+    left: 0;
+    right: 0;
+    height: 50%;
+    background: linear-gradient(180deg, rgba(255,255,255,0.15) 0%, transparent 100%);
+    border-radius: var(--radius-md) var(--radius-md) 40% 40%;
+    pointer-events: none;
+}
+
+.nav-item:active {
+    transform: translateX(1px) scale(0.97);
+}
+
+/* Sidebar User: Clean card */
+.sidebar-user {
+    border: 1px solid var(--border-color);
+    border-radius: var(--radius-md);
+    margin: 0.5rem 0.75rem;
+    padding: 0.6rem;
+    background: var(--bg-tertiary);
+    box-shadow: var(--shadow-sm);
+}
+
+.user-avatar, .user-avatar-placeholder {
+    border: 2px solid var(--border-color);
+    box-shadow: var(--shadow-sm);
+}
+
+/* Sidebar Coins: Minimal badge */
+.sidebar-coins {
+    border: 1px solid var(--border-color);
+    border-radius: var(--radius-md);
+    margin: 0 0.75rem 0.5rem;
+    padding: 0.45rem 0.65rem;
+    background: var(--bg-tertiary);
+    font-weight: 700;
+    box-shadow: var(--gloss-highlight), var(--shadow-sm);
+}
+
+/* Sidebar Upgrade: 3D CTA */
+.sidebar-upgrade a {
+    display: block;
+    padding: 0.6rem 0.75rem;
+    margin: 0 0.75rem 0.5rem;
+    border-radius: var(--radius-md);
+    background: var(--accent-gradient);
+    color: white;
+    text-decoration: none;
+    font-weight: 700;
+    font-size: 0.78rem;
+    text-align: center;
+    box-shadow: var(--gloss-highlight-strong), var(--shadow-3d);
+    transition: all var(--transition-fast), transform var(--transition-bounce);
+    text-shadow: 0 1px 2px rgba(0, 0, 0, 0.15);
+    position: relative;
+    overflow: hidden;
+}
+
+.sidebar-upgrade a::before {
+    content: '';
+    position: absolute;
+    top: 0;
+    left: 0;
+    right: 0;
+    height: 50%;
+    background: linear-gradient(180deg, rgba(255,255,255,0.2) 0%, transparent 100%);
+    pointer-events: none;
+}
+
+.sidebar-upgrade a:hover {
+    transform: translateY(-2px) scale(1.02);
+    box-shadow: var(--gloss-highlight-strong), var(--shadow-3d-hover);
+}
+
+.sidebar-upgrade a:active {
+    transform: translateY(1px) scale(0.98);
+    box-shadow: var(--shadow-3d-active);
+}
+
+.sidebar-footer {
+    border-top: 1px solid var(--border-color);
+}
+
+/* ───────────────────────────────────────────
+   4. CARDS — Clean with 3D Lift on Hover
+   ─────────────────────────────────────────── */
+
+.card {
+    border: 1px solid var(--border-color);
+    border-radius: var(--radius-md);
+    box-shadow: var(--shadow-sm);
+    transition: all var(--transition-normal), transform var(--transition-bounce);
+}
+
+.card:hover {
+    box-shadow: var(--shadow-lg);
+    transform: translateY(-2px);
+}
+
+/* Image Cards: Physical with 3D lift */
+.image-card {
+    border: 1px solid var(--border-color);
+    border-radius: var(--radius-lg);
+    box-shadow: var(--shadow-md);
+    transition: all var(--transition-normal), transform var(--transition-bounce);
+}
+
+.image-card:hover {
+    box-shadow: var(--shadow-xl), 0 0 0 1px var(--accent-primary);
+    transform: translateY(-6px) scale(1.01);
+}
+
+.image-card:active {
+    transform: translateY(-1px) scale(0.99);
+    box-shadow: var(--shadow-sm);
+}
+
+/* ───────────────────────────────────────────
+   5. FORM INPUTS — Soft Recessed / Clean
+   ─────────────────────────────────────────── */
+
+.form-input {
+    border: 1px solid var(--border-color);
+    border-radius: var(--radius-md);
+    padding: 0.6rem 0.85rem;
+    font-weight: 500;
+    transition: all var(--transition-fast);
+    box-shadow: inset 0 1px 3px rgba(0, 0, 0, 0.04);
+}
+
+.form-input:focus {
+    border-color: var(--accent-primary);
+    box-shadow: inset 0 1px 3px rgba(0, 0, 0, 0.04), 0 0 0 3px var(--accent-glow);
+    outline: none;
+}
+
+.form-input:hover:not(:focus) {
+    border-color: var(--border-bold);
+}
+
+/* ───────────────────────────────────────────
+   6. SELECTORS — Squishy Tile Buttons
+   ─────────────────────────────────────────── */
+
+/* Size Selector */
+.size-option {
+    border: 2px solid var(--border-color);
+    border-radius: var(--radius-md);
+    box-shadow: var(--gloss-highlight), var(--shadow-sm);
+    transition: all var(--transition-fast), transform var(--transition-bounce);
+}
+
+.size-option:hover {
+    border-color: var(--accent-primary);
+    transform: translateY(-3px);
+    box-shadow: var(--gloss-highlight), var(--shadow-md);
+}
+
+.size-option.selected {
+    border-color: var(--accent-primary);
+    background: rgba(99, 102, 241, 0.06);
+    box-shadow: 0 0 0 3px var(--accent-glow), var(--shadow-3d);
+    transform: translateY(-3px) scale(1.02);
+}
+
+.size-option:active {
+    transform: scale(0.96);
+    box-shadow: var(--shadow-3d-active);
+}
+
+/* Provider Selector */
+.provider-option {
+    border: 2px solid var(--border-color);
+    border-radius: var(--radius-md);
+    box-shadow: var(--gloss-highlight), var(--shadow-sm);
+    transition: all var(--transition-fast), transform var(--transition-bounce);
+}
+
+.provider-option:hover {
+    border-color: var(--accent-primary);
+    transform: translateY(-3px);
+    box-shadow: var(--gloss-highlight), var(--shadow-md);
+}
+
+.provider-option.selected {
+    border-color: var(--accent-primary);
+    background: rgba(99, 102, 241, 0.08);
+    box-shadow: 0 0 0 3px var(--accent-glow), var(--shadow-3d);
+    transform: translateY(-3px) scale(1.02);
+}
+
+.provider-option:active {
+    transform: scale(0.96);
+    box-shadow: var(--shadow-3d-active);
+}
+
+/* ───────────────────────────────────────────
+   7. UPLOAD AREA — Inviting 3D Zone
+   ─────────────────────────────────────────── */
+
+.upload-area {
+    border: 2px dashed var(--border-bold);
+    border-radius: var(--radius-lg);
+    transition: all var(--transition-normal), transform var(--transition-bounce);
+}
+
+.upload-area:hover {
+    border-color: var(--accent-primary);
+    background: rgba(99, 102, 241, 0.03);
+    transform: scale(1.01);
+    box-shadow: 0 0 0 3px var(--accent-glow);
+}
+
+.upload-area .upload-icon {
+    transition: transform var(--transition-spring);
+}
+
+.upload-area:hover .upload-icon {
+    transform: scale(1.15);
+}
+
+/* Ref Thumbnails: 3D mini cards */
+.ref-thumb {
+    border: 2px solid var(--border-color);
+    border-radius: var(--radius-md);
+    box-shadow: var(--shadow-md);
+    transition: all var(--transition-fast), transform var(--transition-bounce);
+}
+
+.ref-thumb:hover {
+    transform: scale(1.08) rotate(-1deg);
+    box-shadow: var(--shadow-lg);
+    border-color: var(--accent-primary);
+}
+
+.ref-thumb-add {
+    border: 2px dashed var(--border-bold);
+    border-radius: var(--radius-md);
+    transition: all var(--transition-fast), transform var(--transition-bounce);
+}
+
+.ref-thumb-add:hover {
+    transform: scale(1.05);
+    border-color: var(--accent-primary);
+}
+
+/* ───────────────────────────────────────────
+   8. RIGHT PANEL — Clean Preview Frame
+   ─────────────────────────────────────────── */
+
+.right-panel-card {
+    border: 1px solid var(--border-color);
+    border-radius: var(--radius-md);
+    box-shadow: var(--shadow-md);
+}
+
+.right-panel-label {
+    font-family: 'Plus Jakarta Sans', 'Inter', sans-serif;
+    font-weight: 800;
+    letter-spacing: 0.05em;
+    background: var(--bg-tertiary);
+    border-bottom: 1px solid var(--border-color);
+}
+
+.right-panel-empty {
+    border: 2px dashed var(--border-bold);
+    border-radius: var(--radius-lg);
+}
+
+.right-panel-empty .empty-icon {
+    font-size: 3rem;
+    transition: transform var(--transition-spring);
+}
+
+/* ───────────────────────────────────────────
+   9. MODALS & OVERLAYS — Frosted + 3D Frame
+   ─────────────────────────────────────────── */
+
+.loading-content {
+    border: 1px solid var(--border-color);
+    border-radius: var(--radius-xl);
+    box-shadow: var(--shadow-xl);
+}
+
+.loading-spinner {
+    border: 4px solid var(--border-color);
+    border-top-color: var(--accent-primary);
+}
+
+.preview-content {
+    border: 1px solid var(--border-bold);
+    border-radius: var(--radius-xl);
+    box-shadow: var(--shadow-xl);
+}
+
+.preview-close {
+    border-radius: var(--radius-md);
+    backdrop-filter: blur(12px);
+    background: rgba(0, 0, 0, 0.5);
+    border: 1px solid rgba(255, 255, 255, 0.15);
+    box-shadow: var(--shadow-md);
+    transition: all var(--transition-fast), transform var(--transition-bounce);
+}
+
+.preview-close:hover {
+    transform: scale(1.1);
+    background: rgba(0, 0, 0, 0.7);
+}
+
+/* ───────────────────────────────────────────
+   10. TOAST NOTIFICATIONS
+   ─────────────────────────────────────────── */
+
+.toast {
+    border: 1px solid var(--border-color);
+    border-radius: var(--radius-md);
+    box-shadow: var(--shadow-lg);
+    backdrop-filter: blur(12px);
+}
+
+.toast.success { border-left: 4px solid var(--success); }
+.toast.error { border-left: 4px solid var(--danger); }
+.toast.warning { border-left: 4px solid var(--warning); }
+
+/* ───────────────────────────────────────────
+   11. THEME TOGGLE — Squishy Pill
+   ─────────────────────────────────────────── */
+
+.theme-toggle {
+    border: 1px solid var(--border-color);
+    border-radius: var(--radius-pill);
+    box-shadow: var(--gloss-highlight), var(--shadow-sm);
+    font-weight: 700;
+    transition: all var(--transition-fast), transform var(--transition-bounce);
+}
+
+.theme-toggle:hover {
+    transform: translateY(-1px);
+    box-shadow: var(--gloss-highlight), var(--shadow-md);
+}
+
+.theme-toggle:active {
+    transform: translateY(1px);
+    box-shadow: var(--shadow-3d-active);
+}
+
+/* Toggle Switch: Smooth */
+.toggle-slider:before {
+    box-shadow: var(--shadow-sm);
+    transition: transform var(--transition-bounce);
+}
+
+/* ───────────────────────────────────────────
+   12. SETTINGS TABS
+   ─────────────────────────────────────────── */
+
+.settings-tab {
+    font-weight: 700;
+    transition: all var(--transition-fast);
+}
+
+.settings-tab.active {
+    color: var(--accent-primary);
+}
+
+.settings-tab-badge {
+    box-shadow: var(--shadow-sm);
+    font-weight: 800;
+}
+
+/* ───────────────────────────────────────────
+   13. STYLE TABS — Squishy Pills
+   ─────────────────────────────────────────── */
+
+.style-category-tab {
+    border: 1px solid var(--border-color);
+    border-radius: var(--radius-pill);
+    font-weight: 700;
+    box-shadow: var(--gloss-highlight), var(--shadow-sm);
+    transition: all var(--transition-fast), transform var(--transition-bounce);
+}
+
+.style-category-tab:hover {
+    transform: translateY(-2px);
+    box-shadow: var(--gloss-highlight), var(--shadow-md);
+}
+
+.style-category-tab.active {
+    box-shadow: var(--gloss-highlight-strong), var(--shadow-3d);
+    transform: translateY(-2px);
+}
+
+/* ───────────────────────────────────────────
+   14. BADGES — Glossy Chips
+   ─────────────────────────────────────────── */
+
+.local-badge, .enhance-badge {
+    font-weight: 800;
+    border-radius: var(--radius-pill);
+    box-shadow: var(--gloss-highlight), var(--shadow-sm);
+}
+
+/* ───────────────────────────────────────────
+   15. FINETUNE & RESULT
+   ─────────────────────────────────────────── */
+
+.finetune-section {
+    border: 1px solid var(--border-color);
+    border-radius: var(--radius-md);
+    box-shadow: var(--shadow-sm);
+}
+
+.finetune-label {
+    font-family: 'Plus Jakarta Sans', 'Inter', sans-serif;
+    font-weight: 800;
+    letter-spacing: 0.04em;
+}
+
+.result-prompt {
+    border: 1px solid var(--border-color);
+    border-radius: var(--radius-md);
+}
+
+/* ───────────────────────────────────────────
+   16. PROGRESS BARS
+   ─────────────────────────────────────────── */
+
+.enhance-progress-bar, .upload-progress-bar {
+    border: 1px solid var(--border-color);
+    border-radius: var(--radius-md);
+    overflow: hidden;
+    height: 24px;
+}
+
+/* ───────────────────────────────────────────
+   17. BG COLOR SWATCHES — Squishy Circles
+   ─────────────────────────────────────────── */
+
+.bg-color-swatch {
+    border: 2px solid var(--border-color);
+    box-shadow: var(--gloss-highlight), var(--shadow-sm);
+    transition: all var(--transition-fast), transform var(--transition-bounce);
+}
+
+.bg-color-swatch:hover {
+    transform: scale(1.2);
+    box-shadow: var(--shadow-md);
+}
+
+.bg-color-swatch.active {
+    box-shadow: 0 0 0 3px var(--accent-glow), var(--shadow-md);
+    transform: scale(1.15);
+}
+
+/* ───────────────────────────────────────────
+   18. CHECKBOXES — Squishy Toggle
+   ─────────────────────────────────────────── */
+
+.form-check-enhanced input[type="checkbox"] {
+    border-radius: 5px;
+    box-shadow: inset 0 1px 3px rgba(0, 0, 0, 0.08);
+    width: 18px;
+    height: 18px;
+}
+
+.form-check-enhanced input[type="checkbox"]:checked {
+    box-shadow: var(--gloss-highlight), var(--shadow-sm);
+}
+
+/* ───────────────────────────────────────────
+   19. AUTH / LOGIN — Clean & Inviting
+   ─────────────────────────────────────────── */
+
+.login-card {
+    border: 1px solid var(--border-color);
+    border-radius: var(--radius-xl);
+    box-shadow: var(--shadow-xl);
+    animation: tm-pop-in 0.4s var(--transition-spring) both;
+}
+
+.login-brand .brand-icon {
+    border-radius: var(--radius-md);
+    box-shadow: var(--gloss-highlight-strong), var(--shadow-3d);
+}
+
+.google-sign-in-btn {
+    border: 1px solid var(--border-color);
+    border-radius: var(--radius-md);
+    font-weight: 700;
+    box-shadow: var(--gloss-highlight), var(--shadow-3d);
+    transition: all var(--transition-fast), transform var(--transition-bounce);
+}
+
+.google-sign-in-btn:hover {
+    transform: translateY(-3px) scale(1.02);
+    box-shadow: var(--gloss-highlight), var(--shadow-3d-hover);
+}
+
+.google-sign-in-btn:active {
+    transform: translateY(2px) scale(0.98);
+    box-shadow: var(--shadow-3d-active);
+}
+
+/* ───────────────────────────────────────────
+   20. PRICING CARDS — 3D Elevated
+   ─────────────────────────────────────────── */
+
+.pricing-card {
+    border: 1px solid var(--border-color);
+    border-radius: var(--radius-lg);
+    box-shadow: var(--shadow-md);
+    transition: all var(--transition-normal), transform var(--transition-bounce);
+}
+
+.pricing-card:hover {
+    transform: translateY(-6px) scale(1.01);
+    box-shadow: var(--shadow-xl), 0 0 0 1px var(--accent-primary);
+}
+
+.pricing-card-featured {
+    border-color: var(--accent-primary);
+    box-shadow: var(--shadow-lg), 0 0 0 2px var(--accent-glow);
+}
+
+.pricing-badge {
+    font-weight: 800;
+    border-radius: var(--radius-pill);
+    box-shadow: var(--shadow-sm);
+}
+
+/* ───────────────────────────────────────────
+   21. MOBILE MENU — Clean & Visible
+   ─────────────────────────────────────────── */
+
+.mobile-menu-btn {
+    border: 1px solid var(--border-color);
+    border-radius: var(--radius-md);
+    box-shadow: var(--gloss-highlight), var(--shadow-md);
+    backdrop-filter: blur(12px);
+}
+
+/* ───────────────────────────────────────────
+   22. WALLET
+   ─────────────────────────────────────────── */
+
+.wallet-balance-card {
+    border-radius: var(--radius-xl);
+    box-shadow: var(--shadow-lg);
+}
+
+/* ───────────────────────────────────────────
+   23. ADMIN
+   ─────────────────────────────────────────── */
+
+.admin-stat-card {
+    border-radius: var(--radius-md);
+    box-shadow: var(--shadow-md);
+    transition: all var(--transition-fast), transform var(--transition-bounce);
+}
+
+.admin-stat-card:hover {
+    transform: translateY(-3px);
+    box-shadow: var(--shadow-lg);
+}
+
+/* ───────────────────────────────────────────
+   24. MICRO-INTERACTIONS & ANIMATIONS
+   ─────────────────────────────────────────── */
+
+/* Subtle pop-in for cards on mount */
+@keyframes tm-pop-in {
+    0% { opacity: 0; transform: scale(0.92) translateY(8px); }
+    70% { transform: scale(1.02) translateY(-2px); }
+    100% { opacity: 1; transform: scale(1) translateY(0); }
+}
+
+@keyframes tm-bounce-in {
+    0% { opacity: 0; transform: translateY(12px); }
+    60% { transform: translateY(-3px); }
+    100% { opacity: 1; transform: translateY(0); }
+}
+
+@keyframes tm-glow-pulse {
+    0%, 100% { box-shadow: 0 0 0 0 var(--accent-glow); }
+    50% { box-shadow: 0 0 0 8px transparent; }
+}
+
+/* Cards animate in */
+.card, .image-card {
+    animation: tm-bounce-in 0.35s cubic-bezier(0.34, 1.56, 0.64, 1) both;
+}
+
+/* ───────────────────────────────────────────
+   25. ACCENT GRADIENT LINE — Top of Content
+   ─────────────────────────────────────────── */
+
+.main-content::before {
+    content: '';
+    position: fixed;
+    top: 0;
+    left: 200px;
+    right: 0;
+    height: 3px;
+    background: var(--accent-gradient);
+    z-index: 50;
+    opacity: 0.7;
+}
+
+@media (max-width: 768px) {
+    .main-content::before {
+        left: 0;
+    }
+}
+
+/* ───────────────────────────────────────────
+   26. SCROLLBAR — Minimal & Themed
+   ─────────────────────────────────────────── */
+
+::-webkit-scrollbar {
+    width: 8px;
+    height: 8px;
+}
+
+::-webkit-scrollbar-track {
+    background: transparent;
+}
+
+::-webkit-scrollbar-thumb {
+    background: var(--border-bold);
+    border-radius: var(--radius-pill);
+}
+
+::-webkit-scrollbar-thumb:hover {
+    background: var(--text-muted);
+}
+
+/* ───────────────────────────────────────────
+   27. SELECTION — Branded
+   ─────────────────────────────────────────── */
+
+::selection {
+    background: rgba(99, 102, 241, 0.2);
+    color: var(--text-primary);
+}
+
+/* ───────────────────────────────────────────
+   28. SIGN-OUT HOVER
+   ─────────────────────────────────────────── */
+
+.sign-out-link:hover {
+    background: rgba(239, 68, 68, 0.06);
+    color: var(--danger);
+}
+
+/* ───────────────────────────────────────────
+   29. RESPONSIVE ADJUSTMENTS
+   ─────────────────────────────────────────── */
+
+@media (max-width: 480px) {
+    .btn-primary-gradient {
+        border-radius: var(--radius-md);
+    }
+}
+
+/* ───────────────────────────────────────────
+   30. STAGGERED CARD ENTRANCE (JS-driven)
+   ─────────────────────────────────────────── */
+
+.image-card.tm-observed:not(.tm-visible),
+.pricing-card.tm-observed:not(.tm-visible) {
+    opacity: 0;
+    transform: translateY(12px) scale(0.97);
+}
+
+.image-card.tm-visible,
+.pricing-card.tm-visible {
+    animation: tm-bounce-in 0.4s cubic-bezier(0.34, 1.56, 0.64, 1) both;
+}
+
+/* ───────────────────────────────────────────
+   31. REDUCED MOTION — Accessibility
+   ─────────────────────────────────────────── */
+
+@media (prefers-reduced-motion: reduce) {
+    *, *::before, *::after {
+        animation-duration: 0.01ms !important;
+        animation-iteration-count: 1 !important;
+        transition-duration: 0.15s !important;
+        transition-timing-function: ease !important;
+    }
+}
