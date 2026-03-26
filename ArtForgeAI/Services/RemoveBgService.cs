@@ -240,7 +240,13 @@ public sealed class RemoveBgService
                         },
                         new
                         {
-                            text = "Remove the background from this image completely. Return ONLY the subject/foreground with a fully transparent background. Keep the subject exactly as it is with no modifications to colors, details, or proportions."
+                            text = "Remove the background from this image completely. " +
+                                   "Return ONLY the main human subject (person/people) with a fully transparent background. " +
+                                   "Remove ALL background objects including furniture, chairs, tables, walls, decorations, plants, and any other items that are not part of the person's body or clothing. " +
+                                   "Keep ONLY the person — their body, face, hair, clothes, and accessories they are wearing. " +
+                                   "Do NOT keep any objects the person is sitting on, leaning against, or standing near. " +
+                                   "If there is no human subject, extract only the single most prominent foreground object. " +
+                                   "Keep the subject exactly as it is with no modifications to colors, details, or proportions."
                         }
                     }
                 }

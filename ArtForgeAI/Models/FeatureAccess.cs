@@ -21,14 +21,15 @@ public static class FeatureAccess
     public const string Merger = "Merger";
     public const string EmbroideryArt = "EmbroideryArt";
     public const string BackgroundRemoval = "BackgroundRemoval";
+    public const string SignatureDayDesign = "SignatureDayDesign";
 
     /// <summary>Plan name to allowed features mapping</summary>
     public static readonly Dictionary<string, string[]> PlanFeatures = new()
     {
         ["Free"] = [QuickStyle],
         ["Starter"] = [QuickStyle, Home, StyleTransfer, StyleRemix, Gallery],
-        ["Pro"] = [QuickStyle, Home, StyleTransfer, StyleRemix, Gallery, MosaicPoster, PassportPhoto, ImageViewer, Settings, NegativeScan, AutoEnhance, PhotoCollages, Merger, EmbroideryArt, BackgroundRemoval],
-        ["Enterprise"] = [QuickStyle, Home, StyleTransfer, StyleRemix, Gallery, MosaicPoster, PassportPhoto, ImageViewer, Settings, PhotoExpand, GangSheet, ShapeCutSheet, NegativeScan, AutoEnhance, PhotoCollages, Merger, EmbroideryArt, BackgroundRemoval]
+        ["Pro"] = [QuickStyle, Home, StyleTransfer, StyleRemix, Gallery, MosaicPoster, PassportPhoto, ImageViewer, Settings, NegativeScan, AutoEnhance, PhotoCollages, Merger, EmbroideryArt, BackgroundRemoval, SignatureDayDesign],
+        ["Enterprise"] = [QuickStyle, Home, StyleTransfer, StyleRemix, Gallery, MosaicPoster, PassportPhoto, ImageViewer, Settings, PhotoExpand, GangSheet, ShapeCutSheet, NegativeScan, AutoEnhance, PhotoCollages, Merger, EmbroideryArt, BackgroundRemoval, SignatureDayDesign]
     };
 
     /// <summary>Coin cost per generation for each feature</summary>
@@ -48,14 +49,15 @@ public static class FeatureAccess
         [PhotoCollages] = 5,
         [Merger] = 3,
         [EmbroideryArt] = 3,
-        [BackgroundRemoval] = 2
+        [BackgroundRemoval] = 2,
+        [SignatureDayDesign] = 0
     };
 
     /// <summary>All feature keys</summary>
     public static readonly string[] AllFeatures =
     [
         QuickStyle, Home, StyleTransfer, StyleRemix, Gallery, MosaicPoster,
-        PassportPhoto, ImageViewer, Settings, PhotoExpand, GangSheet, ShapeCutSheet, NegativeScan, AutoEnhance, PhotoCollages, Merger, EmbroideryArt, BackgroundRemoval
+        PassportPhoto, ImageViewer, Settings, PhotoExpand, GangSheet, ShapeCutSheet, NegativeScan, AutoEnhance, PhotoCollages, Merger, EmbroideryArt, BackgroundRemoval, SignatureDayDesign
     ];
 
     public static int GetCost(string featureKey) =>

@@ -70,13 +70,106 @@
                 {
                     <hr style="margin: 0.5rem 0; border-color: var(--border-color);" />
 
-                    <button class="btn-primary-gradient" style="width:100%;margin-top:0.5rem;"
-                            @onclick="EnhanceImage" disabled="@_isProcessing">
-                        &#10024; Auto Enhance
-                    </button>
-                    <p style="font-size:0.7rem;color:var(--text-muted);margin-top:0.25rem;">
-                        AI enhances your entire image at once, preserving layout and faces. Just better quality.
-                    </p>
+                    @* ── Face Cleanup (Local) ── *@
+                    <div class="face-cleanup-section" style="margin-top:0.5rem;">
+                        <div style="display:flex;align-items:center;justify-content:space-between;">
+                            <label class="form-label" style="margin-bottom:0;">Clear Face Marks</label>
+                            <span style="font-size:0.65rem;color:var(--text-muted);background:var(--bg-tertiary);padding:0.15rem 0.4rem;border-radius:4px;">LOCAL</span>
+                        </div>
+                        <p style="font-size:0.68rem;color:var(--text-muted);margin:0.2rem 0 0.4rem;">
+                            Remove blemishes, acne &amp; smooth skin locally on your device. No upload needed.
+                        </p>
+
+                        @* Quick actions *@
+                        <div style="display:flex;flex-direction:column;gap:0.35rem;">
+                            <div style="display:flex;gap:0.35rem;">
+                                <button class="btn-secondary face-cleanup-btn" style="flex:1;font-size:0.78rem;padding:0.35rem 0.5rem;"
+                                        @onclick='() => RunFaceCleanup("smooth", "light")' disabled="@(_isProcessing || _isCleaning)">
+                                    &#128172; Light Smooth
+                                </button>
+                                <button class="btn-secondary face-cleanup-btn" style="flex:1;font-size:0.78rem;padding:0.35rem 0.5rem;"
+                                        @onclick='() => RunFaceCleanup("smooth", "medium")' disabled="@(_isProcessing || _isCleaning)">
+                                    &#128172; Medium Smooth
+                                </button>
+                                <button class="btn-secondary face-cleanup-btn" style="flex:1;font-size:0.78rem;padding:0.35rem 0.5rem;"
+                                        @onclick='() => RunFaceCleanup("smooth", "heavy")' disabled="@(_isProcessing || _isCleaning)">
+                                    &#128172; Heavy Smooth
+                                </button>
+                            </div>
+
+                            <div style="display:flex;gap:0.35rem;">
+                                <button class="btn-secondary face-cleanup-btn" style="flex:1;font-size:0.78rem;padding:0.35rem 0.5rem;"
+                                        @onclick='() => RunFaceCleanup("blemish", "gentle")' disabled="@(_isProcessing || _isCleaning)">
+                                    &#10022; Gentle Spot Fix
+                                </button>
+                                <button class="btn-secondary face-cleanup-btn" style="flex:1;font-size:0.78rem;padding:0.35rem 0.5rem;"
+                                        @onclick='() => RunFaceCleanup("blemish", "moderate")' disabled="@(_isProcessing || _isCleaning)">
+                                    &#10022; Moderate Fix
+                                </button>
+                                <button class="btn-secondary face-cleanup-btn" style="flex:1;font-size:0.78rem;padding:0.35rem 0.5rem;"
+                                        @onclick='() => RunFaceCleanup("blemish", "aggressive")' disabled="@(_isProcessing || _isCleaning)">
+                                    &#10022; Deep Fix
+                                </button>
+                            </div>
+
+                            <button class="btn-primary-gradient face-cleanup-btn" style="width:100%;font-size:0.82rem;padding:0.4rem 0.5rem;"
+                                    @onclick='() => RunFaceCleanup("clearAll", _cleanupLevel)' disabled="@(_isProcessing || _isCleaning)">
+                                &#10024; Clear All Face Marks (@_cleanupLevel)
+                            </button>
+
+                            <div style="display:flex;align-items:center;gap:0.5rem;margin-top:0.15rem;">
+                                <label style="font-size:0.72rem;color:var(--text-muted);white-space:nowrap;">Cleanup Level:</label>
+                                <select class="form-select" style="font-size:0.75rem;padding:0.2rem 0.4rem;" @bind="_cleanupLevel">
+                                    <option value="light">Light</option>
+                                    <option value="medium">Medium</option>
+                                    <option value="heavy">Heavy</option>
+                                </select>
+                            </div>
+
+                            @if (_cleanupApplied)
+                            {
+                                <div style="display:flex;gap:0.35rem;margin-top:0.15rem;">
+                                    <button class="btn-secondary" style="flex:1;font-size:0.75rem;padding:0.3rem 0.5rem;"
+                                            @onclick="UndoCleanup" disabled="@(_isProcessing || _isCleaning)">
+                                        &#8634; Undo Cleanup
+                                    </button>
+                                    <button class="btn-secondary" style="flex:1;font-size:0.75rem;padding:0.3rem 0.5rem;"
+                                            @onclick="ApplyCleanup" disabled="@(_isProcessing || _isCleaning)">
+                                        &#10003; Apply &amp; Keep
+                                    </button>
+                                </div>
+                            }
+                        </div>
+
+                        @if (_isCleaning)
+                        {
+                            <div style="display:flex;align-items:center;gap:0.5rem;margin-top:0.35rem;">
+                                <div class="processing-spinner" style="width:16px;height:16px;"></div>
+                                <span style="font-size:0.75rem;color:var(--text-muted);">Processing locally...</span>
+                            </div>
+                        }
+                    </div>
+
+                    <hr style="margin: 0.5rem 0; border-color: var(--border-color);" />
+
+                    @* ── AI Actions ── *@
+                    <div style="display:flex;flex-direction:column;gap:0.4rem;margin-top:0.5rem;">
+                        <button class="btn-primary-gradient" style="width:100%;"
+                                @onclick="EnhanceImage" disabled="@_isProcessing">
+                            &#10024; Auto Enhance
+                        </button>
+                        <p style="font-size:0.68rem;color:var(--text-muted);margin:0;">
+                            AI enhances your entire image at once, preserving layout and faces. Just better quality.
+                        </p>
+
+                        <button class="btn-smartclean" style="width:100%;margin-top:0.25rem;"
+                                @onclick="SmartCleanImage" disabled="@_isProcessing">
+                            &#9889; Enhance &mdash; SmartClean
+                        </button>
+                        <p style="font-size:0.68rem;color:var(--text-muted);margin:0;">
+                            AI removes acne, blemishes, dark spots &amp; smooths skin while preserving natural face features.
+                        </p>
+                    </div>
                 }
             </div>
         </div>
@@ -181,7 +274,10 @@
     private int _sourceWidth;
     private int _sourceHeight;
 
-    // Image compression confirmation state
+    // Face cleanup
+    private bool _isCleaning;
+    private bool _cleanupApplied;
+    private string _cleanupLevel = "medium";
 
     // Crop & compare slider
     private bool _pendingCropInit;
@@ -345,6 +441,93 @@
         }
     }
 
+    // ── Face Cleanup (local, client-side) ──
+
+    private async Task RunFaceCleanup(string mode, string level)
+    {
+        if (string.IsNullOrEmpty(_uploadedDataUrl)) return;
+
+        _isCleaning = true;
+        _errorMessage = null;
+        StateHasChanged();
+
+        try
+        {
+            // Load image into the cleanup module
+            await JS.InvokeVoidAsync("faceCleanup.loadImage", _uploadedDataUrl);
+
+            // Run the selected cleanup
+            string? resultDataUrl = mode switch
+            {
+                "smooth"   => await JS.InvokeAsync<string>("faceCleanup.applySkinSmoothing", level),
+                "blemish"  => await JS.InvokeAsync<string>("faceCleanup.removeBlemishes", level),
+                "clearAll" => await JS.InvokeAsync<string>("faceCleanup.clearAllMarks", level),
+                _          => null
+            };
+
+            if (!string.IsNullOrEmpty(resultDataUrl))
+            {
+                _uploadedDataUrl = resultDataUrl;
+                _cleanupApplied = true;
+                _pendingCropInit = true;
+            }
+            else
+            {
+                _errorMessage = "Face cleanup returned no result. Try a different setting.";
+            }
+        }
+        catch (Exception ex)
+        {
+            Logger.LogError(ex, "Face cleanup failed");
+            _errorMessage = "Face cleanup failed: " + ex.Message;
+        }
+        finally
+        {
+            _isCleaning = false;
+            StateHasChanged();
+        }
+    }
+
+    private async Task UndoCleanup()
+    {
+        if (_originalDataUrl is not null)
+        {
+            _uploadedDataUrl = _originalDataUrl;
+            _uploadedPath = _originalPath;
+            _sourceWidth = _originalWidth;
+            _sourceHeight = _originalHeight;
+            _cleanupApplied = false;
+            _pendingCropInit = true;
+            StateHasChanged();
+        }
+    }
+
+    private async Task ApplyCleanup()
+    {
+        if (!_cleanupApplied || string.IsNullOrEmpty(_uploadedDataUrl)) return;
+
+        try
+        {
+            // Save the cleaned-up image as the new source
+            var base64 = _uploadedDataUrl[(_uploadedDataUrl.IndexOf(",") + 1)..];
+            var bytes = Convert.FromBase64String(base64);
+            using var ms = new MemoryStream(bytes);
+            _uploadedPath = await ImageStorage.SaveUploadedFileAsync(ms, "cleaned.png");
+
+            // Update originals so crop reset uses cleaned version
+            _originalDataUrl = _uploadedDataUrl;
+            _originalPath = _uploadedPath;
+            _cleanupApplied = false;
+            _pendingCropInit = true;
+        }
+        catch (Exception ex)
+        {
+            Logger.LogError(ex, "Apply cleanup failed");
+            _errorMessage = "Failed to apply cleanup: " + ex.Message;
+        }
+        StateHasChanged();
+    }
+
     // ── Gemini AI Enhancement (tiled to preserve layout) ──
 
     private async Task EnhanceImage()
@@ -422,6 +605,90 @@
         {
             Logger.LogError(ex, "Enhancement failed");
             _errorMessage = "Enhancement failed: " + ex.Message;
+        }
+        finally
+        {
+            _isProcessing = false;
+            _processingStatus = "";
+            StateHasChanged();
+        }
+    }
+
+    // ── AI SmartClean (Gemini-powered face mark removal) ──
+
+    private async Task SmartCleanImage()
+    {
+        if (string.IsNullOrEmpty(_uploadedPath)) return;
+
+        // Auto-apply crop before processing
+        try
+        {
+            var cropResult = await JS.InvokeAsync<CropResult>("autoCrop.applyCrop");
+            if (cropResult is not null && !string.IsNullOrEmpty(cropResult.DataUrl))
+            {
+                _uploadedDataUrl = cropResult.DataUrl;
+                _sourceWidth = cropResult.Width;
+                _sourceHeight = cropResult.Height;
+
+                var base64c = cropResult.DataUrl[(cropResult.DataUrl.IndexOf(",") + 1)..];
+                var bytesC = Convert.FromBase64String(base64c);
+                using var msC = new MemoryStream(bytesC);
+                _uploadedPath = await ImageStorage.SaveUploadedFileAsync(msC, "cropped.png");
+            }
+        }
+        catch (Exception ex)
+        {
+            Logger.LogWarning(ex, "Auto-crop skipped");
+        }
+
+        // Debit coins
+        var authStateS = await AuthState.GetAuthenticationStateAsync();
+        var uidStrS = authStateS.User.FindFirstValue(System.Security.Claims.ClaimTypes.NameIdentifier);
+        if (int.TryParse(uidStrS, out var userIdS) && !authStateS.User.IsInRole("SuperAdmin"))
+        {
+            var cost = ArtForgeAI.Models.FeatureAccess.GetCost("AutoEnhance");
+            if (!await CoinService.DebitCoinsAsync(userIdS, cost, ArtForgeAI.Models.CoinTransactionType.GenerationSpend, "SmartClean"))
+            {
+                _errorMessage = "Insufficient coins. Please top up to continue.";
+                StateHasChanged();
+                return;
+            }
+        }
+
+        _isProcessing = true;
+        _processingStatus = "AI is analyzing your face...";
+        _errorMessage = null;
+        _resultReady = false;
+        StateHasChanged();
+
+        try
+        {
+            var fullPath = ResolveFullPath(_uploadedPath);
+            var imageBytes = await File.ReadAllBytesAsync(fullPath);
+
+            var progress = new Progress<(int current, int total, string status)>(p =>
+            {
+                _processingStatus = p.status;
+                InvokeAsync(StateHasChanged);
+            });
+
+            var enhancedBytes = await TiledEnhancer.SmartCleanAsync(
+                imageBytes, _sourceWidth, _sourceHeight, progress);
+
+            var outputFileName = $"sc_{Guid.NewGuid():N}.png";
+            _enhancedImagePath = await ImageStorage.SaveImageFromBytesAsync(
+                BinaryData.FromBytes(enhancedBytes), outputFileName);
+
+            _enhancedWidth = _sourceWidth;
+            _enhancedHeight = _sourceHeight;
+            _enhancedDataUrl = "data:image/png;base64," + Convert.ToBase64String(enhancedBytes);
+            _resultReady = true;
+            _pendingCompareInit = true;
+        }
+        catch (Exception ex)
+        {
+            Logger.LogError(ex, "SmartClean failed");
+            _errorMessage = "SmartClean failed: " + ex.Message;
         }
         finally
         {

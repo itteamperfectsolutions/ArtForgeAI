@@ -137,4 +137,112 @@ public class TiledGeminiEnhanceService
             return resultMs.ToArray();
         }
     }
+
+    /// <summary>
+    /// AI-powered face cleanup — removes acne, blemishes, dark spots while preserving
+    /// natural face features and skin texture. Uses Gemini with a skin-cleanup prompt.
+    /// </summary>
+    public async Task<byte[]> SmartCleanAsync(
+        byte[] sourceBytes,
+        int sourceWidth,
+        int sourceHeight,
+        IProgress<(int current, int total, string status)>? progress = null)
+    {
+        progress?.Report((0, 3, "Preparing image for AI SmartClean..."));
+
+        using var source = Image.Load<Rgba32>(sourceBytes);
+
+        // Calculate shrink dimensions preserving aspect ratio
+        double scale = 1.0;
+        int maxDim = Math.Max(sourceWidth, sourceHeight);
+        if (maxDim > MaxSendDimension)
+            scale = (double)MaxSendDimension / maxDim;
+
+        int sendWidth = Math.Max(2, (int)Math.Round(sourceWidth * scale));
+        int sendHeight = Math.Max(2, (int)Math.Round(sourceHeight * scale));
+
+        _logger.LogInformation(
+            "SmartClean: {OrigW}x{OrigH} -> shrink to {SendW}x{SendH} (scale {Scale:F3})",
+            sourceWidth, sourceHeight, sendWidth, sendHeight, scale);
+
+        // Shrink the image for sending
+        byte[] sendBytes;
+        if (scale < 1.0)
+        {
+            using var shrunk = source.Clone(ctx => ctx.Resize(new ResizeOptions
+            {
+                Size = new Size(sendWidth, sendHeight),
+                Mode = ResizeMode.Stretch,
+                Sampler = KnownResamplers.Lanczos3
+            }));
+            using var ms = new MemoryStream();
+            shrunk.SaveAsPng(ms, new PngEncoder { CompressionLevel = PngCompressionLevel.BestSpeed });
+            sendBytes = ms.ToArray();
+        }
+        else
+        {
+            using var ms = new MemoryStream();
+            source.SaveAsPng(ms, new PngEncoder { CompressionLevel = PngCompressionLevel.BestSpeed });
+            sendBytes = ms.ToArray();
+        }
+
+        progress?.Report((1, 3, "AI is removing face marks & smoothing skin..."));
+
+        const string smartCleanPrompt =
+            "Clean up this face photo. " +
+            "Remove all acne, pimples, blemishes, dark spots, blackheads, whiteheads, acne scars, and skin marks from the face. " +
+            "Smooth the skin naturally while preserving skin texture — do NOT make it look plastic or airbrushed. " +
+            "Even out skin tone and reduce redness/discoloration. " +
+            "MANDATORY: Keep EXACTLY the same face shape, facial features (eyes, eyebrows, nose, mouth, ears), " +
+            "hair, expression, pose, background, clothing, and lighting. Do NOT change anything except skin imperfections. " +
+            "The result should look like the same person with naturally clear, healthy skin.";
+
+        byte[]? cleanedBytes = null;
+        try
+        {
+            var (_, resultBytes) = await _gemini.EditImageAsync(
+                smartCleanPrompt,
+                new List<(byte[] data, string mimeType)> { (sendBytes, "image/png") },
+                sendWidth, sendHeight);
+
+            if (resultBytes is { Length: > 0 })
+                cleanedBytes = resultBytes;
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(ex, "Gemini SmartClean failed, returning original");
+        }
+
+        progress?.Report((2, 3, "Finalizing result..."));
+
+        Image<Rgba32> result;
+        if (cleanedBytes != null)
+        {
+            result = Image.Load<Rgba32>(cleanedBytes);
+        }
+        else
+        {
+            // Fallback: return sharpened original
+            result = source.Clone(ctx => ctx.GaussianSharpen(1.5f));
+        }
+
+        using (result)
+        {
+            if (result.Width != sourceWidth || result.Height != sourceHeight)
+            {
+                result.Mutate(ctx => ctx.Resize(new ResizeOptions
+                {
+                    Size = new Size(sourceWidth, sourceHeight),
+                    Mode = ResizeMode.Stretch,
+                    Sampler = KnownResamplers.Lanczos3
+                }));
+            }
+
+            progress?.Report((3, 3, "Saving clean result..."));
+
+            using var resultMs = new MemoryStream();
+            result.SaveAsPng(resultMs);
+            return resultMs.ToArray();
+        }
+    }
 }

@@ -1,67 +1,104 @@
-/* ===== ArtForge AI Theme Variables ===== */
+/* ===== ArtForge AI — Tactile Maximalism Theme (2026) ===== */
+/* Clean whites, hyper-color accents, 3D squishy depth, 60-30-10 rule */
 
 :root {
-    /* Light Theme */
-    --bg-primary: #f8f9fc;
+    /* ── 60% Base: Clean white / very light gray ── */
+    --bg-primary: #f7f8fa;
     --bg-secondary: #ffffff;
-    --bg-tertiary: #f0f1f5;
+    --bg-tertiary: #eef0f4;
     --bg-card: #ffffff;
     --bg-sidebar: #ffffff;
-    --bg-input: #f0f1f5;
-    --bg-overlay: rgba(0, 0, 0, 0.5);
+    --bg-input: #f2f3f7;
+    --bg-overlay: rgba(10, 10, 30, 0.5);
 
-    --text-primary: #1a1d2e;
+    /* ── 30% Secondary: Cool neutral text ── */
+    --text-primary: #111827;
     --text-secondary: #6b7280;
     --text-muted: #9ca3af;
 
+    /* ── Borders: subtle, clean ── */
     --border-color: #e5e7eb;
     --border-light: #f0f1f5;
+    --border-bold: #d1d5db;
 
+    /* ── 10% Accent: Hyper electric blue-pink ── */
     --accent-primary: #6366f1;
-    --accent-secondary: #8b5cf6;
-    --accent-gradient: linear-gradient(135deg, #6366f1, #8b5cf6);
-    --accent-gradient-hover: linear-gradient(135deg, #5558e6, #7c4fed);
-    --accent-glow: rgba(99, 102, 241, 0.3);
+    --accent-secondary: #ec4899;
+    --accent-tertiary: #06b6d4;
+    --accent-gradient: linear-gradient(135deg, #6366f1, #8b5cf6, #ec4899);
+    --accent-gradient-hover: linear-gradient(135deg, #4f46e5, #7c3aed, #db2777);
+    --accent-glow: rgba(99, 102, 241, 0.35);
+    --accent-glow-pink: rgba(236, 72, 153, 0.3);
+    --accent-glow-cyan: rgba(6, 182, 212, 0.3);
 
     --success: #10b981;
     --warning: #f59e0b;
     --danger: #ef4444;
 
-    --shadow-sm: 0 1px 3px rgba(0, 0, 0, 0.06);
-    --shadow-md: 0 4px 12px rgba(0, 0, 0, 0.08);
-    --shadow-lg: 0 8px 30px rgba(0, 0, 0, 0.12);
-    --shadow-xl: 0 20px 60px rgba(0, 0, 0, 0.15);
+    /* ── 3D Squishy Shadows: multi-layered for inflatable/clay depth ── */
+    --shadow-sm: 0 1px 2px rgba(0, 0, 0, 0.05);
+    --shadow-md: 0 4px 6px -1px rgba(0, 0, 0, 0.07), 0 2px 4px -2px rgba(0, 0, 0, 0.05);
+    --shadow-lg: 0 10px 15px -3px rgba(0, 0, 0, 0.08), 0 4px 6px -4px rgba(0, 0, 0, 0.05);
+    --shadow-xl: 0 20px 25px -5px rgba(0, 0, 0, 0.1), 0 8px 10px -6px rgba(0, 0, 0, 0.06);
 
-    --radius-sm: 8px;
-    --radius-md: 12px;
-    --radius-lg: 16px;
-    --radius-xl: 24px;
+    /* 3D button shadows — creates raised/squishy look */
+    --shadow-3d: 0 4px 0 rgba(0, 0, 0, 0.12), 0 6px 16px rgba(0, 0, 0, 0.08);
+    --shadow-3d-hover: 0 6px 0 rgba(0, 0, 0, 0.12), 0 10px 24px rgba(0, 0, 0, 0.1);
+    --shadow-3d-active: 0 1px 0 rgba(0, 0, 0, 0.12), 0 2px 4px rgba(0, 0, 0, 0.06);
 
-    --transition-fast: 150ms ease;
-    --transition-normal: 250ms ease;
-    --transition-slow: 400ms ease;
+    /* Glossy inner highlight for chrome/glass feel */
+    --gloss-highlight: inset 0 1px 0 rgba(255, 255, 255, 0.5), inset 0 -1px 0 rgba(0, 0, 0, 0.05);
+    --gloss-highlight-strong: inset 0 2px 0 rgba(255, 255, 255, 0.6), inset 0 -2px 0 rgba(0, 0, 0, 0.08);
+
+    /* ── Rounded: generous radii for friendly/squishy feel ── */
+    --radius-sm: 10px;
+    --radius-md: 14px;
+    --radius-lg: 20px;
+    --radius-xl: 28px;
+    --radius-pill: 999px;
+
+    /* ── Smooth Transitions with subtle bounce ── */
+    --transition-fast: 150ms cubic-bezier(0.4, 0, 0.2, 1);
+    --transition-normal: 250ms cubic-bezier(0.4, 0, 0.2, 1);
+    --transition-slow: 400ms cubic-bezier(0.4, 0, 0.2, 1);
+    --transition-bounce: 500ms cubic-bezier(0.34, 1.56, 0.64, 1);
+    --transition-spring: 600ms cubic-bezier(0.175, 0.885, 0.32, 1.275);
 }
 
 [data-theme="dark"] {
-    --bg-primary: #0f1117;
-    --bg-secondary: #1a1d2e;
-    --bg-tertiary: #252836;
-    --bg-card: #1a1d2e;
-    --bg-sidebar: #141620;
-    --bg-input: #252836;
+    /* ── 60% Base: Deep clean dark ── */
+    --bg-primary: #0c0d12;
+    --bg-secondary: #16171f;
+    --bg-tertiary: #1e2028;
+    --bg-card: #16171f;
+    --bg-sidebar: #111219;
+    --bg-input: #1e2028;
     --bg-overlay: rgba(0, 0, 0, 0.7);
 
+    /* ── 30% Secondary ── */
     --text-primary: #f1f5f9;
-    --text-secondary: #b0bec5;
-    --text-muted: #8896a4;
+    --text-secondary: #94a3b8;
+    --text-muted: #64748b;
 
-    --border-color: #2d3148;
-    --border-light: #252836;
+    --border-color: #2a2d3a;
+    --border-light: #1e2028;
+    --border-bold: #3b3f50;
 
-    --accent-glow: rgba(99, 102, 241, 0.4);
+    /* ── Accent glows brighter in dark ── */
+    --accent-glow: rgba(99, 102, 241, 0.5);
+    --accent-glow-pink: rgba(236, 72, 153, 0.4);
+    --accent-glow-cyan: rgba(6, 182, 212, 0.4);
 
-    --shadow-sm: 0 1px 3px rgba(0, 0, 0, 0.2);
-    --shadow-md: 0 4px 12px rgba(0, 0, 0, 0.3);
-    --shadow-lg: 0 8px 30px rgba(0, 0, 0, 0.4);
-    --shadow-xl: 0 20px 60px rgba(0, 0, 0, 0.5);
+    /* ── Dark 3D shadows ── */
+    --shadow-sm: 0 1px 2px rgba(0, 0, 0, 0.3);
+    --shadow-md: 0 4px 6px rgba(0, 0, 0, 0.35), 0 2px 4px rgba(0, 0, 0, 0.2);
+    --shadow-lg: 0 10px 15px rgba(0, 0, 0, 0.4), 0 4px 6px rgba(0, 0, 0, 0.25);
+    --shadow-xl: 0 20px 25px rgba(0, 0, 0, 0.45), 0 8px 10px rgba(0, 0, 0, 0.3);
+
+    --shadow-3d: 0 4px 0 rgba(0, 0, 0, 0.35), 0 6px 16px rgba(0, 0, 0, 0.25);
+    --shadow-3d-hover: 0 6px 0 rgba(0, 0, 0, 0.35), 0 10px 24px rgba(0, 0, 0, 0.3);
+    --shadow-3d-active: 0 1px 0 rgba(0, 0, 0, 0.35), 0 2px 4px rgba(0, 0, 0, 0.2);
+
+    --gloss-highlight: inset 0 1px 0 rgba(255, 255, 255, 0.1), inset 0 -1px 0 rgba(0, 0, 0, 0.2);
+    --gloss-highlight-strong: inset 0 2px 0 rgba(255, 255, 255, 0.12), inset 0 -2px 0 rgba(0, 0, 0, 0.25);
 }

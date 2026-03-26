@@ -1,0 +1,1000 @@
+@page "/bg-studio"
+@rendermode InteractiveServer
+@attribute [Authorize]
+@using SixLabors.ImageSharp
+@using SixLabors.ImageSharp.PixelFormats
+@using SixLabors.ImageSharp.Processing
+@using SixLabors.ImageSharp.Formats.Png
+@inject IBackgroundRemovalService BgService
+@inject RemoveBgService GeminiBgService
+@inject RemoveBgApiService RemoveBgApi
+@inject BriaRmbgService BriaService
+@inject IsNetBgService IsNetService
+@inject BiRefNetBgService BiRefNetService
+@inject PythonBgSidecarService PySidecar
+@inject IImageStorageService ImageStorage
+@inject IJSRuntime JS
+@inject IWebHostEnvironment Env
+@inject ILogger<BgStudio> Logger
+@inject ISubscriptionService SubscriptionService
+@inject ICoinService CoinService
+@inject AuthenticationStateProvider AuthState
+@inject NavigationManager Nav
+
+<PageTitle>ArtForge AI - BG Studio</PageTitle>
+
+<div class="page-header page-header-lg">
+    <h2>BG Studio</h2>
+    <p>Remove, replace &amp; recolor backgrounds &mdash; transparent, solid colors, gradients &amp; custom backgrounds</p>
+</div>
+
+<div class="create-layout">
+    @* ── Left column ── *@
+    <div class="create-left">
+        <div class="card">
+            <div class="card-body">
+
+                @* Upload *@
+                <div class="mb-3">
+                    <label class="form-label">Upload Image</label>
+                    @if (!string.IsNullOrEmpty(_uploadedPath))
+                    {
+                        <div style="position:relative;">
+                            <button class="ref-thumb-remove" @onclick="RemovePhoto" disabled="@_isProcessing"
+                                    style="position:absolute;top:4px;right:4px;z-index:20;">&#10005;</button>
+                            <img src="@_uploadedDataUrl" alt="Uploaded"
+                                 style="width:100%;border-radius:8px;object-fit:contain;max-height:250px;background:var(--bg-secondary);" />
+                        </div>
+                        @if (_sourceWidth > 0)
+                        {
+                            <p style="font-size:0.72rem;color:var(--text-muted);margin:0.35rem 0 0 0;">
+                                Source: @(_sourceWidth)&times;@(_sourceHeight) px
+                            </p>
+                        }
+                    }
+                    else
+                    {
+                        <label class="upload-area upload-area-compact @(_isUploading ? "disabled" : "")">
+                            <span class="upload-icon">&#9986;</span>
+                            <span>Upload a photo</span>
+                            <span style="font-size:0.7rem;color:var(--text-muted);margin-left:0.5rem;">JPG, PNG up to 10MB</span>
+                            <InputFile OnChange="HandleFileUpload" accept="image/*;capture=camera"
+                                       style="display:none" disabled="@(_isProcessing || _isUploading)" />
+                        </label>
+                    }
+                    @if (_isUploading)
+                    {
+                        <div class="upload-progress-bar" style="margin-top:0.35rem;">
+                            <div class="upload-progress-fill" style="width:50%"></div>
+                            <span class="upload-progress-text">Uploading...</span>
+                        </div>
+                    }
+                </div>
+
+                @if (!string.IsNullOrEmpty(_uploadedPath))
+                {
+                    <hr style="margin:0.5rem 0;border-color:var(--border-color);" />
+
+                    @* ── Removal Method ── *@
+                    <div class="mb-3">
+                        <label class="form-label">Removal Method</label>
+                        <select class="form-select" @bind="_method" disabled="@_isProcessing"
+                                style="font-size:0.82rem;">
+                            <optgroup label="PyTorch Models (Best Quality)">
+                                <option value="py_bria">BRIA RMBG 1.4 (PyTorch - Best)</option>
+                                <option value="py_birefnet">BiRefNet (PyTorch - State-of-art)</option>
+                            </optgroup>
+                            <optgroup label="Cloud APIs">
+                                <option value="removebg">remove.bg API (Canva quality)</option>
+                                <option value="ai">Gemini AI (Complex scenes)</option>
+                            </optgroup>
+                            <optgroup label="ONNX Models (Local)">
+                                <option value="bria">BRIA RMBG 2.0 (ONNX)</option>
+                                <option value="birefnet">BiRefNet (ONNX)</option>
+                                <option value="isnet">IS-Net DIS (ONNX)</option>
+                                <option value="pipeline">U²-Net + MODNet Pipeline</option>
+                                <option value="local">U²-Net Basic (Fastest)</option>
+                            </optgroup>
+                        </select>
+                        <p style="font-size:0.65rem;color:var(--text-muted);margin-top:0.2rem;">
+                            @(_method switch {
+                                "py_bria" => "BRIA RMBG 1.4 PyTorch \u2014 excellent quality, non-gated. Auto-starts Python sidecar, downloads from HuggingFace.",
+                                "py_birefnet" => "BiRefNet PyTorch \u2014 state-of-the-art edge quality. Auto-starts Python sidecar.",
+                                "removebg" => "remove.bg API \u2014 industry best, used by Canva. 50 free/month then paid.",
+                                "bria" => "BRIA RMBG 2.0 ONNX \u2014 good quality, runs in .NET. ~176MB model auto-downloads.",
+                                "birefnet" => "BiRefNet ONNX \u2014 salient object detection in .NET. ~228MB model auto-downloads.",
+                                "isnet" => "IS-Net (DIS) ONNX \u2014 fine details: hair, fur, lace. ~176MB model auto-downloads.",
+                                "ai" => "Gemini AI \u2014 uses AI to understand the scene. Great for complex/cluttered backgrounds.",
+                                "pipeline" => "U\u00B2-Net + MODNet pipeline \u2014 dual-model with alpha matting for hair/fur edges.",
+                                "local" => "U\u00B2-Net only \u2014 fastest, ~4.7MB model. Good for simple subjects.",
+                                _ => ""
+                            })
+                        </p>
+                    </div>
+
+                    <hr style="margin:0.5rem 0;border-color:var(--border-color);" />
+
+                    @* ── Background Type ── *@
+                    <div class="mb-3">
+                        <label class="form-label">Background Type</label>
+                        <div class="ns-type-pills">
+                            <button class="ns-pill @(_bgType == "transparent" ? "selected" : "")"
+                                    @onclick='() => SetBgType("transparent")' disabled="@_isProcessing">
+                                &#9744; Transparent
+                            </button>
+                            <button class="ns-pill @(_bgType == "solid" ? "selected" : "")"
+                                    @onclick='() => SetBgType("solid")' disabled="@_isProcessing">
+                                &#127912; Solid Color
+                            </button>
+                            <button class="ns-pill @(_bgType == "gradient" ? "selected" : "")"
+                                    @onclick='() => SetBgType("gradient")' disabled="@_isProcessing">
+                                &#127752; Gradient
+                            </button>
+                        </div>
+                    </div>
+
+                    @* ── Color Swatches (Solid) ── *@
+                    @if (_bgType == "solid")
+                    {
+                        <div class="mb-3">
+                            <label class="form-label" style="font-size:0.78rem;">Pick a Color</label>
+                            <div class="bg-swatch-grid">
+                                @foreach (var swatch in _colorSwatches)
+                                {
+                                    <button class="bg-swatch @(_selectedColor == swatch.Hex ? "selected" : "")"
+                                            style="background:@swatch.Hex;" title="@swatch.Name"
+                                            @onclick="() => _selectedColor = swatch.Hex" disabled="@_isProcessing">
+                                        @if (_selectedColor == swatch.Hex) { <span>&#10003;</span> }
+                                    </button>
+                                }
+                            </div>
+                            <div style="display:flex;align-items:center;gap:0.5rem;margin-top:0.4rem;">
+                                <label style="font-size:0.72rem;color:var(--text-muted);white-space:nowrap;">Custom:</label>
+                                <input type="color" @bind="_selectedColor"
+                                       style="width:40px;height:28px;padding:1px;border:1px solid var(--border-color);border-radius:4px;cursor:pointer;background:transparent;" />
+                                <span style="font-size:0.72rem;color:var(--text-muted);">@_selectedColor</span>
+                            </div>
+                        </div>
+                    }
+
+                    @* ── Gradient Options ── *@
+                    @if (_bgType == "gradient")
+                    {
+                        <div class="mb-3">
+                            <label class="form-label" style="font-size:0.78rem;">Gradient Preset</label>
+                            <div class="bg-swatch-grid">
+                                @foreach (var grad in _gradientPresets)
+                                {
+                                    <button class="bg-swatch bg-swatch-wide @(_selectedGradient == grad.Css ? "selected" : "")"
+                                            style="background:@grad.Css;" title="@grad.Name"
+                                            @onclick="() => _selectedGradient = grad.Css" disabled="@_isProcessing">
+                                        @if (_selectedGradient == grad.Css) { <span>&#10003;</span> }
+                                    </button>
+                                }
+                            </div>
+                            <div style="display:flex;gap:0.4rem;align-items:center;margin-top:0.4rem;">
+                                <label style="font-size:0.72rem;color:var(--text-muted);">From:</label>
+                                <input type="color" @bind="_gradColor1"
+                                       style="width:32px;height:24px;padding:1px;border:1px solid var(--border-color);border-radius:4px;cursor:pointer;background:transparent;" />
+                                <label style="font-size:0.72rem;color:var(--text-muted);">To:</label>
+                                <input type="color" @bind="_gradColor2"
+                                       style="width:32px;height:24px;padding:1px;border:1px solid var(--border-color);border-radius:4px;cursor:pointer;background:transparent;" />
+                                <select class="form-select" style="width:auto;font-size:0.72rem;padding:0.15rem 0.3rem;" @bind="_gradDirection">
+                                    <option value="to bottom">Top to Bottom</option>
+                                    <option value="to right">Left to Right</option>
+                                    <option value="to bottom right">Diagonal</option>
+                                    <option value="circle">Radial</option>
+                                </select>
+                                <button class="btn-secondary" style="font-size:0.68rem;padding:0.2rem 0.5rem;"
+                                        @onclick="ApplyCustomGradient">Apply</button>
+                            </div>
+                        </div>
+                    }
+
+                    <hr style="margin:0.5rem 0;border-color:var(--border-color);" />
+
+                    @* ── Process Button ── *@
+                    <button class="btn-primary-gradient w-100" @onclick="ProcessImage" disabled="@_isProcessing"
+                            style="margin-top:0.25rem;">
+                        @if (_isProcessing)
+                        {
+                            <span class="loading-spinner" style="width:16px;height:16px;margin-right:0.4rem;display:inline-block;vertical-align:middle;"></span>
+                            <span>@_processingStatus</span>
+                        }
+                        else
+                        {
+                            <span>&#9986; Remove Background</span>
+                        }
+                    </button>
+
+                    @* ── Re-apply BG to existing result ── *@
+                    @if (_resultTransparentBytes is not null && !_isProcessing)
+                    {
+                        <button class="btn-secondary w-100" style="margin-top:0.35rem;font-size:0.8rem;"
+                                @onclick="ReapplyBackground" disabled="@_isProcessing">
+                            &#127912; Re-apply Background (No re-process)
+                        </button>
+                        <p style="font-size:0.65rem;color:var(--text-muted);margin-top:0.15rem;">
+                            Change color/gradient without re-running AI. Uses the already-extracted subject.
+                        </p>
+                    }
+                }
+
+                @if (!string.IsNullOrEmpty(_errorMessage))
+                {
+                    <div class="card" style="border-left:3px solid var(--danger);margin-top:0.75rem;">
+                        <div class="card-body" style="padding:0.6rem 0.8rem;">
+                            <span style="color:var(--danger);font-size:0.8rem;">Error: @_errorMessage</span>
+                        </div>
+                    </div>
+                }
+            </div>
+        </div>
+    </div>
+
+    @* ── Right column — Result ── *@
+    <div class="create-right" style="overflow-y:auto;">
+        @if (_hasResult)
+        {
+            <div class="card">
+                <div class="card-body" style="text-align:center;">
+                    <h4 style="margin-bottom:0.5rem;font-size:0.9rem;color:var(--text-secondary);">RESULT</h4>
+
+                    @* Preview with checkerboard for transparency *@
+                    <div style="display:inline-block;border-radius:8px;overflow:hidden;border:1px solid var(--border-color);
+                                background:@(_bgType == "transparent"
+                                    ? "repeating-conic-gradient(#e0e0e0 0% 25%, #fff 0% 50%) 0 0 / 16px 16px"
+                                    : _bgType == "gradient" ? _selectedGradient : _selectedColor);">
+                        <img src="@($"/{_displayPath}?v={_imgVersion}")" alt="Result"
+                             style="max-width:100%;max-height:55vh;display:block;" />
+                    </div>
+
+                    @if (_resultWidth > 0)
+                    {
+                        <p style="font-size:0.72rem;color:var(--text-muted);margin:0.5rem 0 0 0;">
+                            @(_resultWidth)&times;@(_resultHeight) px &mdash; @_methodUsed &mdash; @(_processingTime.ToString("F1"))s
+                        </p>
+                    }
+
+                    @* DPI *@
+                    <div style="display:flex;align-items:center;gap:0.4rem;margin-top:0.6rem;justify-content:center;">
+                        <label style="font-size:0.78rem;color:var(--text-muted);">Print DPI:</label>
+                        <select class="form-select" style="width:auto;font-size:0.8rem;padding:0.25rem 0.5rem;" @bind="_selectedDpi">
+                            <option value="300">300 DPI</option>
+                            <option value="600">600 DPI</option>
+                            <option value="1200">1200 DPI</option>
+                        </select>
+                    </div>
+
+                    @* Download buttons *@
+                    <div style="display:flex;gap:0.4rem;justify-content:center;flex-wrap:wrap;margin-top:0.5rem;">
+                        <button class="btn-primary-gradient" style="font-size:0.82rem;padding:0.4rem 0.8rem;"
+                                @onclick="DownloadTransparent" disabled="@_isDownloading">
+                            &#11015; Transparent PNG
+                        </button>
+                        @if (_bgType != "transparent")
+                        {
+                            <button class="btn-secondary" style="font-size:0.82rem;padding:0.4rem 0.8rem;"
+                                    @onclick="DownloadWithBackground" disabled="@_isDownloading">
+                                &#11015; With Background
+                            </button>
+                        }
+                        <button class="btn-secondary" style="font-size:0.82rem;padding:0.4rem 0.8rem;"
+                                @onclick="DownloadCutLine" disabled="@_isDownloading">
+                            &#9986; Cut Line
+                        </button>
+                        <button class="btn-secondary" style="font-size:0.82rem;padding:0.4rem 0.8rem;"
+                                @onclick="CreateAnother">
+                            &#10227; New Image
+                        </button>
+                    </div>
+
+                    @if (_isDownloading)
+                    {
+                        <div class="upload-progress-bar" style="margin-top:0.5rem;">
+                            <div class="upload-progress-fill" style="width:@(_downloadPct)%"></div>
+                            <span class="upload-progress-text">@_downloadStatus</span>
+                        </div>
+                    }
+
+                    <div style="font-size:0.68rem;color:var(--text-muted);margin-top:0.75rem;">
+                        AI-generated mask &mdash; edge quality depends on image complexity.
+                    </div>
+                </div>
+            </div>
+        }
+        else if (!string.IsNullOrEmpty(_uploadedPath) && !_isProcessing)
+        {
+            <div class="card" style="text-align:center;padding:3rem 1rem;color:var(--text-muted);">
+                <span style="font-size:2.5rem;">&#9986;</span>
+                <p style="margin-top:0.5rem;">Choose a method &amp; background, then click "Remove Background"</p>
+            </div>
+        }
+    </div>
+</div>
+
+@* Processing overlay *@
+@if (_isProcessing)
+{
+    <div class="pp-processing-overlay">
+        <div class="pp-processing-modal">
+            <div class="processing-spinner" style="width:36px;height:36px;margin:0 auto 1rem;"></div>
+            <p style="margin:0;font-size:0.95rem;color:var(--text-primary);">@_processingStatus</p>
+        </div>
+    </div>
+}
+
+@code {
+    // ── State ──
+    private string? _uploadedPath;
+    private string? _uploadedDataUrl;
+    private int _sourceWidth, _sourceHeight;
+    private bool _isUploading;
+    private bool _isProcessing;
+    private string _processingStatus = "";
+    private string? _errorMessage;
+
+    // Options
+    private string _method = "py_bria";
+    private string _bgType = "transparent";
+    private string _selectedColor = "#FFFFFF";
+    private string _selectedGradient = "linear-gradient(to bottom, #667eea, #764ba2)";
+    private string _gradColor1 = "#667eea";
+    private string _gradColor2 = "#764ba2";
+    private string _gradDirection = "to bottom";
+    private int _selectedDpi = 300;
+
+    // Result
+    private bool _hasResult;
+    private string? _displayPath;
+    private string? _resultTransparentPath;
+    private string? _resultColoredPath;
+    private byte[]? _resultTransparentBytes;
+    private int _resultWidth, _resultHeight;
+    private long _imgVersion;
+    private string _methodUsed = "";
+    private double _processingTime;
+
+    // Download
+    private bool _isDownloading;
+    private int _downloadPct;
+    private string _downloadStatus = "";
+
+    // ── Color Swatches ──
+    private record ColorSwatch(string Name, string Hex);
+    private static readonly ColorSwatch[] _colorSwatches =
+    [
+        new("White",       "#FFFFFF"),
+        new("Black",       "#000000"),
+        new("Light Gray",  "#D1D5DB"),
+        new("Dark Gray",   "#374151"),
+        new("Red",         "#EF4444"),
+        new("Rose",        "#F43F5E"),
+        new("Pink",        "#EC4899"),
+        new("Fuchsia",     "#D946EF"),
+        new("Purple",      "#A855F7"),
+        new("Violet",      "#8B5CF6"),
+        new("Indigo",      "#6366F1"),
+        new("Blue",        "#3B82F6"),
+        new("Sky",         "#0EA5E9"),
+        new("Cyan",        "#06B6D4"),
+        new("Teal",        "#14B8A6"),
+        new("Emerald",     "#10B981"),
+        new("Green",       "#22C55E"),
+        new("Lime",        "#84CC16"),
+        new("Yellow",      "#EAB308"),
+        new("Amber",       "#F59E0B"),
+        new("Orange",      "#F97316"),
+        new("Coral",       "#FF6B6B"),
+        new("Cream",       "#FFFDD0"),
+        new("Beige",       "#F5F5DC"),
+        new("Ivory",       "#FFFFF0"),
+        new("Navy",        "#1E3A5F"),
+        new("Maroon",      "#800000"),
+        new("Olive",       "#808000"),
+        new("Brown",       "#92400E"),
+        new("Pastel Blue", "#BFDBFE"),
+        new("Pastel Pink", "#FBCFE8"),
+        new("Pastel Green","#BBF7D0"),
+        new("Pastel Yellow","#FEF08A"),
+        new("Slate",       "#475569"),
+        new("Charcoal",    "#1F2937"),
+        new("Mint",        "#A7F3D0"),
+        new("Lavender",    "#DDD6FE"),
+    ];
+
+    // ── Gradient Presets ──
+    private record GradientPreset(string Name, string Css, string Color1, string Color2);
+    private static readonly GradientPreset[] _gradientPresets =
+    [
+        new("Purple Haze",    "linear-gradient(to bottom, #667eea, #764ba2)", "#667eea", "#764ba2"),
+        new("Ocean Blue",     "linear-gradient(to bottom, #2193b0, #6dd5ed)", "#2193b0", "#6dd5ed"),
+        new("Sunset",         "linear-gradient(to bottom, #ff512f, #f09819)", "#ff512f", "#f09819"),
+        new("Peach",          "linear-gradient(to bottom, #ffecd2, #fcb69f)", "#ffecd2", "#fcb69f"),
+        new("Cool Gray",      "linear-gradient(to bottom, #e0eafc, #cfdef3)", "#e0eafc", "#cfdef3"),
+        new("Forest",         "linear-gradient(to bottom, #134e5e, #71b280)", "#134e5e", "#71b280"),
+        new("Rose Gold",      "linear-gradient(to bottom, #f4c4f3, #fc67fa)", "#f4c4f3", "#fc67fa"),
+        new("Midnight",       "linear-gradient(to bottom, #232526, #414345)", "#232526", "#414345"),
+        new("Sky",            "linear-gradient(to bottom, #a1c4fd, #c2e9fb)", "#a1c4fd", "#c2e9fb"),
+        new("Warm Flame",     "linear-gradient(to bottom right, #ff9a9e, #fad0c4)", "#ff9a9e", "#fad0c4"),
+        new("Deep Space",     "linear-gradient(to bottom, #000428, #004e92)", "#000428", "#004e92"),
+        new("Cherry Blossom", "linear-gradient(to bottom, #fbc2eb, #a6c1ee)", "#fbc2eb", "#a6c1ee"),
+    ];
+
+    // ── Lifecycle ──
+    protected override async Task OnInitializedAsync()
+    {
+        var authState = await AuthState.GetAuthenticationStateAsync();
+        if (!authState.User.IsInRole("SuperAdmin"))
+        {
+            var userIdStr = authState.User.FindFirstValue(System.Security.Claims.ClaimTypes.NameIdentifier);
+            if (int.TryParse(userIdStr, out var uid))
+            {
+                if (!await SubscriptionService.HasFeatureAccessAsync(uid, FeatureAccess.BackgroundRemoval))
+                {
+                    Nav.NavigateTo("/pricing", forceLoad: true);
+                    return;
+                }
+            }
+        }
+    }
+
+    // ── Helpers ──
+    private void SetBgType(string type) => _bgType = type;
+
+    private void ApplyCustomGradient()
+    {
+        _selectedGradient = _gradDirection == "circle"
+            ? $"radial-gradient(circle, {_gradColor1}, {_gradColor2})"
+            : $"linear-gradient({_gradDirection}, {_gradColor1}, {_gradColor2})";
+    }
+
+    // ── Upload ──
+    private async Task HandleFileUpload(InputFileChangeEventArgs e)
+    {
+        var file = e.File;
+        if (file is null) return;
+
+        _isUploading = true;
+        _errorMessage = null;
+        ResetResult();
+        StateHasChanged();
+
+        try
+        {
+            if (file.Size > ImageUploadHelper.DefaultMaxUploadSize)
+            {
+                if (file.Size > ImageUploadHelper.MaxReadSize)
+                {
+                    _errorMessage = $"File is too large ({ImageUploadHelper.FormatFileSize(file.Size)}). Max: {ImageUploadHelper.FormatFileSize(ImageUploadHelper.MaxReadSize)}.";
+                    return;
+                }
+                using var readMs = new MemoryStream();
+                await file.OpenReadStream(ImageUploadHelper.MaxReadSize).CopyToAsync(readMs);
+                var compressed = ImageUploadHelper.CompressToFit(readMs.ToArray(), file.Name);
+                _uploadedPath = await ImageStorage.SaveUploadedFileAsync(compressed, file.Name);
+            }
+            else
+            {
+                using var stream = file.OpenReadStream(ImageUploadHelper.MaxReadSize);
+                _uploadedPath = await ImageStorage.SaveUploadedFileAsync(stream, file.Name);
+            }
+
+            var fullPath = ResolvePath(_uploadedPath);
+            using var img = Image.Load(fullPath);
+            _sourceWidth = img.Width;
+            _sourceHeight = img.Height;
+            _uploadedDataUrl = $"/{_uploadedPath}";
+        }
+        catch (Exception ex)
+        {
+            Logger.LogError(ex, "Upload failed");
+            _errorMessage = "Upload failed: " + ex.Message;
+        }
+        finally
+        {
+            _isUploading = false;
+            StateHasChanged();
+        }
+    }
+
+    // ── Process ──
+    private async Task ProcessImage()
+    {
+        if (string.IsNullOrEmpty(_uploadedPath) || _isProcessing) return;
+
+        // Debit coins
+        var authState = await AuthState.GetAuthenticationStateAsync();
+        var uidStr = authState.User.FindFirstValue(System.Security.Claims.ClaimTypes.NameIdentifier);
+        if (int.TryParse(uidStr, out var userId) && !authState.User.IsInRole("SuperAdmin"))
+        {
+            var cost = FeatureAccess.GetCost(FeatureAccess.BackgroundRemoval);
+            if (!await CoinService.DebitCoinsAsync(userId, cost, CoinTransactionType.GenerationSpend, "BG Studio"))
+            {
+                _errorMessage = "Insufficient coins. Please purchase more.";
+                StateHasChanged();
+                return;
+            }
+        }
+
+        _isProcessing = true;
+        _processingStatus = "Preparing...";
+        _errorMessage = null;
+        ResetResult();
+        StateHasChanged();
+
+        try
+        {
+            var bgColor = _bgType == "solid" ? _selectedColor : "white";
+            var sw = System.Diagnostics.Stopwatch.StartNew();
+
+            switch (_method)
+            {
+                case "py_bria":
+                    await ProcessWithPython("bria", bgColor);
+                    break;
+                case "py_birefnet":
+                    await ProcessWithPython("birefnet", bgColor);
+                    break;
+                case "removebg":
+                    await ProcessWithRemoveBgApi(bgColor);
+                    break;
+                case "bria":
+                    await ProcessWithBria(bgColor);
+                    break;
+                case "birefnet":
+                    await ProcessWithBiRefNet(bgColor);
+                    break;
+                case "isnet":
+                    await ProcessWithIsNet(bgColor);
+                    break;
+                case "ai":
+                    if (GeminiBgService.IsAvailable)
+                        await ProcessWithGemini(bgColor);
+                    else
+                    {
+                        _errorMessage = "Gemini AI not available (API key missing). Using pipeline instead.";
+                        await InvokeAsync(StateHasChanged);
+                        await ProcessWithPipeline(bgColor);
+                    }
+                    break;
+                case "local":
+                    await ProcessWithLocalOnnx(bgColor);
+                    break;
+                default:
+                    await ProcessWithPipeline(bgColor);
+                    break;
+            }
+
+            sw.Stop();
+            _processingTime = sw.Elapsed.TotalSeconds;
+
+            // If gradient, apply it via canvas on the transparent result
+            if (_bgType == "gradient" && _resultTransparentBytes is not null)
+            {
+                await ApplyGradientBackground();
+            }
+
+            _hasResult = _resultTransparentPath is not null;
+
+            if (!_hasResult)
+            {
+                _errorMessage = "No result was generated. Please try a different method or image.";
+            }
+        }
+        catch (Exception ex)
+        {
+            Logger.LogError(ex, "BG removal failed");
+            _errorMessage = "Processing failed: " + ex.Message;
+        }
+        finally
+        {
+            _isProcessing = false;
+            StateHasChanged();
+        }
+    }
+
+    private async Task ProcessWithPipeline(string bgColor)
+    {
+        _processingStatus = "Running U\u00B2-Net + MODNet pipeline...";
+        _methodUsed = "U\u00B2-Net + MODNet Pipeline";
+        StateHasChanged();
+        _ = RotateStatus(new[] {
+            "Running U\u00B2-Net subject detection...",
+            "Refining edges with MODNet alpha matting...",
+            "Applying edge feathering...",
+            "Generating transparent PNG..."
+        });
+
+        var result = await BgService.RemoveBackgroundAsync(_uploadedPath!, bgColor);
+        SetResult(result);
+    }
+
+    private async Task ProcessWithGemini(string bgColor)
+    {
+        _processingStatus = "Sending to Gemini AI...";
+        _methodUsed = "Gemini AI";
+        StateHasChanged();
+
+        _ = RotateStatus(new[] {
+            "Gemini AI is analyzing the image...",
+            "Isolating the main subject...",
+            "Removing background...",
+            "Generating transparent PNG..."
+        });
+
+        // Use Gemini AI for subject detection + transparent extraction
+        var fullPath = ResolvePath(_uploadedPath!);
+        var imageBytes = await File.ReadAllBytesAsync(fullPath);
+
+        Logger.LogInformation("BG Studio: Starting Gemini AI bg removal, image size: {Size} bytes", imageBytes.Length);
+
+        var smartResult = await GeminiBgService.DetectSubjectAsync(imageBytes);
+
+        Logger.LogInformation("BG Studio: Gemini returned result, transparent bytes: {Len}", smartResult.TransparentPngBytes?.Length ?? 0);
+
+        _resultTransparentPath = smartResult.TransparentImagePath;
+        _resultTransparentBytes = smartResult.TransparentPngBytes;
+        _resultWidth = smartResult.OriginalWidth;
+        _resultHeight = smartResult.OriginalHeight;
+
+        // Generate colored version if needed
+        if (_bgType != "transparent")
+        {
+            _resultColoredPath = await BgService.RecolorBackgroundFromBytesAsync(
+                smartResult.TransparentPngBytes, bgColor);
+            _displayPath = _resultColoredPath;
+        }
+        else
+        {
+            _displayPath = _resultTransparentPath;
+        }
+        _imgVersion++;
+    }
+
+    private async Task ProcessWithLocalOnnx(string bgColor)
+    {
+        _processingStatus = "Running local ONNX U\u00B2-Net...";
+        _methodUsed = "Local ONNX U\u00B2-Net";
+        StateHasChanged();
+        _ = RotateStatus(new[] {
+            "Loading U\u00B2-Net model...",
+            "Detecting subject...",
+            "Generating mask...",
+            "Creating transparent PNG..."
+        });
+
+        var result = await BgService.RemoveBackgroundAsync(_uploadedPath!, bgColor);
+        SetResult(result);
+    }
+
+    private async Task ProcessWithPython(string pyMethod, string bgColor)
+    {
+        var modelName = pyMethod switch { "bria" => "BRIA RMBG 1.4", "birefnet" => "BiRefNet", _ => pyMethod };
+        _processingStatus = $"Starting Python sidecar...";
+        _methodUsed = $"{modelName} (PyTorch)";
+        StateHasChanged();
+
+        _ = RotateStatus(new[] {
+            "Starting Python sidecar server...",
+            $"Loading {modelName} PyTorch model...",
+            "Downloading model weights from HuggingFace (first time only)...",
+            "Processing image...",
+            "Generating transparent PNG..."
+        });
+
+        var fullPath = ResolvePath(_uploadedPath!);
+        var imageBytes = await File.ReadAllBytesAsync(fullPath);
+        var result = await PySidecar.RemoveAndSaveAsync(imageBytes, pyMethod, bgColor);
+        SetResult(result);
+    }
+
+    private async Task ProcessWithRemoveBgApi(string bgColor)
+    {
+        _processingStatus = "Sending to remove.bg API...";
+        _methodUsed = "remove.bg API";
+        StateHasChanged();
+
+        if (!RemoveBgApi.IsAvailable)
+        {
+            _errorMessage = "remove.bg API key not configured. Add RemoveBg:ApiKey to appsettings.json. Get a free key at https://www.remove.bg/api";
+            StateHasChanged();
+            return;
+        }
+
+        var fullPath = ResolvePath(_uploadedPath!);
+        var imageBytes = await File.ReadAllBytesAsync(fullPath);
+        var result = await RemoveBgApi.RemoveAndSaveAsync(imageBytes, bgColor);
+        SetResult(result);
+    }
+
+    private async Task ProcessWithBria(string bgColor)
+    {
+        _processingStatus = "Running BRIA RMBG 2.0...";
+        _methodUsed = "BRIA RMBG 2.0";
+        StateHasChanged();
+        _ = RotateStatus(new[] {
+            "Loading BRIA RMBG 2.0 model...",
+            "Analyzing image...",
+            "Generating segmentation mask...",
+            "Creating transparent PNG..."
+        });
+
+        var fullPath = ResolvePath(_uploadedPath!);
+        var imageBytes = await File.ReadAllBytesAsync(fullPath);
+        var result = await BriaService.RemoveAndSaveAsync(imageBytes, bgColor);
+        SetResult(result);
+    }
+
+    private async Task ProcessWithBiRefNet(string bgColor)
+    {
+        _processingStatus = "Running BiRefNet...";
+        _methodUsed = "BiRefNet";
+        StateHasChanged();
+        _ = RotateStatus(new[] {
+            "Loading BiRefNet model...",
+            "Running bilateral reference network...",
+            "Refining segmentation...",
+            "Creating transparent PNG..."
+        });
+
+        var fullPath = ResolvePath(_uploadedPath!);
+        var imageBytes = await File.ReadAllBytesAsync(fullPath);
+        var result = await BiRefNetService.RemoveAndSaveAsync(imageBytes, bgColor);
+        SetResult(result);
+    }
+
+    private async Task ProcessWithIsNet(string bgColor)
+    {
+        _processingStatus = "Running IS-Net (DIS)...";
+        _methodUsed = "IS-Net DIS";
+        StateHasChanged();
+        _ = RotateStatus(new[] {
+            "Loading IS-Net model...",
+            "Running dichotomous segmentation...",
+            "Processing fine details...",
+            "Creating transparent PNG..."
+        });
+
+        var fullPath = ResolvePath(_uploadedPath!);
+        var imageBytes = await File.ReadAllBytesAsync(fullPath);
+        var result = await IsNetService.RemoveAndSaveAsync(imageBytes, bgColor);
+        SetResult(result);
+    }
+
+    private void SetResult(BackgroundRemovalResult result)
+    {
+        _resultTransparentPath = result.TransparentImagePath;
+        _resultTransparentBytes = result.TransparentPngBytes;
+        _resultColoredPath = result.ColoredImagePath;
+        _displayPath = _bgType == "transparent" ? _resultTransparentPath : _resultColoredPath;
+        _imgVersion++;
+
+        using var resultImg = Image.Load(result.TransparentPngBytes);
+        _resultWidth = resultImg.Width;
+        _resultHeight = resultImg.Height;
+    }
+
+    // ── Re-apply background without re-processing ──
+    private async Task ReapplyBackground()
+    {
+        if (_resultTransparentBytes is null) return;
+
+        _errorMessage = null;
+
+        try
+        {
+            if (_bgType == "transparent")
+            {
+                _displayPath = _resultTransparentPath;
+            }
+            else if (_bgType == "gradient")
+            {
+                await ApplyGradientBackground();
+            }
+            else
+            {
+                // Solid color
+                var newPath = await BgService.RecolorBackgroundFromBytesAsync(_resultTransparentBytes, _selectedColor);
+                _resultColoredPath = newPath;
+                _displayPath = newPath;
+            }
+            _imgVersion++;
+            StateHasChanged();
+        }
+        catch (Exception ex)
+        {
+            Logger.LogError(ex, "Re-apply background failed");
+            _errorMessage = "Failed to re-apply background: " + ex.Message;
+            StateHasChanged();
+        }
+    }
+
+    private async Task ApplyGradientBackground()
+    {
+        if (_resultTransparentBytes is null) return;
+
+        // Parse gradient colors from the selected gradient CSS
+        var (c1, c2) = ParseGradientColors(_selectedGradient);
+        var isRadial = _selectedGradient.Contains("radial");
+
+        using var fg = Image.Load<Rgba32>(_resultTransparentBytes);
+        int w = fg.Width, h = fg.Height;
+
+        using var canvas = new Image<Rgba32>(w, h);
+
+        // Draw gradient background pixel by pixel
+        var color1 = Rgba32.ParseHex(c1);
+        var color2 = Rgba32.ParseHex(c2);
+
+        canvas.ProcessPixelRows(accessor =>
+        {
+            for (int y = 0; y < h; y++)
+            {
+                var row = accessor.GetRowSpan(y);
+                for (int x = 0; x < w; x++)
+                {
+                    float t;
+                    if (isRadial)
+                    {
+                        float cx = w / 2f, cy = h / 2f;
+                        float maxDist = MathF.Sqrt(cx * cx + cy * cy);
+                        float dist = MathF.Sqrt((x - cx) * (x - cx) + (y - cy) * (y - cy));
+                        t = Math.Clamp(dist / maxDist, 0, 1);
+                    }
+                    else if (_selectedGradient.Contains("to right"))
+                    {
+                        t = (float)x / w;
+                    }
+                    else if (_selectedGradient.Contains("to bottom right"))
+                    {
+                        t = ((float)x / w + (float)y / h) / 2f;
+                    }
+                    else // to bottom (default)
+                    {
+                        t = (float)y / h;
+                    }
+
+                    row[x] = new Rgba32(
+                        (byte)(color1.R + (color2.R - color1.R) * t),
+                        (byte)(color1.G + (color2.G - color1.G) * t),
+                        (byte)(color1.B + (color2.B - color1.B) * t),
+                        255);
+                }
+            }
+        });
+
+        // Composite foreground over gradient
+        canvas.ProcessPixelRows(fg, (bgAcc, fgAcc) =>
+        {
+            for (int y = 0; y < h; y++)
+            {
+                var bgRow = bgAcc.GetRowSpan(y);
+                var fgRow = fgAcc.GetRowSpan(y);
+                for (int x = 0; x < w; x++)
+                {
+                    var fgPx = fgRow[x];
+                    if (fgPx.A == 0) continue;
+                    float a = fgPx.A / 255f;
+                    float ia = 1f - a;
+                    bgRow[x] = new Rgba32(
+                        (byte)(fgPx.R * a + bgRow[x].R * ia),
+                        (byte)(fgPx.G * a + bgRow[x].G * ia),
+                        (byte)(fgPx.B * a + bgRow[x].B * ia),
+                        255);
+                }
+            }
+        });
+
+        using var ms = new MemoryStream();
+        canvas.SaveAsPng(ms);
+        var gradPath = await ImageStorage.SaveImageFromBytesAsync(
+            BinaryData.FromBytes(ms.ToArray()), $"bg_grad_{Guid.NewGuid():N}.png");
+
+        _resultColoredPath = gradPath;
+        _displayPath = gradPath;
+    }
+
+    private static (string c1, string c2) ParseGradientColors(string css)
+    {
+        // Extract hex colors from gradient CSS
+        var matches = System.Text.RegularExpressions.Regex.Matches(css, @"#[0-9a-fA-F]{6}");
+        var c1 = matches.Count > 0 ? matches[0].Value : "#667eea";
+        var c2 = matches.Count > 1 ? matches[1].Value : "#764ba2";
+        return (c1, c2);
+    }
+
+    private async Task RotateStatus(string[] messages)
+    {
+        try
+        {
+            for (int i = 1; i < messages.Length && _isProcessing; i++)
+            {
+                await Task.Delay(3000);
+                if (!_isProcessing) break;
+                _processingStatus = messages[i];
+                await InvokeAsync(StateHasChanged);
+            }
+        }
+        catch (OperationCanceledException) { }
+    }
+
+    // ── Downloads ──
+
+    private async Task DownloadTransparent()
+    {
+        if (_resultTransparentBytes is null) return;
+        _isDownloading = true; _downloadPct = 30; _downloadStatus = "Preparing..."; StateHasChanged();
+        try
+        {
+            var dpiBytes = await ImageStorage.EmbedDpiAsync(_resultTransparentBytes, _selectedDpi);
+            _downloadPct = 80; _downloadStatus = "Starting download..."; StateHasChanged();
+            var base64 = Convert.ToBase64String(dpiBytes);
+            await JS.InvokeVoidAsync("downloadFileFromBytes",
+                $"bg_removed_transparent_{_selectedDpi}dpi.png", "image/png", base64);
+            _downloadPct = 100; _downloadStatus = "Done!"; StateHasChanged();
+            await Task.Delay(400);
+        }
+        catch (Exception ex)
+        {
+            Logger.LogError(ex, "Download failed");
+            _errorMessage = "Download failed.";
+        }
+        finally { _isDownloading = false; _downloadPct = 0; StateHasChanged(); }
+    }
+
+    private async Task DownloadWithBackground()
+    {
+        if (_resultColoredPath is null) return;
+        _isDownloading = true; _downloadPct = 30; _downloadStatus = "Preparing..."; StateHasChanged();
+        try
+        {
+            var fullPath = ResolvePath(_resultColoredPath);
+            var rawBytes = await File.ReadAllBytesAsync(fullPath);
+            var dpiBytes = await ImageStorage.EmbedDpiAsync(rawBytes, _selectedDpi);
+            _downloadPct = 80; _downloadStatus = "Starting download..."; StateHasChanged();
+            var base64 = Convert.ToBase64String(dpiBytes);
+            var label = _bgType == "gradient" ? "gradient" : "colored";
+            await JS.InvokeVoidAsync("downloadFileFromBytes",
+                $"bg_{label}_{_selectedDpi}dpi.png", "image/png", base64);
+            _downloadPct = 100; _downloadStatus = "Done!"; StateHasChanged();
+            await Task.Delay(400);
+        }
+        catch (Exception ex)
+        {
+            Logger.LogError(ex, "Download failed");
+            _errorMessage = "Download failed.";
+        }
+        finally { _isDownloading = false; _downloadPct = 0; StateHasChanged(); }
+    }
+
+    private async Task DownloadCutLine()
+    {
+        if (_resultTransparentBytes is null) return;
+        _isDownloading = true; _downloadPct = 40; _downloadStatus = "Generating cut line..."; StateHasChanged();
+        try
+        {
+            var cutLineBytes = await BgService.GenerateCutLineAsync(_resultTransparentBytes);
+            _downloadPct = 80; _downloadStatus = "Starting download..."; StateHasChanged();
+            var base64 = Convert.ToBase64String(cutLineBytes);
+            await JS.InvokeVoidAsync("downloadFileFromBytes",
+                "cut_line.png", "image/png", base64);
+            _downloadPct = 100; _downloadStatus = "Done!"; StateHasChanged();
+            await Task.Delay(400);
+        }
+        catch (Exception ex)
+        {
+            Logger.LogError(ex, "Cut line failed");
+            _errorMessage = "Cut line generation failed.";
+        }
+        finally { _isDownloading = false; _downloadPct = 0; StateHasChanged(); }
+    }
+
+    // ── Reset ──
+    private void RemovePhoto() { ResetResult(); _uploadedPath = null; _uploadedDataUrl = null; _sourceWidth = 0; _sourceHeight = 0; _errorMessage = null; }
+    private void CreateAnother() => RemovePhoto();
+    private void ResetResult() { _hasResult = false; _resultTransparentPath = null; _resultColoredPath = null; _resultTransparentBytes = null; _displayPath = null; _resultWidth = 0; _resultHeight = 0; }
+
+    private string ResolvePath(string webPath) =>
+        Path.Combine(Env.WebRootPath, webPath.Replace("/", Path.DirectorySeparatorChar.ToString()));
+}

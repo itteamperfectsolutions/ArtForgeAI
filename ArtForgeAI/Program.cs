@@ -64,6 +64,18 @@ builder.Services.AddHttpClient<RemoveBgService>(client =>
 // Local ONNX background removal — U-2-Net (singleton — model loaded once, auto-downloads)
 builder.Services.AddSingleton<OnnxBgRemovalService>();
 
+// BG Studio — additional removal models (all singleton, auto-download on first use)
+builder.Services.AddHttpClient<RemoveBgApiService>(client =>
+{
+    client.Timeout = TimeSpan.FromSeconds(60);
+});
+builder.Services.AddSingleton<BriaRmbgService>();   // BRIA RMBG 2.0 (~176MB ONNX)
+builder.Services.AddSingleton<IsNetBgService>();     // IS-Net DIS (~176MB ONNX)
+builder.Services.AddSingleton<BiRefNetBgService>();  // BiRefNet (~228MB ONNX)
+
+// Python sidecar — PyTorch models (BRIA, BiRefNet, InSPyReNet) via local Flask server
+builder.Services.AddHttpClient<PythonBgSidecarService>();
+
 // Local ONNX image enhancement — Real-ESRGAN 4x upscale (singleton — model loaded once)
 builder.Services.AddSingleton<IImageEnhancerService, OnnxImageEnhancerService>();
 
@@ -456,7 +468,7 @@ using (var scope = app.Services.CreateScope())
     }
 
     // ── Seed-version gate: skip heavy style seeding if already done ──
-    const int CURRENT_SEED_VERSION = 1;
+    const int CURRENT_SEED_VERSION = 3;
     var seedAlreadyDone = false;
     try
     {
@@ -700,7 +712,9 @@ using (var scope = app.Services.CreateScope())
                 "SELECT COUNT(*) AS [Value] FROM CollageTemplates WHERE SlotDescriptionsJson LIKE '%blowing candles%' OR SlotDescriptionsJson LIKE '%throwing colorful%' OR SlotDescriptionsJson LIKE '%holding baby shoes%' OR SlotDescriptionsJson LIKE '%candlelit dinner%'").ToListAsync();
             var hasBWStrip = await db.Database.SqlQueryRaw<int>(
                 "SELECT COUNT(*) AS [Value] FROM CollageTemplates WHERE Name = 'B&W Strip Panels'").ToListAsync();
-            if ((oldRows.Count > 0 && oldRows[0] > 0) || (hasBWStrip.Count > 0 && hasBWStrip[0] == 0))
+            var hasQueenPortrait = await db.Database.SqlQueryRaw<int>(
+                "SELECT COUNT(*) AS [Value] FROM CollageTemplates WHERE Name = 'Queen Portrait'").ToListAsync();
+            if ((oldRows.Count > 0 && oldRows[0] > 0) || (hasBWStrip.Count > 0 && hasBWStrip[0] == 0) || (hasQueenPortrait.Count > 0 && hasQueenPortrait[0] == 0))
             {
                 await db.Database.ExecuteSqlRawAsync("DELETE FROM CollageTemplates");
                 needsReseed = true;
@@ -814,9 +828,17 @@ VALUES
  'watercolor roses, peonies, eucalyptus leaves, delicate baby breath flowers, gold leaf accents, soft petals',
  '',
  'Elegant FLORAL FRAME style. Hero portrait in center with a soft oval or circular floral frame made of watercolor roses and greenery. Other photos softly blended into background with floral overlay. Lush watercolor flower arrangements framing the entire composition — top corners and bottom. Name at bottom in elegant rose-gold script font. Background: soft cream to blush gradient. Delicate and feminine aesthetic.',
- '🌸', 1, 1, 1, 1, 13)
+ '🌸', 1, 1, 1, 1, 13),
+
+('Queen Portrait', 'Dramatic B&W background portrait with vibrant colorful foreground hero and elegant Queen text overlay', 'Portrait', 4,
+ '[""Center foreground - vibrant full-color portrait, warm smile looking at camera, head to waist, sharp focus, slightly angled pose with hand near chin"",""Background large - same person in dramatic black and white, close-up face filling the background, soft ethereal fade, looking slightly to the side with gentle smile"",""Bottom-left accent - small full-color photo, different pose, playful confident expression, waist-up"",""Bottom-right accent - small full-color photo, looking over shoulder, elegant side glance, upper body""]',
+ 0, 'monochrome grayscale background, vibrant full-color foreground, soft pink and red accent hearts, black and white contrast', 'dramatic, elegant, empowering, bold, glamorous',
+ 'decorative hearts, subtle floral swirls, soft ink splash effects, elegant script flourishes, scattered small hearts',
+ 'Queen',
+ 'DRAMATIC B&W HERO OVERLAY style — NOT a framed grid. The BACKGROUND is a LARGE BLACK AND WHITE close-up portrait of the person face filling about 70 percent of the canvas with soft ethereal fade at edges. The person IDENTITY MUST remain EXACTLY the same — do NOT change the face, skin tone, or any facial features. In the CENTER-RIGHT FOREGROUND: a smaller FULLY COLORFUL vibrant portrait of the SAME person (waist-up, slightly angled, hand near chin) overlapping the B&W background, taking about 40 percent width. Two small colorful accent photos at bottom corners. At the BOTTOM CENTER: the word Queen in LARGE ELEGANT FLOWING SCRIPT font with decorative flourishes. Small scattered hearts in soft pink and red around the composition. Background base: soft white-to-light-gray gradient behind the B&W portrait with subtle ink splash or smoke effects at edges. Face must remain 100 percent photorealistic and untouched — no beautification, no skin smoothing, no style effects on face. Overall look: dramatic glamour portrait poster.',
+ '👑', 1, 0, 0, 0, 14)
 ");
-            app.Logger.LogInformation("Seeded {Count} CollageTemplates.", 13);
+            app.Logger.LogInformation("Seeded {Count} CollageTemplates.", 14);
         }
     }
     catch (Exception ex)
@@ -2205,11 +2227,38 @@ VALUES
 
             UPDATE StylePresets SET PromptTemplate = N'Transform into a dreamy digital oil painting with soft ethereal glow. Luminous dewy skin with warm peach-rose undertones. Ultra-smooth blended brushwork. Moody background gradient of warm greys, dusty mauve, purple haze, and amber with dark vignette corners. Warm golden rim light creating halo on hair edges. Intensify all original colors.'
             WHERE Name = 'Dreamy Glow Oil';
+
         ");
     }
     catch (Exception ex)
     {
         app.Logger.LogWarning(ex, "PhotoArts StylePresets seeding failed (non-fatal)");
+    }
+
+    // ── Seed Classic Oil Painting & Watercolor Splash Portrait (PhotoArts) ──
+    try
+    {
+        await db.Database.ExecuteSqlRawAsync(@"
+            IF NOT EXISTS (SELECT 1 FROM StylePresets WHERE Name = N'Classic Oil Painting')
+            AND NOT EXISTS (SELECT 1 FROM DeletedStyleSeeds WHERE Name = N'Classic Oil Painting')
+                INSERT INTO StylePresets (Name, Description, PromptTemplate, Category, IconEmoji, AccentColor, IsActive, SortOrder) VALUES
+                (N'Classic Oil Painting', N'Warm classic oil portrait with textured canvas and vintage frame',
+                 N'Transform into a classic oil painting portrait on textured canvas. Preserve the subject''s EXACT facial features, skin tone, and expression. Traditional oil painting with warm earthy palette: burnt sienna, raw umber, yellow ochre, and golden amber tones. Thick visible impasto brushstrokes on clothing and background, with finer blended brushwork on the face preserving realistic detail. Canvas texture visible throughout. Skin rendered with warm golden undertones and subtle paint texture while retaining natural features. Hair painted with flowing directional brushstrokes. Warm abstract mottled background in golden-brown, olive-ochre and amber tones like a classical Renaissance portrait backdrop. Soft tonal gradations with visible canvas weave texture. Add a subtle dark rounded-corner vignette border around the entire image, simulating a vintage gallery frame effect with dark edges fading inward. Warm dramatic side lighting with golden highlights and rich brown shadows. Museum-quality fine art portrait. No text, no watermarks, no signatures.',
+                 N'PhotoArts', N'🎨', '#8B6914', 1, 220);
+
+            IF NOT EXISTS (SELECT 1 FROM StylePresets WHERE Name = N'Watercolor Splash Portrait')
+            AND NOT EXISTS (SELECT 1 FROM DeletedStyleSeeds WHERE Name = N'Watercolor Splash Portrait')
+                INSERT INTO StylePresets (Name, Description, PromptTemplate, Category, IconEmoji, AccentColor, IsActive, SortOrder) VALUES
+                (N'Watercolor Splash Portrait', N'Vivid watercolor ink splash portrait on clean white background',
+                 N'Transform into a stunning watercolor splash portrait. Preserve the subject''s EXACT facial features, skin tone, and expression. The subject should be rendered with sharp photorealistic detail on the face and upper body, wearing their original clothing and colors. BACKGROUND: Clean pure white background with NO solid backdrop. Instead, surround the subject with expressive watercolor and ink splash effects. Vibrant splashes of purple, indigo, cobalt blue, violet, and magenta watercolor pigment radiating outward from behind the subject. The splashes should look like wet ink dropped on paper, with organic flowing edges, paint drips, color bleeding, and soft diffusion. Mix thick saturated paint splatters with thin translucent washes. Some splashes should overlap the subject''s edges slightly, blending the person into the art. The watercolor effect fades to clean white at the outer edges, giving a floating, frameless look. The subject''s hair should have soft painterly strands blending into the watercolor splashes. Clothing rendered with slightly more painterly texture while keeping recognizable details and colors. Overall mood: vibrant, artistic, elegant. Style: modern mixed-media portrait combining photorealism with traditional watercolor art. No text, no watermarks, no signatures, no logos.',
+                 N'PhotoArts', N'💜', '#7B1FA2', 1, 221);
+        ");
+        Console.WriteLine(">>> Classic Oil Painting & Watercolor Splash Portrait seeded!");
+    }
+    catch (Exception ex)
+    {
+        Console.WriteLine($">>> Classic Oil Painting / Watercolor Splash seeding FAILED: {ex.Message}");
+        app.Logger.LogWarning(ex, "Classic Oil Painting / Watercolor Splash seeding failed (non-fatal)");
     }
 
     // ── Memorial Frame StylePresets ──
