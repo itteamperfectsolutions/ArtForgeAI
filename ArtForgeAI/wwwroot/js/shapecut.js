@@ -12,7 +12,7 @@ window.shapeCut = (function () {
     var cropNaturalW = 0, cropNaturalH = 0;
     var cropState = { x: 0, y: 0, w: 100, h: 100 };
     var dragState = null;
-    var aspectRatio = 1;
+    var aspectRatio = 0; // 0 = free crop (no ratio lock)
 
     var sheetCanvas = null;
     var sheetResizeObserver = null;
@@ -84,10 +84,10 @@ window.shapeCut = (function () {
             });
 
             var defH = cropDisplayH * 0.85;
-            var defW = defH * aspectRatio;
+            var defW = (aspectRatio > 0) ? defH * aspectRatio : cropDisplayW * 0.85;
             if (defW > cropDisplayW * 0.95) {
                 defW = cropDisplayW * 0.95;
-                defH = defW / aspectRatio;
+                defH = (aspectRatio > 0) ? defW / aspectRatio : defH;
             }
             cropState.x = (cropDisplayW - defW) / 2;
             cropState.y = (cropDisplayH - defH) / 2;
@@ -114,9 +114,8 @@ window.shapeCut = (function () {
     }
 
     function setAspectRatio(ratio) {
-        if (ratio <= 0) return;
-        aspectRatio = ratio;
-        if (!cropBoxEl || !cropDisplayW) return;
+        aspectRatio = (ratio > 0) ? ratio : 0; // 0 = free crop
+        if (aspectRatio === 0 || !cropBoxEl || !cropDisplayW) return;
 
         var cx = cropState.x + cropState.w / 2;
         var cy = cropState.y + cropState.h / 2;
@@ -172,12 +171,16 @@ window.shapeCut = (function () {
         var sh = Math.round(rect.h * cropNaturalH);
         if (sw < 1 || sh < 1) return null;
 
+        // If targetW/H are 0, use the natural cropped dimensions
+        var outW = (targetWPx > 0) ? targetWPx : sw;
+        var outH = (targetHPx > 0) ? targetHPx : sh;
+
         var offscreen = document.createElement("canvas");
-        offscreen.width = targetWPx;
-        offscreen.height = targetHPx;
+        offscreen.width = outW;
+        offscreen.height = outH;
         var ctx = offscreen.getContext("2d");
-        ctx.clearRect(0, 0, targetWPx, targetHPx);
-        ctx.drawImage(cropImg, sx, sy, sw, sh, 0, 0, targetWPx, targetHPx);
+        ctx.clearRect(0, 0, outW, outH);
+        ctx.drawImage(cropImg, sx, sy, sw, sh, 0, 0, outW, outH);
         return offscreen.toDataURL("image/png");
     }
 
@@ -246,52 +249,54 @@ window.shapeCut = (function () {
         }
     }
 
-    // ── Resize with aspect ratio lock ──
+    // ── Resize with optional aspect ratio lock (aspectRatio=0 → free) ──
 
     function resizeCrop(handle, dx, dy, orig) {
         var nw, nh, nx, ny;
+        var locked = (aspectRatio > 0);
 
         if (handle === "br") {
             nw = Math.max(40, orig.w + dx);
-            nh = nw / aspectRatio;
+            nh = locked ? nw / aspectRatio : Math.max(40, orig.h + dy);
             nx = orig.x; ny = orig.y;
         } else if (handle === "bl") {
             nw = Math.max(40, orig.w - dx);
-            nh = nw / aspectRatio;
+            nh = locked ? nw / aspectRatio : Math.max(40, orig.h + dy);
             nx = orig.x + orig.w - nw; ny = orig.y;
         } else if (handle === "tr") {
             nw = Math.max(40, orig.w + dx);
-            nh = nw / aspectRatio;
-            nx = orig.x; ny = orig.y + orig.h - nh;
+            nh = locked ? nw / aspectRatio : Math.max(40, orig.h - dy);
+            nx = orig.x; ny = locked ? orig.y + orig.h - nh : orig.y + orig.h - nh;
         } else if (handle === "tl") {
             nw = Math.max(40, orig.w - dx);
-            nh = nw / aspectRatio;
+            nh = locked ? nw / aspectRatio : Math.max(40, orig.h - dy);
             nx = orig.x + orig.w - nw; ny = orig.y + orig.h - nh;
         } else if (handle === "r") {
             nw = Math.max(40, orig.w + dx);
-            nh = nw / aspectRatio;
-            nx = orig.x; ny = orig.y + (orig.h - nh) / 2;
+            nh = locked ? nw / aspectRatio : orig.h;
+            nx = orig.x; ny = locked ? orig.y + (orig.h - nh) / 2 : orig.y;
         } else if (handle === "l") {
             nw = Math.max(40, orig.w - dx);
-            nh = nw / aspectRatio;
-            nx = orig.x + orig.w - nw; ny = orig.y + (orig.h - nh) / 2;
+            nh = locked ? nw / aspectRatio : orig.h;
+            nx = orig.x + orig.w - nw; ny = locked ? orig.y + (orig.h - nh) / 2 : orig.y;
         } else if (handle === "b") {
             nh = Math.max(40, orig.h + dy);
-            nw = nh * aspectRatio;
-            nx = orig.x + (orig.w - nw) / 2; ny = orig.y;
+            nw = locked ? nh * aspectRatio : orig.w;
+            nx = locked ? orig.x + (orig.w - nw) / 2 : orig.x; ny = orig.y;
         } else if (handle === "t") {
             nh = Math.max(40, orig.h - dy);
-            nw = nh * aspectRatio;
-            nx = orig.x + (orig.w - nw) / 2; ny = orig.y + orig.h - nh;
+            nw = locked ? nh * aspectRatio : orig.w;
+            nx = locked ? orig.x + (orig.w - nw) / 2 : orig.x; ny = orig.y + orig.h - nh;
         } else {
             return;
         }
 
         if (nx < 0) { nx = 0; }
         if (ny < 0) { ny = 0; }
-        if (nx + nw > cropDisplayW) { nw = cropDisplayW - nx; nh = nw / aspectRatio; }
-        if (ny + nh > cropDisplayH) { nh = cropDisplayH - ny; nw = nh * aspectRatio; }
-        if (nw < 40) { nw = 40; nh = nw / aspectRatio; }
+        if (nx + nw > cropDisplayW) { nw = cropDisplayW - nx; if (locked) nh = nw / aspectRatio; }
+        if (ny + nh > cropDisplayH) { nh = cropDisplayH - ny; if (locked) nw = nh * aspectRatio; }
+        if (nw < 40) { nw = 40; if (locked) nh = nw / aspectRatio; }
+        if (nh < 40) { nh = 40; if (locked) nw = nh * aspectRatio; }
 
         cropState.x = nx;
         cropState.y = ny;
@@ -925,8 +930,39 @@ window.shapeCut = (function () {
         return erodeMask(dilated, w, h, radiusPx);
     }
 
-    // Generate the cut outline: a black ring around the design silhouette.
-    // Uses morphological close to consolidate nearby elements, then dilation for the contour.
+    // Smooth a binary mask using blur + threshold for rounded edges.
+    // Returns a new canvas with a smooth, rounded binary mask.
+    function smoothBinaryMask(srcCanvas, w, h, blurRadius) {
+        if (blurRadius <= 0) {
+            var c = document.createElement("canvas");
+            c.width = w; c.height = h;
+            c.getContext("2d").drawImage(srcCanvas, 0, 0);
+            return c;
+        }
+        var smoothCanvas = document.createElement("canvas");
+        smoothCanvas.width = w; smoothCanvas.height = h;
+        var ctx = smoothCanvas.getContext("2d");
+        ctx.filter = "blur(" + blurRadius + "px)";
+        ctx.drawImage(srcCanvas, 0, 0);
+        ctx.filter = "none";
+
+        // Re-threshold: blur produces soft alpha, snap back to binary
+        var imgData = ctx.getImageData(0, 0, w, h);
+        var d = imgData.data;
+        for (var i = 0; i < w * h; i++) {
+            d[i * 4 + 3] = d[i * 4 + 3] > 100 ? 255 : 0;
+            if (d[i * 4 + 3] === 255) {
+                d[i * 4] = 255; d[i * 4 + 1] = 255; d[i * 4 + 2] = 255;
+            } else {
+                d[i * 4] = 0; d[i * 4 + 1] = 0; d[i * 4 + 2] = 0;
+            }
+        }
+        ctx.putImageData(imgData, 0, 0);
+        return smoothCanvas;
+    }
+
+    // Generate the cut outline: a smooth, rounded ring around the design silhouette.
+    // Uses blur-based smoothing for naturally rounded contours with no sharp edges.
     function generateOutline(designDataUrl, distancePx, cornerRadiusPx, widthPx) {
         return new Promise(function (resolve) {
             var img = new Image();
@@ -942,28 +978,31 @@ window.shapeCut = (function () {
                 silCtx.drawImage(img, 0, 0);
                 makeSilhouette(silCtx, w, h);
 
-                // Step 2: Morphological close to consolidate nearby elements
-                // (e.g., logo icon + text) into one connected shape.
-                // Close radius = distancePx so elements within gap distance merge together.
+                // Step 2: Morphological close to merge nearby elements (icon + text)
                 var closeRadius = Math.max(distancePx, 10);
                 var consolidatedCanvas = closeMask(silCanvas, w, h, closeRadius);
 
-                // Step 3: Outer boundary (distance + width + corner smoothing)
-                var outerCanvas = expandMask(consolidatedCanvas, w, h, distancePx + widthPx + cornerRadiusPx);
+                // Step 3: Smooth the consolidated mask to round all edges
+                var smoothed = smoothBinaryMask(consolidatedCanvas, w, h, cornerRadiusPx);
 
-                // Step 4: Inner boundary (distance + corner smoothing)
-                var innerCanvas = expandMask(consolidatedCanvas, w, h, distancePx + cornerRadiusPx);
+                // Step 4: Expand for outer boundary
+                var outerExpand = expandMask(smoothed, w, h, distancePx + widthPx);
+                var outerSmooth = smoothBinaryMask(outerExpand, w, h, Math.max(cornerRadiusPx, 3));
 
-                // Step 5: Subtract inner from outer to get the outline ring
+                // Step 5: Expand for inner boundary
+                var innerExpand = expandMask(smoothed, w, h, distancePx);
+                var innerSmooth = smoothBinaryMask(innerExpand, w, h, Math.max(cornerRadiusPx, 3));
+
+                // Step 6: Subtract inner from outer to get the outline ring
                 var outCanvas = document.createElement("canvas");
                 outCanvas.width = w; outCanvas.height = h;
                 var outCtx = outCanvas.getContext("2d");
-                outCtx.drawImage(outerCanvas, 0, 0);
+                outCtx.drawImage(outerSmooth, 0, 0);
                 outCtx.globalCompositeOperation = "destination-out";
-                outCtx.drawImage(innerCanvas, 0, 0);
+                outCtx.drawImage(innerSmooth, 0, 0);
                 outCtx.globalCompositeOperation = "source-over";
 
-                // Step 6: Color the ring solid black
+                // Step 7: Color the ring solid black
                 outCtx.globalCompositeOperation = "source-in";
                 outCtx.fillStyle = "#000000";
                 outCtx.fillRect(0, 0, w, h);
@@ -1518,6 +1557,58 @@ window.shapeCut = (function () {
         lastRenderParams = null;
     }
 
+    // ── Get image dimensions from data URL ──
+    function getImageDimensions(dataUrl) {
+        return new Promise(function (resolve) {
+            var img = new Image();
+            img.onload = function () {
+                resolve([img.naturalWidth, img.naturalHeight]);
+            };
+            img.onerror = function () {
+                resolve([0, 0]);
+            };
+            img.src = dataUrl;
+        });
+    }
+
+    // ── Composite design + outline into single image ──
+    function compositeDesignAndOutline(designDataUrl, outlineDataUrl) {
+        return new Promise(function (resolve) {
+            var designImg = new Image();
+            designImg.onload = function () {
+                var outlineImg = new Image();
+                outlineImg.onload = function () {
+                    var w = Math.max(designImg.naturalWidth, outlineImg.naturalWidth);
+                    var h = Math.max(designImg.naturalHeight, outlineImg.naturalHeight);
+                    var canvas = document.createElement("canvas");
+                    canvas.width = w;
+                    canvas.height = h;
+                    var ctx = canvas.getContext("2d");
+                    // Draw checkerboard background for transparency
+                    var sz = 8;
+                    for (var y = 0; y < h; y += sz) {
+                        for (var x = 0; x < w; x += sz) {
+                            ctx.fillStyle = ((x / sz + y / sz) % 2 === 0) ? "#2a2a2a" : "#3a3a3a";
+                            ctx.fillRect(x, y, sz, sz);
+                        }
+                    }
+                    ctx.drawImage(designImg, 0, 0, w, h);
+                    ctx.drawImage(outlineImg, 0, 0, w, h);
+                    resolve(canvas.toDataURL("image/png"));
+                };
+                outlineImg.src = outlineDataUrl;
+            };
+            designImg.src = designDataUrl;
+        });
+    }
+
+    // ── Download SVG string as file ──
+    function downloadSvgString(svgContent, filename) {
+        if (!svgContent) return;
+        var blob = new Blob([svgContent], { type: "image/svg+xml" });
+        downloadBlob(blob, filename || "cutline.svg");
+    }
+
     // ── Public API ──
     return {
         initCropTool: initCropTool,
@@ -1540,6 +1631,9 @@ window.shapeCut = (function () {
         downloadBothMulti: downloadBothMulti,
         downloadSingleMulti: downloadSingleMulti,
         downloadDesignPng: downloadDesignPng,
+        getImageDimensions: getImageDimensions,
+        compositeDesignAndOutline: compositeDesignAndOutline,
+        downloadSvgString: downloadSvgString,
         dispose: dispose,
     };
 })();

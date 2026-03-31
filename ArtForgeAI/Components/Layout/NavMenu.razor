@@ -79,10 +79,6 @@
                 <span class="nav-icon">&#128737;</span>
                 Admin Panel
             </NavLink>
-            <NavLink class="nav-item nav-item-admin" href="photo-collage-settings">
-                <span class="nav-icon">&#128444;</span>
-                Collage Templates
-            </NavLink>
         }
         else
         {
@@ -190,18 +186,14 @@
         new("StyleTransfer", "style-transfer",   "&#10024;",   "Style Transfer"),
         new("StyleRemix",   "style-remix",       "&#127912;",  "Style Remix"),
         new("MosaicPoster", "mosaic-poster",     "&#129513;",  "Mosaic Poster"),
-        new("MosaicPoster", "template-collage",  "&#127912;",  "Template Collage"),
-        new("PhotoCollages","photo-collages",    "&#128444;",  "Photo Collages"),
         new("PassportPhoto","passport-photo",    "&#128247;",  "Passport Photo"),
         new("PhotoExpand",  "photo-size-expand", "&#128200;",  "Photo Expand"),
         new("GangSheet",    "gang-sheet",        "&#128424;",  "Gang Sheet"),
-        new("ShapeCutSheet","shape-cut",         "&#9986;",    "Shape Cut Sheet"),
+        new("ShapeCutSheet","shape-cut",         "&#9986;",    "Half Cut Sticker"),
         new("Merger",       "merger",            "&#129520;",  "Photo Merger"),
         new("EmbroideryArt","embroidery-art",    "&#129525;",  "Embroidery Art"),
         new("NegativeScan", "negative-scan",     "&#127902;",  "Negative Scan"),
-        new("BackgroundRemoval", "background-removal", "&#9986;", "BG Removal"),
         new("BackgroundRemoval", "bg-studio", "&#127912;", "BG Studio"),
-        new("SignatureDayDesign", "signature-day", "&#127881;", "Signature Day"),
     ];
 
     // ── Maps coin transaction descriptions to feature keys ──
@@ -213,8 +205,6 @@
         ["Style Transfer generation"]    = "StyleTransfer",
         ["Style Remix generation"]       = "StyleRemix",
         ["Mosaic Poster export"]         = "MosaicPoster",
-        ["Template Collage generation"]  = "MosaicPoster",
-        ["Photo Collage composition"]    = "PhotoCollages",
         ["Passport Photo generation"]    = "PassportPhoto",
         ["AI Passport Adjust"]           = "PassportPhoto",
         ["Photo Expand generation"]      = "PhotoExpand",
@@ -224,8 +214,6 @@
         ["Embroidery Art"]               = "EmbroideryArt",
         ["Negative Scan conversion"]     = "NegativeScan",
         ["Negative Scan AI enhancement"] = "NegativeScan",
-        ["Background Removal"]           = "BackgroundRemoval",
-        ["Signature Day Design"]         = "SignatureDayDesign",
     };
 
     protected override async Task OnInitializedAsync()

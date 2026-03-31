@@ -152,68 +152,20 @@ Every prompt template MUST incorporate these rules from `CollageRules.txt`:
 
 ## How to Add a New Template
 
-### Step 1: Design the Prompt
+> **IMPORTANT:** For the current recommended approach to adding ANY new style preset (not just Trendy Photo Collage), see **[`docs/StylePreset-SeedingGuide.md`](StylePreset-SeedingGuide.md)**. The method below is outdated and should NOT be used for new styles.
 
-Write a detailed prompt that includes:
+### Current Method: `incrementalStyles` Array
 
-```
-1. CRITICAL identity preservation statement
-2. Person count detection: "DETECT how many people... do NOT add or remove anyone"
-3. Single-person handling: "IF ONE PERSON: [solo pose description]"
-4. Multi-person handling: "IF TWO OR MORE PEOPLE: [couple/group pose]"
-5. Scene/layout description (specific, detailed)
-6. Lighting and atmosphere
-7. Color palette
-8. Style description
-9. Strict rules footer (no face changes, no text, no watermarks)
-```
+Add a new entry to the `incrementalStyles` array in `Program.cs` (after the `} // end if (!seedAlreadyDone)` block). This runs on every startup, force-clears `DeletedStyleSeeds`, and upserts the style. No version bumping needed.
 
-### Step 2: Choose Metadata
+See **[`docs/StylePreset-SeedingGuide.md`](StylePreset-SeedingGuide.md)** for full step-by-step instructions.
 
-| Field | Guidelines |
-|-------|-----------|
-| **Name** | Short, descriptive (max 50 chars). Must be unique across all presets |
-| **Description** | 1-line user-facing summary (max 200 chars) |
-| **Category** | Must be `Trendy Photo Collage` |
-| **IconEmoji** | Single emoji that represents the style |
-| **AccentColor** | Hex color matching the template's dominant tone |
-| **SortOrder** | Next available number (current max: 217) |
-
-### Step 3: Add the Seed Block
-
-Insert the seed block in `Program.cs` **before** the cleanup section (`// Clean up: remove any seeded styles that the user previously deleted`).
-
-```csharp
-// ── Seed [Your Template Name] ──
-try
-{
-    await db.Database.ExecuteSqlRawAsync(@"
-        IF NOT EXISTS (SELECT 1 FROM StylePresets WHERE Name = '[Your Template Name]')
-            INSERT INTO StylePresets
-                (Name, Description, PromptTemplate, Category, IconEmoji, AccentColor, IsActive, SortOrder)
-            VALUES
-                (N'[Name]', N'[Description]',
-                 N'[Your prompt here — use double single-quotes for apostrophes]',
-                 N'Trendy Photo Collage', N'[Emoji]', '[#HexColor]', 1, [NextSortOrder]);
-
-        UPDATE StylePresets SET
-            Description = N'[Description]',
-            PromptTemplate = N'[Your prompt here]'
-        WHERE Name = '[Your Template Name]';
-    ");
-}
-catch (Exception ex)
-{
-    app.Logger.LogWarning(ex, "[Your Template Name] StylePreset seeding failed (non-fatal)");
-}
-```
-
-### Step 4: Test
+### Test
 
 1. Run the application
 2. Go to **Settings** page
-3. Find the new template under **Trendy Photo Collage**
-4. Click **Test Style** — upload a photo and verify the result
+3. Find the new template under its category
+4. Click **Test Prompt** -- upload a photo and verify the result
 5. Click **Use as Thumbnail** to save the preview image
 
 ---

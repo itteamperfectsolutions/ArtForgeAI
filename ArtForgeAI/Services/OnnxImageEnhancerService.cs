@@ -8,7 +8,7 @@ namespace ArtForgeAI.Services;
 
 /// <summary>
 /// Local ONNX-based image enhancement using Real-ESRGAN (4x upscale).
-/// Uses tiled inference to keep memory usage bounded on CPU.
+/// Uses tiled inference with parallel processing for speed.
 /// Registered as singleton (model loaded once).
 /// </summary>
 public sealed class OnnxImageEnhancerService : IImageEnhancerService, IDisposable
@@ -23,6 +23,7 @@ public sealed class OnnxImageEnhancerService : IImageEnhancerService, IDisposabl
     private const int Scale = 4;
     private const int TileSize = 192;  // Process in 192x192 tiles
     private const int TilePad = 10;    // Overlap padding to avoid seams
+    private const int MaxParallel = 4; // Concurrent ONNX inference sessions
 
     public bool IsAvailable => _session is not null;
 
@@ -61,8 +62,8 @@ public sealed class OnnxImageEnhancerService : IImageEnhancerService, IDisposabl
             _outputName = _session.OutputMetadata.Keys.First();
 
             _logger.LogInformation(
-                "Real-ESRGAN model loaded (input={Input}, output={Output}, tile={Tile}x{Tile})",
-                _inputName, _outputName, TileSize, TileSize);
+                "Real-ESRGAN model loaded (input={Input}, output={Output}, tile={Tile}x{Tile}, parallel={P})",
+                _inputName, _outputName, TileSize, TileSize, MaxParallel);
         }
         catch (Exception ex)
         {
@@ -93,85 +94,132 @@ public sealed class OnnxImageEnhancerService : IImageEnhancerService, IDisposabl
         var outW = srcW * Scale;
         var outH = srcH * Scale;
 
-        _logger.LogInformation("Enhancing {W}x{H} -> {OW}x{OH} (4x)", srcW, srcH, outW, outH);
+        _logger.LogInformation("Enhancing {W}x{H} -> {OW}x{OH} (4x, parallel={P})", srcW, srcH, outW, outH, MaxParallel);
 
         using var output = new Image<Rgb24>(outW, outH);
 
-        // Tile-based inference
+        // Calculate tile grid
         int tilesX = (srcW + TileSize - 1) / TileSize;
         int tilesY = (srcH + TileSize - 1) / TileSize;
         int totalTiles = tilesX * tilesY;
-        int processed = 0;
 
-        for (int ty = 0; ty < tilesY; ty++)
+        // Phase 1: Pre-extract all tile tensors in parallel (fast, CPU-only)
+        var tileJobs = new TileJob[totalTiles];
+        Parallel.For(0, totalTiles, idx =>
         {
-            for (int tx = 0; tx < tilesX; tx++)
+            int tx = idx % tilesX;
+            int ty = idx / tilesX;
+
+            int srcX = tx * TileSize;
+            int srcY = ty * TileSize;
+            int tileW = Math.Min(TileSize, srcW - srcX);
+            int tileH = Math.Min(TileSize, srcH - srcY);
+
+            int padLeft = Math.Min(TilePad, srcX);
+            int padTop = Math.Min(TilePad, srcY);
+            int padRight = Math.Min(TilePad, srcW - srcX - tileW);
+            int padBottom = Math.Min(TilePad, srcH - srcY - tileH);
+
+            int cropX = srcX - padLeft;
+            int cropY = srcY - padTop;
+            int cropW = tileW + padLeft + padRight;
+            int cropH = tileH + padTop + padBottom;
+
+            DenseTensor<float> inputTensor;
+            lock (image)
             {
-                // Source tile bounds (without padding)
-                int srcX = tx * TileSize;
-                int srcY = ty * TileSize;
-                int tileW = Math.Min(TileSize, srcW - srcX);
-                int tileH = Math.Min(TileSize, srcH - srcY);
-
-                // Padded source bounds (clamped to image)
-                int padLeft = Math.Min(TilePad, srcX);
-                int padTop = Math.Min(TilePad, srcY);
-                int padRight = Math.Min(TilePad, srcW - srcX - tileW);
-                int padBottom = Math.Min(TilePad, srcH - srcY - tileH);
-
-                int cropX = srcX - padLeft;
-                int cropY = srcY - padTop;
-                int cropW = tileW + padLeft + padRight;
-                int cropH = tileH + padTop + padBottom;
-
-                // Extract padded tile
                 using var tile = image.Clone(ctx => ctx.Crop(new Rectangle(cropX, cropY, cropW, cropH)));
+                inputTensor = ImageToTensor(tile);
+            }
 
-                // Run inference on this tile
-                var inputTensor = ImageToTensor(tile);
-                var inputs = new List<NamedOnnxValue>
+            tileJobs[idx] = new TileJob
+            {
+                Index = idx,
+                InputTensor = inputTensor,
+                SrcX = srcX, SrcY = srcY,
+                TileW = tileW, TileH = tileH,
+                PadLeft = padLeft, PadTop = padTop
+            };
+        });
+
+        _logger.LogInformation("Pre-extracted {N} tile tensors, starting parallel inference...", totalTiles);
+
+        // Phase 2: Run ONNX inference in parallel batches (the bottleneck)
+        int processed = 0;
+        var semaphore = new SemaphoreSlim(MaxParallel);
+        var inferTasks = new Task[totalTiles];
+
+        for (int i = 0; i < totalTiles; i++)
+        {
+            var job = tileJobs[i];
+            inferTasks[i] = Task.Run(() =>
+            {
+                semaphore.Wait();
+                try
                 {
-                    NamedOnnxValue.CreateFromTensor(_inputName, inputTensor)
-                };
+                    // Run ONNX inference
+                    var inputs = new List<NamedOnnxValue>
+                    {
+                        NamedOnnxValue.CreateFromTensor(_inputName, job.InputTensor)
+                    };
 
-                using var results = _session!.Run(inputs);
-                var outputTensor = results.First().AsTensor<float>();
+                    using var results = _session!.Run(inputs);
+                    var outputTensor = results.First().AsTensor<float>();
 
-                // Extract the non-padded region from the upscaled output
-                int outPadLeft = padLeft * Scale;
-                int outPadTop = padTop * Scale;
-                int outTileW = tileW * Scale;
-                int outTileH = tileH * Scale;
+                    // Extract non-padded region dimensions
+                    int outPadLeft = job.PadLeft * Scale;
+                    int outPadTop = job.PadTop * Scale;
+                    int outTileW = job.TileW * Scale;
+                    int outTileH = job.TileH * Scale;
+                    int dstX = job.SrcX * Scale;
+                    int dstY = job.SrcY * Scale;
 
-                // Write to output image
-                int dstX = srcX * Scale;
-                int dstY = srcY * Scale;
-
-                output.ProcessPixelRows(accessor =>
-                {
+                    // Convert output tensor to pixel bytes (avoid holding tensor reference during write)
+                    var pixels = new byte[outTileH * outTileW * 3];
                     for (int y = 0; y < outTileH; y++)
                     {
-                        var row = accessor.GetRowSpan(dstY + y);
                         for (int x = 0; x < outTileW; x++)
                         {
-                            float r = Math.Clamp(outputTensor[0, 0, outPadTop + y, outPadLeft + x], 0f, 1f);
-                            float g = Math.Clamp(outputTensor[0, 1, outPadTop + y, outPadLeft + x], 0f, 1f);
-                            float b = Math.Clamp(outputTensor[0, 2, outPadTop + y, outPadLeft + x], 0f, 1f);
-
-                            row[dstX + x] = new Rgb24(
-                                (byte)(r * 255f + 0.5f),
-                                (byte)(g * 255f + 0.5f),
-                                (byte)(b * 255f + 0.5f));
+                            int offset = (y * outTileW + x) * 3;
+                            pixels[offset + 0] = (byte)(Math.Clamp(outputTensor[0, 0, outPadTop + y, outPadLeft + x], 0f, 1f) * 255f + 0.5f);
+                            pixels[offset + 1] = (byte)(Math.Clamp(outputTensor[0, 1, outPadTop + y, outPadLeft + x], 0f, 1f) * 255f + 0.5f);
+                            pixels[offset + 2] = (byte)(Math.Clamp(outputTensor[0, 2, outPadTop + y, outPadLeft + x], 0f, 1f) * 255f + 0.5f);
                         }
                     }
-                });
 
-                processed++;
-                progress?.Report(processed * 100 / totalTiles);
-                if (processed % 10 == 0 || processed == totalTiles)
-                    _logger.LogInformation("Enhanced tile {N}/{Total}", processed, totalTiles);
-            }
+                    // Free tensor memory early
+                    job.InputTensor = null!;
+
+                    // Write pixels to output image (lock since ImageSharp isn't thread-safe)
+                    lock (output)
+                    {
+                        output.ProcessPixelRows(accessor =>
+                        {
+                            for (int y = 0; y < outTileH; y++)
+                            {
+                                var row = accessor.GetRowSpan(dstY + y);
+                                for (int x = 0; x < outTileW; x++)
+                                {
+                                    int offset = (y * outTileW + x) * 3;
+                                    row[dstX + x] = new Rgb24(pixels[offset], pixels[offset + 1], pixels[offset + 2]);
+                                }
+                            }
+                        });
+                    }
+
+                    var done = Interlocked.Increment(ref processed);
+                    progress?.Report(done * 100 / totalTiles);
+                    if (done % 10 == 0 || done == totalTiles)
+                        _logger.LogInformation("Enhanced tile {N}/{Total}", done, totalTiles);
+                }
+                finally
+                {
+                    semaphore.Release();
+                }
+            });
         }
+
+        Task.WaitAll(inferTasks);
 
         var fileName = $"{Guid.NewGuid():N}_enhanced.png";
         var outputPath = Path.Combine(_outputDir, fileName);
@@ -181,9 +229,6 @@ public sealed class OnnxImageEnhancerService : IImageEnhancerService, IDisposabl
         return $"generated/{fileName}";
     }
 
-    /// <summary>
-    /// Converts an ImageSharp tile to NCHW tensor normalized to [0, 1].
-    /// </summary>
     private static DenseTensor<float> ImageToTensor(Image<Rgb24> image)
     {
         int w = image.Width;
@@ -211,5 +256,12 @@ public sealed class OnnxImageEnhancerService : IImageEnhancerService, IDisposabl
     public void Dispose()
     {
         _session?.Dispose();
+    }
+
+    private class TileJob
+    {
+        public int Index;
+        public DenseTensor<float> InputTensor = null!;
+        public int SrcX, SrcY, TileW, TileH, PadLeft, PadTop;
     }
 }

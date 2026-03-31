@@ -468,7 +468,7 @@ using (var scope = app.Services.CreateScope())
     }
 
     // ── Seed-version gate: skip heavy style seeding if already done ──
-    const int CURRENT_SEED_VERSION = 3;
+    const int CURRENT_SEED_VERSION = 4;
     var seedAlreadyDone = false;
     try
     {
@@ -2319,6 +2319,29 @@ VALUES
         app.Logger.LogWarning(ex, "Vibrant Digital Portrait StylePreset seeding failed (non-fatal)");
     }
 
+    // ── Seed Storybook Enchanted Forest (PhotoArts) ──
+    try
+    {
+        await db.Database.ExecuteSqlRawAsync(@"
+            IF NOT EXISTS (SELECT 1 FROM StylePresets WHERE Name = N'Storybook Enchanted Forest')
+            AND NOT EXISTS (SELECT 1 FROM DeletedStyleSeeds WHERE Name = N'Storybook Enchanted Forest')
+                INSERT INTO StylePresets (Name, Description, PromptTemplate, Category, IconEmoji, AccentColor, IsActive, SortOrder) VALUES
+                (N'Storybook Enchanted Forest', N'Whimsical illustrated forest adventure - kids safe, gender neutral',
+                 N'Transform the subject into a whimsical storybook illustration set in an enchanted forest. CRITICAL IDENTITY RULES: 1) The subject''s face must remain 100% PHOTOREALISTIC and UNCHANGED - preserve exact facial features, face shape, eyes, nose, lips, jawline, expression, skin tone, undertone, and texture. Do NOT beautify, stylize, cartoonify, smooth, or alter the face in ANY way. The face must look like the real person, not illustrated. 2) FACE BIOMETRICS: Maintain exact interpupillary distance, nose bridge width, lip thickness ratio, ear position, and facial proportions pixel-for-pixel from the source. 3) AGE PRESERVATION: The subject must appear the EXACT same age as in the source photo - do NOT age up or age down. A child must remain a child of the same age, an adult must remain the same age adult. 4) GENDER NEUTRAL: Do not add or remove any gender-specific features. No added makeup, no beard modification, no gender-stereotyped accessories. Work identically for any gender. 5) KIDS SAFE: Absolutely no scary, violent, suggestive, or inappropriate elements. Keep all content wholesome and family-friendly. Clothing must remain modest. 6) HUMAN ANATOMY: Maintain natural proportions - correct number of fingers (exactly 5 per hand), no distorted limbs, no stretched or compressed body parts. STYLE: The BODY and CLOTHING should be rendered in a soft 3D animated storybook illustration style (similar to modern animated films) - slightly stylized proportions for the body while keeping the real face seamlessly composited. Clothing can be gently stylized into a charming adventure outfit (jacket, shirt, belt, trousers) in warm inviting colors, but must respect the original clothing silhouette and color palette. BACKGROUND: A lush enchanted forest scene with tall rounded stylized trees in rich greens, dappled golden sunlight filtering through the canopy, soft volumetric god rays, scattered wildflowers (pink tulips, blue hydrangeas) in the foreground, lush green foliage and leaves, gentle floating light particles. The forest should feel magical, warm, and inviting - a safe fairytale woodland. Soft depth-of-field blur on distant trees. Color palette: rich emerald greens, warm golden sunlight, soft pink and blue floral accents. COMPOSITION: Portrait orientation (12x18 ratio), subject centered, full body or three-quarter body shot, standing naturally in the forest clearing. Warm natural lighting consistent between face and scene. The photorealistic face must blend seamlessly with the illustrated body and background through matched lighting and color grading. No text, no watermarks, no signatures, no logos, no names anywhere in the image.',
+                 N'PhotoArts', N'🌲', '#2E7D32', 1, 222);
+
+            UPDATE StylePresets SET
+                PromptTemplate = N'Transform the subject into a whimsical storybook illustration set in an enchanted forest. CRITICAL IDENTITY RULES: 1) The subject''s face must remain 100% PHOTOREALISTIC and UNCHANGED - preserve exact facial features, face shape, eyes, nose, lips, jawline, expression, skin tone, undertone, and texture. Do NOT beautify, stylize, cartoonify, smooth, or alter the face in ANY way. The face must look like the real person, not illustrated. 2) FACE BIOMETRICS: Maintain exact interpupillary distance, nose bridge width, lip thickness ratio, ear position, and facial proportions pixel-for-pixel from the source. 3) AGE PRESERVATION: The subject must appear the EXACT same age as in the source photo - do NOT age up or age down. A child must remain a child of the same age, an adult must remain the same age adult. 4) GENDER NEUTRAL: Do not add or remove any gender-specific features. No added makeup, no beard modification, no gender-stereotyped accessories. Work identically for any gender. 5) KIDS SAFE: Absolutely no scary, violent, suggestive, or inappropriate elements. Keep all content wholesome and family-friendly. Clothing must remain modest. 6) HUMAN ANATOMY: Maintain natural proportions - correct number of fingers (exactly 5 per hand), no distorted limbs, no stretched or compressed body parts. STYLE: The BODY and CLOTHING should be rendered in a soft 3D animated storybook illustration style (similar to modern animated films) - slightly stylized proportions for the body while keeping the real face seamlessly composited. Clothing can be gently stylized into a charming adventure outfit (jacket, shirt, belt, trousers) in warm inviting colors, but must respect the original clothing silhouette and color palette. BACKGROUND: A lush enchanted forest scene with tall rounded stylized trees in rich greens, dappled golden sunlight filtering through the canopy, soft volumetric god rays, scattered wildflowers (pink tulips, blue hydrangeas) in the foreground, lush green foliage and leaves, gentle floating light particles. The forest should feel magical, warm, and inviting - a safe fairytale woodland. Soft depth-of-field blur on distant trees. Color palette: rich emerald greens, warm golden sunlight, soft pink and blue floral accents. COMPOSITION: Portrait orientation (12x18 ratio), subject centered, full body or three-quarter body shot, standing naturally in the forest clearing. Warm natural lighting consistent between face and scene. The photorealistic face must blend seamlessly with the illustrated body and background through matched lighting and color grading. No text, no watermarks, no signatures, no logos, no names anywhere in the image.'
+            WHERE Name = 'Storybook Enchanted Forest';
+        ");
+        Console.WriteLine(">>> Storybook Enchanted Forest (PhotoArts) seeded!");
+    }
+    catch (Exception ex)
+    {
+        Console.WriteLine($">>> Storybook Enchanted Forest seeding FAILED: {ex.Message}");
+        app.Logger.LogWarning(ex, "Storybook Enchanted Forest seeding failed (non-fatal)");
+    }
+
     // ── Seed Trendy Photo Collage StylePresets ──
     try
     {
@@ -2766,6 +2789,447 @@ VALUES
         app.Logger.LogWarning(ex, "Seed version stamp failed (non-fatal)");
     }
     } // end if (!seedAlreadyDone)
+
+    // ── Incremental style seeds ──────────────────────────────────────────
+    // These run on EVERY startup, OUTSIDE the seed-version gate.
+    // To add a new style: just add an entry to the array below. That's it.
+    //   - Force-clears DeletedStyleSeeds so new dev-added styles always appear
+    //   - Upserts: inserts if missing, updates prompt/metadata if already present
+    //   - No need to bump CURRENT_SEED_VERSION
+    // See docs/StylePreset-SeedingGuide.md for full instructions.
+    var incrementalStyles = new[]
+    {
+        new {
+            Name        = "Selective Ink Wash",
+            Description = "Detailed ink sketch with selective color wash on clothing",
+            Prompt      = @"Transform the subject into a detailed ink line-art illustration with selective color wash. CRITICAL: Preserve the subject's EXACT facial features, identity, skin tone, and expression — absolutely no modifications to the face. LINE STYLE: Fine detailed pen-and-ink linework throughout the entire image — precise cross-hatching, contour hatching, and stippling for shading. Lines should be hand-drawn quality with varying thickness — thicker on outlines and shadow edges, thinner for detail and texture. Every element rendered with visible ink strokes — no smooth digital gradients on the figure. COLORING RULES: The body, skin, face, and background remain in greyscale ink — black, white, and grey tones only, like a pencil or ink sketch. ONLY the clothing and fabric accessories receive color washes — applied as translucent watercolor-like tones over the ink lines. Use a warm selective palette for clothing: vermillion red, saffron orange, deep crimson, burnt sienna, and golden amber for garments. Ornaments, jewelry, and metallic accessories rendered in warm gold and antique brass tones with ink-line detail preserved underneath. COMPOSITION: Clean white or off-white background with minimal or no background elements — the focus is entirely on the figure. Soft shadow beneath the subject for grounding. The ink lines remain visible through the color washes — the color is translucent, not opaque. MOOD: Devotional, classical, serene. The style evokes traditional Indian devotional calendar illustrations meets architectural ink rendering. High-contrast ink detail with restrained, elegant use of warm color only on fabrics. STRICT RULES: Face must remain 100% photorealistic and identity-preserved. No face swap, no beautification, no skin smoothing, no reshaping. Maintain exact skin tone, natural proportions. No cartoon or artistic rendering of the face. Lighting and shadows must remain natural and consistent. Final output should look like a real person rendered in fine ink illustration with selective color.",
+            Category    = "Artistic",
+            Emoji       = "\U0001F58B\uFE0F",  // 🖋️
+            Color       = "#8B4513",
+            SortOrder   = 220
+        },
+        new {
+            Name        = "Royal Palace Wedding",
+            Description = "Grand Indian palace wedding oil painting with rich crimson and gold tones",
+            Prompt      = @"Transform the subject into a grand royal Indian wedding oil painting portrait. CRITICAL: Preserve EVERY person's EXACT facial features, identity, skin tone, and expression — absolutely no modifications to any face. First, DETECT how many people are in the source image. Use ONLY the people present — do NOT add or remove anyone. IF ONE PERSON: Place the subject in a majestic palace mandap setting, dressed in rich traditional wedding attire — ornate red bridal lehenga with heavy gold zari embroidery OR elegant dark formal sherwani/suit as appropriate to the subject. The subject posed gracefully in a ceremonial stance. IF TWO OR MORE PEOPLE: Compose as a romantic wedding portrait — one person kneeling or standing beside the other in a ring ceremony or hand-holding pose. Each person in their appropriate wedding attire — one in rich crimson red bridal lehenga with gold embroidery and dupatta, the other in a dark formal suit or sherwani. BACKGROUND: Grand palatial mandap interior with ornate golden Mughal arches, intricate carved pillars, and filigree jali screens. Warm golden chandeliers with glowing candlelight. Lush red and orange marigold garland drapes hanging from the archways. Scattered rose petals on the floor. Rich warm ambient lighting creating a regal ceremonial atmosphere. COLOR PALETTE: Deep crimson red, rich gold, warm amber, dark chocolate brown, burnt orange marigold accents. Overall warm golden-hour tone suffusing the entire scene. ART STYLE: Classical oil painting quality with visible brushstroke texture — rich impasto on fabrics and ornaments, smooth blending on skin. Luminous glazing technique creating depth and warmth. Dramatic chiaroscuro lighting — warm golden key light from chandeliers above with soft amber fill. Museum-quality fine art portrait painting feel. Romantic, regal, timeless. STRICT RULES: Every face must remain 100% photorealistic and identity-preserved. No face swap, no beautification, no skin smoothing, no reshaping. Maintain exact skin tone, natural proportions. The oil painting style applies to clothing, background, lighting, and atmosphere ONLY — faces stay sharp and photorealistic. No text, no names, no dates, no watermarks.",
+            Category    = "PhotoArts",
+            Emoji       = "\U0001F3F0",  // 🏰
+            Color       = "#B71C1C",
+            SortOrder   = 223
+        },
+        new {
+            Name        = "Lifestyle Cafe Portrait",
+            Description = "Trendy cafe lifestyle editorial portrait with warm fashion tones",
+            Prompt      = @"Transform the subject into a stylish lifestyle editorial portrait set inside a trendy modern cafe or restaurant. CRITICAL: Preserve the subject's EXACT facial features, identity, skin tone, and expression — absolutely no modifications to the face. SETTING: Place the subject seated casually on a wooden stool or mid-century chair inside a chic contemporary cafe interior. Background features geometric wooden wall panels or exposed brick, hanging pendant lights with warm Edison bulbs, lush indoor plants, and curated decor. Warm ambient cafe lighting with natural window light from one side. STYLING: Dress the subject in smart-casual contemporary fashion — a stylish striped or patterned shirt with well-fitted trousers and clean sneakers or loafers. Relaxed confident pose — one hand resting on knee, body slightly angled, natural easy expression. The outfit colors should complement the warm interior tones. COLOR PALETTE: Warm earth tones — teal, forest green, warm wood brown, amber, cream, muted gold. Rich but natural color grading with warm highlights and soft shadows. Overall warm lifestyle editorial tone. ART STYLE: High-end fashion lifestyle photography quality. Shallow depth of field with the subject tack-sharp and background softly blurred. Natural skin tones with editorial color grading. Magazine editorial quality — GQ or lifestyle blog aesthetic. Clean, aspirational, effortlessly stylish. STRICT RULES: Face must remain 100% photorealistic and identity-preserved. No face swap, no beautification, no skin smoothing, no reshaping. Maintain exact skin tone, natural proportions. No text, no names, no watermarks.",
+            Category    = "Artistic",
+            Emoji       = "\u2615",  // ☕
+            Color       = "#5D4037",
+            SortOrder   = 224
+        },
+        new {
+            Name        = "Executive Studio Portrait",
+            Description = "Polished executive studio portrait with dramatic professional lighting",
+            Prompt      = @"Transform the subject into a polished executive studio portrait. CRITICAL: Preserve the subject's EXACT facial features, identity, skin tone, and expression — absolutely no modifications to the face. STYLING: Dress the subject in a sharp tailored formal suit — charcoal grey, navy, or dark classic suit with a crisp white dress shirt and silk tie. Impeccable grooming with professional presence. Seated confidently in a slight three-quarter pose with hands relaxed, shoulders squared, direct eye contact with the camera. Exudes authority, confidence, and approachability. BACKGROUND: Clean dark gradient studio backdrop — deep charcoal to black, smooth and distraction-free. No props, no furniture — pure studio environment. LIGHTING: Professional three-point studio lighting setup. Strong key light at 45 degrees creating defined Rembrandt triangle on cheek. Subtle fill light softening shadows. Hair/rim light separating the subject from the dark background with a subtle luminous edge. Catchlights visible in the eyes. Dramatic but not harsh — refined corporate studio quality. COLOR PALETTE: Dark sophisticated tones — charcoal, slate grey, deep navy, crisp white, subtle skin warmth. Muted, professional color grading with rich contrast. ART STYLE: High-end corporate portrait photography — Fortune 500 CEO headshot quality. Razor-sharp focus on the face and upper body with flawless exposure and white balance. Clean post-processing with natural skin texture preserved. Magazine cover executive portrait quality — powerful, refined, commanding. STRICT RULES: Face must remain 100% photorealistic and identity-preserved. No face swap, no beautification, no skin smoothing, no reshaping. Maintain exact skin tone, natural proportions. No text, no names, no watermarks.",
+            Category    = "Artistic",
+            Emoji       = "\U0001F454",  // 👔
+            Color       = "#37474F",
+            SortOrder   = 225
+        },
+        new {
+            Name        = "Dramatic B&W Close-up",
+            Description = "Moody black & white intimate close-up with dramatic side lighting",
+            Prompt      = @"Transform the subject into a dramatic black and white fine-art close-up portrait. CRITICAL: Preserve the subject's EXACT facial features, identity, skin tone structure, and expression — absolutely no modifications to the face. FRAMING: Tight intimate close-up — face and upper shoulders only, slightly cropped at the top of the head. The subject in a contemplative or introspective pose — one hand near the chin or jawline, fingers relaxed and natural. Slight head tilt with a thoughtful, intense gaze — either direct at camera or slightly off-axis. LIGHTING: Dramatic single-source side lighting from one direction creating deep chiaroscuro contrast. One side of the face brightly illuminated, the other falling into rich deep shadow. Strong highlight on the cheekbone, bridge of nose, and jawline edge. Subtle rim light catching individual hair strands. Deep blacks in the shadows with bright specular highlights. No fill light — embrace the darkness. COLOR: Entirely monochrome black and white. Rich tonal range from pure black to bright white with full spectrum of greys. No color tinting, no sepia, no blue tone — pure classic B&W. Deep grain texture reminiscent of classic Tri-X or HP5 film. ART STYLE: Fine-art portrait photography in the tradition of Peter Lindbergh, Helmut Newton, and Annie Leibovitz. Raw, authentic, emotionally powerful. Minimal retouching — skin texture, pores, and natural details fully visible. The drama comes from light and shadow, not post-processing. Cinematic, moody, gallery-exhibition quality. Background completely black — no distractions. STRICT RULES: Face must remain 100% photorealistic and identity-preserved. No face swap, no beautification, no skin smoothing, no reshaping. Maintain exact facial structure and natural proportions. No text, no names, no watermarks.",
+            Category    = "Artistic",
+            Emoji       = "\U0001F3AD",  // 🎭
+            Color       = "#212121",
+            SortOrder   = 226
+        },
+        // ── Fun styles batch (from Test styles folder) ──
+        new {
+            Name        = "Street Fashion Stroll",
+            Description = "Stylish cable-knit cardigan street fashion editorial portrait",
+            Prompt      = @"Transform the subject into a stylish street fashion editorial portrait. CRITICAL: Preserve the subject's EXACT facial features, identity, skin tone, and expression — absolutely no modifications to the face. STYLING: Dress the subject in a classic cable-knit shawl-collar cardigan in soft grey or neutral tone over a crisp white shirt with a striped tie. Well-fitted cream or khaki trousers. Stylish aviator or wayfarer sunglasses. A luxury wristwatch on one hand, other hand casually holding a dark overcoat. POSE: Standing confidently on an urban sidewalk, mid-stride or paused casually. One hand adjusting the cardigan, relaxed confident body language. SETTING: Modern city street with soft bokeh — blurred urban architecture, clean sidewalk, natural daylight. Shallow depth of field with subject tack-sharp. COLOR PALETTE: Soft neutrals — grey, cream, white, dark brown accents. Warm natural light with gentle shadows. ART STYLE: High-end fashion street photography — GQ editorial quality. Natural skin tones, crisp detail, aspirational lifestyle. STRICT RULES: Face must remain 100% photorealistic and identity-preserved. No face swap, no beautification, no skin smoothing, no reshaping. Maintain exact skin tone, natural proportions. No text, no names, no watermarks.",
+            Category    = "Fun",
+            Emoji       = "\U0001F576\uFE0F",  // 🕶️
+            Color       = "#78909C",
+            SortOrder   = 227
+        },
+        new {
+            Name        = "Home Vibes Casual",
+            Description = "Casual hoodie and headphones in modern kitchen lifestyle shot",
+            Prompt      = @"Transform the subject into a casual home lifestyle portrait. CRITICAL: Preserve the subject's EXACT facial features, identity, skin tone, and expression — absolutely no modifications to the face. STYLING: Dress the subject in a comfortable navy blue zip-up hoodie over a white crew-neck t-shirt. Wireless headphones draped around the neck. Holding a smartphone in one hand, casually looking at it. SETTING: Modern stylish kitchen with dark cabinets, warm under-cabinet LED strip lighting, open shelving with bottles and accessories. A stainless steel pot visible on the counter. Warm ambient interior lighting with moody evening atmosphere. POSE: Standing casually, slightly leaning, absorbed in the phone. Relaxed natural body language. COLOR PALETTE: Deep navy, white, warm wood tones, dark kitchen tones with warm amber accent lighting. Cozy, intimate evening vibe. ART STYLE: Lifestyle photography — influencer content quality. Shallow depth of field with warm color grading. Natural, relatable, effortlessly cool. STRICT RULES: Face must remain 100% photorealistic and identity-preserved. No face swap, no beautification, no skin smoothing, no reshaping. No text, no names, no watermarks.",
+            Category    = "Fun",
+            Emoji       = "\U0001F3E0",  // 🏠
+            Color       = "#1A237E",
+            SortOrder   = 228
+        },
+        new {
+            Name        = "Summer Clean Minimal",
+            Description = "All-white minimalist summer look against warm terracotta wall",
+            Prompt      = @"Transform the subject into a clean minimalist summer fashion portrait. CRITICAL: Preserve the subject's EXACT facial features, identity, skin tone, and expression — absolutely no modifications to the face. STYLING: Dress the subject in a fitted white ribbed polo or open-collar knit shirt with cream or off-white tailored trousers. A thin gold chain necklace. Stylish dark sunglasses. Clean minimal look — no excess accessories. POSE: Dynamic confident pose — one hand adjusting the collar or shirt, the other on the hip. Body slightly angled. SETTING: Clean warm terracotta or burnt orange wall as background. Bright natural sunlight casting crisp shadows. Minimal environment — just the subject against the wall. COLOR PALETTE: White, cream, warm terracotta orange, golden skin tones. Bright, sun-kissed, Mediterranean summer vibe. ART STYLE: High-end minimalist fashion photography. Clean sharp focus, bright natural lighting, editorial quality. Fresh, confident, effortlessly stylish. STRICT RULES: Face must remain 100% photorealistic and identity-preserved. No face swap, no beautification, no skin smoothing, no reshaping. No text, no names, no watermarks.",
+            Category    = "Fun",
+            Emoji       = "\u2600\uFE0F",  // ☀️
+            Color       = "#E65100",
+            SortOrder   = 229
+        },
+        new {
+            Name        = "Metallic Puffer Editorial",
+            Description = "Silver metallic oversized puffer jacket with dynamic fashion pose",
+            Prompt      = @"Transform the subject into a high-fashion editorial portrait wearing a metallic outfit. CRITICAL: Preserve the subject's EXACT facial features, identity, skin tone, and expression — absolutely no modifications to the face. STYLING: Dress the subject in a highly reflective metallic silver oversized puffer jacket over a fitted black base layer. Dark fitted jeans or trousers with chunky metallic or black sneakers. Hair styled slick and sharp. POSE: Dynamic mid-stride or action pose — jacket flaring open with movement, arms slightly spread. Full-body shot showing the entire outfit. SETTING: Rich solid-colored studio backdrop — deep crimson red or burgundy. Clean studio floor. Professional studio flash lighting creating sharp reflections on the metallic jacket surface. LIGHTING: Multiple light sources creating dramatic specular highlights on the silver jacket. Rim light separating subject from background. COLOR PALETTE: Silver metallic, deep black, rich red backdrop. High contrast, bold, futuristic. ART STYLE: High-end fashion editorial — Vogue or avant-garde fashion magazine quality. Sharp, dramatic, statement-making. STRICT RULES: Face must remain 100% photorealistic and identity-preserved. No face swap, no beautification, no skin smoothing, no reshaping. No text, no names, no watermarks.",
+            Category    = "Fun",
+            Emoji       = "\U0001FA9E",  // 🪞
+            Color       = "#B0BEC5",
+            SortOrder   = 230
+        },
+        new {
+            Name        = "Glass Cube Display",
+            Description = "Standing inside geometric glass/metal cube frame in dark studio",
+            Prompt      = @"Transform the subject into a dramatic fashion portrait inside a geometric display frame. CRITICAL: Preserve the subject's EXACT facial features, identity, skin tone, and expression — absolutely no modifications to the face. STYLING: Dress the subject in an all-black modern minimalist outfit — sleek black jacket, black turtleneck, slim black trousers, polished black shoes. Clean sharp silhouette. POSE: Standing tall and confident inside a large rectangular open metal frame or glass cube structure — like a human display case. Feet shoulder-width apart, hands at sides or one hand in pocket. SETTING: Dark dramatic studio environment. The metal frame is matte black geometric structure surrounding the subject. Moody atmospheric lighting — single key light from one side, deep shadows everywhere else. Floor reflecting subtle light. LIGHTING: Low-key dramatic — one strong directional light creating sharp contrast. The metal frame casting geometric shadows. Theatrical, gallery-installation aesthetic. COLOR PALETTE: Pure black, dark grey, subtle steel highlights. Monochromatic dark palette. ART STYLE: Avant-garde fashion photography meets art installation. Minimal, architectural, powerful. STRICT RULES: Face must remain 100% photorealistic and identity-preserved. No face swap, no beautification, no skin smoothing, no reshaping. No text, no names, no watermarks.",
+            Category    = "Fun",
+            Emoji       = "\U0001F532",  // ▪️🔲
+            Color       = "#212121",
+            SortOrder   = 231
+        },
+        new {
+            Name        = "F1 Race Driver",
+            Description = "Formula 1 racing driver in team suit sitting in race car cockpit",
+            Prompt      = @"Transform the subject into a Formula 1 racing driver portrait. CRITICAL: Preserve the subject's EXACT facial features, identity, skin tone, and expression — absolutely no modifications to the face. STYLING: Dress the subject in a professional F1 racing team suit — vivid red base with team sponsor patches and logos (generic racing-style patches, no real brand names). Racing gloves visible, a luxury chronograph watch on the wrist. Stylish aviator sunglasses pushed slightly down the nose. POSE: Seated in the driver's seat of a high-end sports car or racing cockpit. One hand on the steering wheel, the other thoughtfully touching the chin or adjusting sunglasses. Relaxed confident driver energy. SETTING: Inside a luxury or racing car cockpit — leather steering wheel, carbon fiber details, racing instruments visible. View through windshield slightly blurred. Moody interior car lighting. COLOR PALETTE: Vivid racing red, black, carbon grey with gold/yellow sponsor accent patches. Dramatic, high-octane energy. ART STYLE: Automotive lifestyle photography — motorsport magazine quality. Cinematic shallow depth of field, rich color grading. Fast, powerful, aspirational. STRICT RULES: Face must remain 100% photorealistic and identity-preserved. No face swap, no beautification, no skin smoothing, no reshaping. No text, no names, no watermarks.",
+            Category    = "Fun",
+            Emoji       = "\U0001F3CE\uFE0F",  // 🏎️
+            Color       = "#D32F2F",
+            SortOrder   = 232
+        },
+        new {
+            Name        = "Leather Rebel Studio",
+            Description = "Edgy black leather jacket on bold red studio backdrop",
+            Prompt      = @"Transform the subject into an edgy fashion portrait with a bold studio setup. CRITICAL: Preserve the subject's EXACT facial features, identity, skin tone, and expression — absolutely no modifications to the face. STYLING: Dress the subject in a fitted black leather biker jacket over a black crew-neck top. Dark jeans or leather pants. Dark lace-up boots. Hair styled sharp and slicked. Confident intense expression. POSE: Seated on a minimalist black metal stool or chair, leaning forward slightly with elbows on knees or one hand on knee. Full-body shot. Commanding presence. SETTING: Bold solid red studio backdrop — vivid crimson or scarlet. Clean studio floor, no props except the stool. LIGHTING: Professional studio lighting — strong key light from above-left, creating sharp shadows. The red backdrop evenly lit and saturated. Subject well-separated from background. Dramatic but clean. COLOR PALETTE: Black leather, deep red backdrop, skin tones. High contrast, bold, rebellious. ART STYLE: High-end studio fashion photography — rock-star editorial quality. Clean sharp focus, dramatic color contrast. Edgy, magnetic, commanding. STRICT RULES: Face must remain 100% photorealistic and identity-preserved. No face swap, no beautification, no skin smoothing, no reshaping. No text, no names, no watermarks.",
+            Category    = "Fun",
+            Emoji       = "\U0001F9F9",  // 🧥→
+            Color       = "#B71C1C",
+            SortOrder   = 233
+        },
+        new {
+            Name        = "Velvet Blazer GQ",
+            Description = "Rich velvet blazer editorial on muted olive studio backdrop",
+            Prompt      = @"Transform the subject into a sophisticated fashion editorial portrait. CRITICAL: Preserve the subject's EXACT facial features, identity, skin tone, and expression — absolutely no modifications to the face. STYLING: Dress the subject in a rich deep blue or navy velvet blazer over a dark open-collar shirt. Slim-fit dark trousers with polished black loafers. Refined grooming — neat beard or clean-shaven as per the subject's existing style. POSE: Seated dynamically on a large raw concrete or stone geometric block/bench. One leg crossed or extended. Relaxed confident editorial pose with one arm resting on the block. SETTING: Muted warm olive green or khaki-toned studio backdrop. Clean floor. Single geometric block as the only prop. Sophisticated minimal studio environment. LIGHTING: Soft directional studio light from upper left. Gentle shadows, flattering skin illumination. Subtle fill light. Warm tonal quality. COLOR PALETTE: Deep navy blue velvet, dark charcoal, warm olive green, skin tones. Muted, sophisticated, editorial. ART STYLE: GQ or Esquire magazine fashion editorial. Refined, intelligent, stylish. Professional studio photography quality. STRICT RULES: Face must remain 100% photorealistic and identity-preserved. No face swap, no beautification, no skin smoothing, no reshaping. No text, no names, no watermarks.",
+            Category    = "Fun",
+            Emoji       = "\U0001F454",  // 👔
+            Color       = "#1A237E",
+            SortOrder   = 234
+        },
+        new {
+            Name        = "Car Lean Boss",
+            Description = "Smart casual leaning on white sedan with urban backdrop",
+            Prompt      = @"Transform the subject into an aspirational car lifestyle portrait. CRITICAL: Preserve the subject's EXACT facial features, identity, skin tone, and expression — absolutely no modifications to the face. STYLING: Dress the subject in a clean white zip-up knit sweater or cardigan over a white dress shirt with a slim dark tie. Dark fitted trousers. Stylish aviator sunglasses. A luxury wristwatch. Smart casual boss energy. POSE: Leaning casually against the hood or front of a clean white modern sedan. One hand on the car, the other in pocket or adjusting sunglasses. Full-body shot with the car prominent. Relaxed confident stance. SETTING: Urban outdoor setting — residential street or parking area. Overcast or soft daylight. The white car clean and polished. Buildings softly blurred in background. COLOR PALETTE: White, cream, dark accents (tie, trousers), automotive chrome. Clean, crisp, aspirational. ART STYLE: Automotive lifestyle photography — social media influencer quality. Sharp focus on subject, natural lighting, clean composition. STRICT RULES: Face must remain 100% photorealistic and identity-preserved. No face swap, no beautification, no skin smoothing, no reshaping. No text, no names, no watermarks.",
+            Category    = "Fun",
+            Emoji       = "\U0001F697",  // 🚗
+            Color       = "#607D8B",
+            SortOrder   = 235
+        },
+        new {
+            Name        = "Tonal Studio Editorial",
+            Description = "Suit and turtleneck on solid color studio with geometric block",
+            Prompt      = @"Transform the subject into a sophisticated tonal studio fashion portrait. CRITICAL: Preserve the subject's EXACT facial features, identity, skin tone, and expression — absolutely no modifications to the face. STYLING: Dress the subject in a textured dark grey or charcoal suit — herringbone or subtle check pattern — over a black turtleneck. Dark polished oxford shoes. Clean minimal styling. POSE: Seated on a dark geometric cube or angular block. Relaxed but commanding — one hand on knee, leaning slightly. Full-body shot showing the complete outfit and shoes. SETTING: Solid rich-colored studio backdrop — deep emerald green, forest green, or teal. Clean studio floor with the geometric block as the only prop. LIGHTING: Soft directional studio lighting creating the subject's shadow on the colored wall. Even color saturation on the backdrop. Flattering skin lighting. COLOR PALETTE: Charcoal grey suit, black turtleneck, deep green backdrop. Sophisticated tonal harmony. ART STYLE: High-end studio fashion editorial — Esquire or luxury brand campaign quality. Refined, powerful, stylish. STRICT RULES: Face must remain 100% photorealistic and identity-preserved. No face swap, no beautification, no skin smoothing, no reshaping. No text, no names, no watermarks.",
+            Category    = "Fun",
+            Emoji       = "\U0001F7E9",  // 🟩
+            Color       = "#2E7D32",
+            SortOrder   = 236
+        },
+        new {
+            Name        = "White Ring Portal",
+            Description = "All-white outfit standing inside large circular ring frame in white studio",
+            Prompt      = @"Transform the subject into a futuristic minimalist fashion portrait. CRITICAL: Preserve the subject's EXACT facial features, identity, skin tone, and expression — absolutely no modifications to the face. STYLING: Dress the subject in an all-white monochrome outfit — white cable-knit sweater, white cargo pants or relaxed trousers, white chunky sneakers. Clean head-to-toe white look. POSE: Standing confidently inside a large suspended circular ring or hoop — a white matte architectural ring frame (about 2 meters diameter) hanging from above. The subject centered within the ring. Arms at sides or slightly out. Full-body shot. SETTING: Clean bright white studio — white floor, white background. The circular ring is the only structural element. Bright even lighting with minimal shadows. Ultra-clean minimalist environment. LIGHTING: High-key bright studio lighting — soft and even from all directions. Minimal shadows. Clean, futuristic, fashion-forward. COLOR PALETTE: Pure white on white with subtle grey shadows for depth. Pristine, clean, futuristic. ART STYLE: Avant-garde minimalist fashion photography — high-concept editorial. Clean, bold, architectural. STRICT RULES: Face must remain 100% photorealistic and identity-preserved. No face swap, no beautification, no skin smoothing, no reshaping. No text, no names, no watermarks.",
+            Category    = "Fun",
+            Emoji       = "\u2B55",  // ⭕
+            Color       = "#EEEEEE",
+            SortOrder   = 237
+        },
+        new {
+            Name        = "Earth Tone Artisan",
+            Description = "Flowing rust/terracotta outfit next to large clay vase on warm backdrop",
+            Prompt      = @"Transform the subject into an earthy artisan fashion portrait. CRITICAL: Preserve the subject's EXACT facial features, identity, skin tone, and expression — absolutely no modifications to the face. STYLING: Dress the subject in a flowing rust, burnt sienna, or terracotta colored ensemble — a relaxed satin or linen shirt with wide-leg matching trousers. Minimal earth-tone accessories. Suede boots or sandals. Natural relaxed elegance. POSE: Standing in a relaxed fluid pose next to a large sculptural ceramic or clay vase (about waist height). One hand touching or resting on the vase. Body slightly turned, weight on one leg. Artistic, contemplative energy. SETTING: Warm monochromatic studio backdrop in matching earth tones — sandy beige, warm tan, or terracotta. The large artisan vase as the only prop. Clean warm studio floor. LIGHTING: Soft warm directional light creating gentle shadows. Golden-hour warmth. Flattering even skin illumination. COLOR PALETTE: Rust, terracotta, burnt sienna, sandy beige, warm brown — entirely warm earth-tone monochrome. ART STYLE: Artistic fashion photography with sculptural quality. Warm, organic, gallery-exhibition feel. STRICT RULES: Face must remain 100% photorealistic and identity-preserved. No face swap, no beautification, no skin smoothing, no reshaping. No text, no names, no watermarks.",
+            Category    = "Fun",
+            Emoji       = "\U0001F3FA",  // 🏺
+            Color       = "#BF360C",
+            SortOrder   = 238
+        },
+        new {
+            Name        = "Neon Pillar Studio",
+            Description = "Dark suit leaning against neon-glowing pillar on black backdrop",
+            Prompt      = @"Transform the subject into a dramatic neon-accented studio fashion portrait. CRITICAL: Preserve the subject's EXACT facial features, identity, skin tone, and expression — absolutely no modifications to the face. STYLING: Dress the subject in a sharp dark pinstripe or charcoal suit with a black turtleneck underneath. Polished black shoes. Clean sharp tailoring. POSE: Standing tall, leaning one shoulder casually against a tall vertical neon-lit pillar or column. Full-body shot — one leg crossed in front of the other. Confident, magnetic presence. SETTING: Pure black studio backdrop. A single tall cylindrical or rectangular pillar that glows with vivid neon color — bright yellow-green, electric lime, or chartreuse. The neon pillar is the only light source accent besides the studio key light. LIGHTING: Low-key dramatic — most of the image in dark shadow. The neon pillar casting vivid colored light on the side of the subject's suit and face. A separate key light illuminating the face clearly. Strong contrast between darkness and neon glow. COLOR PALETTE: Black, dark charcoal, vivid neon yellow-green accent. Dramatic contrast. ART STYLE: High-fashion editorial with avant-garde lighting — Tom Ford campaign quality. Sleek, dramatic, unforgettable. STRICT RULES: Face must remain 100% photorealistic and identity-preserved. No face swap, no beautification, no skin smoothing, no reshaping. No text, no names, no watermarks.",
+            Category    = "Fun",
+            Emoji       = "\U0001F7E2",  // 🟢
+            Color       = "#C6FF00",
+            SortOrder   = 239
+        },
+        new {
+            Name        = "Bold Color Block Pop",
+            Description = "Vibrant sweater matching studio backdrop with white cube seat",
+            Prompt      = @"Transform the subject into a bold color-block fashion portrait. CRITICAL: Preserve the subject's EXACT facial features, identity, skin tone, and expression — absolutely no modifications to the face. STYLING: Dress the subject in a vibrant solid-colored ribbed knit sweater — bright orange, hot pink, electric blue, or vivid red. Clean white trousers or chinos. White fashion sneakers. Black sunglasses. Minimal, clean, bold. POSE: Seated on a clean white geometric cube or block. Relaxed confident pose — elbows on knees, leaning forward slightly, or one leg extended. Full-body shot. SETTING: The studio backdrop AND floor are the SAME vivid color as the sweater — creating a monochromatic color-drenched environment. The white cube and white trousers provide crisp contrast. Everything is one bold color except the white elements. LIGHTING: Bright even studio lighting. The colored backdrop evenly saturated. Clean shadows under the cube. Pop-art level color saturation. COLOR PALETTE: One dominant vivid color (orange, pink, blue) + crisp white contrast + dark sunglasses accent. Bold, fun, eye-catching. ART STYLE: Bold pop fashion photography — Instagram-viral, social-media-optimized editorial. Vibrant, energetic, statement-making. STRICT RULES: Face must remain 100% photorealistic and identity-preserved. No face swap, no beautification, no skin smoothing, no reshaping. No text, no names, no watermarks.",
+            Category    = "Fun",
+            Emoji       = "\U0001F7E7",  // 🟧
+            Color       = "#FF6D00",
+            SortOrder   = 240
+        },
+        new {
+            Name        = "Supermarket Freeze Frame",
+            Description = "Funny action pose in grocery store with flying food items",
+            Prompt      = @"Transform the subject into a comedic supermarket action-freeze portrait. CRITICAL: Preserve the subject's EXACT facial features, identity, skin tone, and expression — absolutely no modifications to the face. STYLING: Dress the subject in a smart-casual blazer over a dark t-shirt with jeans and sneakers. Oversized glasses or round spectacles for extra character. Surprised or dramatically shocked facial expression with wide eyes and open mouth. POSE: Dynamic mid-action freeze-frame — the subject in mid-slip or dramatic reaction pose in the middle of a supermarket aisle. One foot sliding on a banana peel, arms flailing for balance. Exaggerated comedic body language frozen in motion. SETTING: Inside a brightly lit modern grocery supermarket. Neatly stocked shelves of colorful products on both sides forming an aisle. Various food items frozen mid-air around the subject — flying vegetables (lettuce, tomatoes, peppers), fruits, groceries tumbling off shelves. The banana peel visible on the floor. LIGHTING: Bright commercial supermarket lighting — even fluorescent overhead. Clean, sharp, high-key. COLOR PALETTE: Bright supermarket colors — vivid reds, greens, yellows of produce. Clean white lighting. Fun, chaotic, colorful. ART STYLE: Hyper-realistic cinematic freeze-frame photography — like a movie still from a comedy. Sharp detail, dynamic composition, humor-filled. STRICT RULES: Face must remain 100% photorealistic and identity-preserved. No face swap, no beautification, no skin smoothing, no reshaping. No text, no names, no watermarks.",
+            Category    = "Fun",
+            Emoji       = "\U0001F6D2",  // 🛒
+            Color       = "#43A047",
+            SortOrder   = 241
+        },
+        new {
+            Name        = "Pastel Mono Studio",
+            Description = "Single pastel color head-to-toe outfit on transparent chair in white studio",
+            Prompt      = @"Transform the subject into a minimalist pastel monochrome fashion portrait. CRITICAL: Preserve the subject's EXACT facial features, identity, skin tone, and expression — absolutely no modifications to the face. STYLING: Dress the subject in a complete monochromatic pastel outfit — head-to-toe in a single soft pastel color (mint green, baby blue, lavender, or blush pink). Relaxed-fit linen or satin shirt, matching wide-leg trousers, and matching sneakers or loafers. Everything the same soft pastel shade. POSE: Seated elegantly on a transparent acrylic ghost chair. Relaxed open pose — hands resting on armrests or knees. Full-body shot showing the complete outfit and transparent chair. SETTING: Clean bright white studio — white floor, white background. The transparent chair is the only prop. Ultra-minimal environment. High-key bright lighting. LIGHTING: Soft bright even studio lighting from multiple angles. Minimal shadows. Clean and fresh. The pastel outfit pops against the pure white background. COLOR PALETTE: Single soft pastel color + pure white. Pristine, fresh, fashion-forward. ART STYLE: High-concept minimalist fashion editorial — editorial campaign quality. Clean, sophisticated, Instagram-ready. STRICT RULES: Face must remain 100% photorealistic and identity-preserved. No face swap, no beautification, no skin smoothing, no reshaping. No text, no names, no watermarks.",
+            Category    = "Fun",
+            Emoji       = "\U0001F49A",  // 💚
+            Color       = "#A5D6A7",
+            SortOrder   = 242
+        },
+        new {
+            Name        = "Graffiti Self-Portrait",
+            Description = "Subject sitting below a graffiti street art mural of themselves",
+            Prompt      = @"Transform the subject into an urban street art portrait. CRITICAL: Preserve the subject's EXACT facial features, identity, skin tone, and expression — absolutely no modifications to the face. COMPOSITION: The subject sitting on the ground at the base of a large concrete or brick wall. ABOVE AND BEHIND them on the wall is a large vibrant graffiti/street-art mural depicting the SAME person — their face and upper body painted in bold spray-paint style with vivid colors, drips, and urban art elements. The real person below and their painted mural version above create a striking mirror effect. STYLING: Dress the subject in casual urban streetwear — a hoodie or oversized graphic tee, distressed jeans, and sneakers (red Converse or similar). The mural version wears similar clothing. POSE: Sitting on the ground against the wall — one knee up, one hand behind the head or running through hair. Looking directly at camera. Cool relaxed urban attitude. SETTING: Gritty urban alley or street. Raw concrete/brick wall covered in colorful graffiti tags and spray paint around the main mural. Street debris, dim alley lighting. LIGHTING: Moody urban lighting — warm streetlight from one side. The wall slightly darker. Cinematic urban atmosphere. COLOR PALETTE: Vibrant graffiti colors (neon greens, pinks, blues) on the mural contrasting with the real subject's more muted clothing. Urban, raw, artistic. ART STYLE: Urban street photography meets street art culture. Gritty, authentic, culturally rich. STRICT RULES: Face must remain 100% photorealistic and identity-preserved — both the real person AND the mural must clearly look like the same person. No text, no names, no watermarks.",
+            Category    = "Fun",
+            Emoji       = "\U0001F3A8",  // 🎨
+            Color       = "#E91E63",
+            SortOrder   = 243
+        },
+        new {
+            Name        = "CCTV Surveillance Style",
+            Description = "Walking on crosswalk with CCTV detection boxes and surveillance overlay",
+            Prompt      = @"Transform the subject into a CCTV surveillance camera footage-style image. CRITICAL: Preserve the subject's EXACT facial features, identity, skin tone, and expression — absolutely no modifications to the face. COMPOSITION: The subject walking confidently across a zebra crosswalk on a busy urban street, captured as if from a mounted CCTV security camera at a slight elevated angle. OVERLAY ELEMENTS: Digital surveillance HUD overlay on the image including: a green or blue rectangle detection box around the subject's face labeled 'IDENTITY CONFIRMED' with a 'MATCH: 98.7%%' confidence score. Additional detection boxes around clothing items labeled 'OBJECT: LEATHER JACKET', 'OBJECT: DENIM JEANS' etc. Timestamp in the corner showing 'TIME: 14:37:19' and 'DATE: 2024-10-26'. A small 'FEED: LIVE' or 'RESOLUTION: 4K' indicator in the bottom corner. STYLING: Dress the subject in a stylish street outfit — leather jacket, dark jeans, boots, sunglasses. Holding a coffee cup. SETTING: Urban city crosswalk — cars blurred in background, buildings, traffic lights. Slight surveillance camera lens distortion at edges. COLOR PALETTE: Slightly desaturated, cool-toned surveillance footage look. The detection boxes in bright green or cyan lines with white text. ART STYLE: Hyper-realistic AI surveillance aesthetic — cinematic meets tech dystopian. Sharp, modern, thought-provoking. STRICT RULES: Face must remain 100% photorealistic and identity-preserved. No face swap, no beautification, no skin smoothing, no reshaping. No text with real names — only generic detection labels.",
+            Category    = "Fun",
+            Emoji       = "\U0001F4F9",  // 📹
+            Color       = "#00BFA5",
+            SortOrder   = 244
+        },
+        new {
+            Name        = "Motorcycle Pencil Sketch",
+            Description = "Black and white pencil sketch riding a sport motorcycle in city",
+            Prompt      = @"Transform the subject into a detailed black and white pencil sketch riding a motorcycle. CRITICAL: Preserve the subject's EXACT facial features and identity in the sketch. ART STYLE: Highly detailed graphite pencil illustration on white paper. Fine linework with cross-hatching and shading for depth. Visible pencil strokes and paper texture. No color — pure black and white graphite. COMPOSITION: The subject seated on a sleek sport motorcycle (generic design), riding through a city street. Three-quarter view showing both the rider and the bike. The subject wearing a leather jacket, looking forward with confidence. Hair flowing slightly with wind. SETTING: Urban city backdrop rendered in detailed pencil sketch — tall buildings, lampposts, street details, all in graphite linework. The city forms a detailed but slightly lighter background behind the sharp foreground subject. An artist's signature-style mark in the bottom corner. TECHNIQUE: Varying pencil pressure — dark heavy strokes on the motorcycle and jacket for depth, lighter delicate strokes on the face for softness, fine detail work on the city background. Professional illustration quality. STRICT RULES: The subject's face must be clearly recognizable and accurately rendered in the sketch — same facial structure, features, and proportions. No text, no names, no watermarks.",
+            Category    = "Fun",
+            Emoji       = "\U0001F3CD\uFE0F",  // 🏍️
+            Color       = "#424242",
+            SortOrder   = 245
+        },
+        new {
+            Name        = "Mount Rushmore Monument",
+            Description = "Subject's face carved into a granite mountain monument like Mount Rushmore",
+            Prompt      = @"Transform the subject into a Mount Rushmore-style monumental portrait. CRITICAL: Preserve the subject's EXACT facial features, identity, and proportions — the carved faces must be clearly recognizable as the person. COMPOSITION: A massive granite mountain monument carved with the subject's face — shown FOUR times at slightly different angles (front, three-quarter left, three-quarter right, profile) side by side, exactly like Mount Rushmore. Each carved face is enormous, rising from the rocky mountainside. The carvings show head and upper shoulders emerging from the raw stone. SETTING: Dramatic outdoor natural landscape — the carved mountain set against a partly cloudy blue sky with sunlight illuminating the stone faces. Rocky terrain, sparse vegetation, and desert/mountain landscape at the base. Pine trees on the hillsides. STYLE: Hyper-realistic photographic quality — the carved stone faces look like real granite with natural rock texture, weathering, and shadows in the carved recesses. The surrounding landscape is photorealistic natural scenery. Warm golden sunlight creating dramatic shadows on the stone carvings. COLOR PALETTE: Natural granite grey, warm sandstone, blue sky, green vegetation. Monumental, grand, awe-inspiring. STRICT RULES: Each carved face must clearly look like the subject — same facial structure, nose, jawline. The carving should look like real stone, not painted. No text, no names.",
+            Category    = "Fun",
+            Emoji       = "\U0001F5FB",  // 🗻
+            Color       = "#795548",
+            SortOrder   = 246
+        },
+        new {
+            Name        = "Mirror Shatter Portrait",
+            Description = "Subject surrounded by shattered mirror fragments with blue reflective lighting",
+            Prompt      = @"Transform the subject into a dramatic shattered mirror portrait. CRITICAL: Preserve the subject's EXACT facial features, identity, skin tone, and expression — absolutely no modifications to the face. COMPOSITION: The subject at the center, surrounded by large shattered mirror fragments and broken glass shards floating in the air around them. Each mirror fragment reflects parts of the subject from different angles — creating a kaleidoscopic multi-reflection effect. The fragments are large, angular, and dramatically arranged. STYLING: Dress the subject in luxurious dark clothing — an ornate dark brocade jacket or embroidered blazer. Dark sunglasses or dramatic eyewear. Statement jewelry or chains. LIGHTING: Dramatic cool-toned lighting — deep electric blue and silver. The mirror fragments catching and bouncing light creating bright specular highlights and reflections. Strong directional key light from one side. The broken glass refracting light into sparkles and flares. SETTING: Dark atmospheric void — black background with the mirror fragments and subject as the focal point. Floating shards creating depth layers. COLOR PALETTE: Electric blue, silver, chrome, deep black. Cold, dramatic, powerful. ART STYLE: High-concept fashion photography — fragmented reality aesthetic. Cinematic, visually striking, art-gallery quality. STRICT RULES: Face must remain 100% photorealistic and identity-preserved. No face swap, no beautification, no skin smoothing, no reshaping. No text, no names, no watermarks.",
+            Category    = "Fun",
+            Emoji       = "\U0001F48E",  // 💎
+            Color       = "#1565C0",
+            SortOrder   = 247
+        },
+        new {
+            Name        = "Impressionist Fire Aura",
+            Description = "Vivid oil painting with fire and smoke swirling around the subject",
+            Prompt      = @"Transform the subject into a vivid impressionist oil painting with dynamic fire elements. CRITICAL: Preserve the subject's EXACT facial features and identity — the face must remain photorealistic even within the painterly style. ART STYLE: Rich impasto oil painting technique with thick visible brushstrokes. Bold expressive color mixing directly on canvas. Energetic, dynamic brushwork with raw texture and movement. COMPOSITION: Close-up portrait of the subject from shoulders up. Their hair and the space around them dissolving into swirling flames, smoke, and dynamic paint strokes. Fire and warm energy emanating from and around the subject — flames licking upward from the shoulders and through the hair. Smoke wisps and ember particles scattered throughout. The face remains sharp and realistic while everything around it becomes increasingly painterly and abstract. COLOR PALETTE: Vivid warm spectrum — deep burnt orange, bright cadmium yellow, crimson red, gold, with cool blue and white accents in highlights. Rich saturated oil paint colors. The background a mix of dark smoke and bright flame. TECHNIQUE: The face rendered with fine realistic detail. Hair transitions into flowing paint strokes. Background and surroundings are fully impressionist — loose, energetic, expressive. Fire elements feel alive and dynamic. STRICT RULES: Face must remain 100% photorealistic and identity-preserved. No face swap, no beautification, no skin smoothing, no reshaping. Maintain exact facial features. No text, no names, no watermarks.",
+            Category    = "Fun",
+            Emoji       = "\U0001F525",  // 🔥
+            Color       = "#E65100",
+            SortOrder   = 248
+        },
+        new {
+            Name        = "Street Art Mural Face",
+            Description = "Large colorful graffiti-style mural of subject's face on urban wall",
+            Prompt      = @"Transform the subject into a photorealistic scene of a large street art mural on an urban wall. CRITICAL: Preserve the subject's EXACT facial features and identity — the mural face must be clearly recognizable. COMPOSITION: A large-scale colorful graffiti/street-art mural painted on the side of a building or concrete wall. The mural depicts the subject's face and upper body in vivid spray-paint style — bold outlines, vibrant colors, dripping paint, geometric patterns mixed with realistic features. The mural is enormous — covering most of the wall. SETTING: Urban street environment — the wall is part of a building on a city sidewalk. Passers-by or the subject themselves standing at the base of the wall looking up at the mural, providing scale. Street elements — trash cans, fire hydrants, urban fixtures. Daytime with natural lighting on the wall. ART STYLE (for the mural): Bold spray-paint street art — thick black outlines, vivid fills in electric blue, magenta, yellow, teal. Paint drips running down. Geometric and abstract background patterns around the realistic face. Mixed techniques — stencil, freehand, and paste-up elements. ART STYLE (overall image): Photorealistic street photography of the wall and surroundings — the mural is painted art, but the photo of it is sharp and real. COLOR PALETTE: Vibrant graffiti colors on mural, urban grey/concrete surroundings. Bold contrast. STRICT RULES: The mural face must clearly look like the subject. No text with real names. No watermarks.",
+            Category    = "Fun",
+            Emoji       = "\U0001F5BC\uFE0F",  // 🖼️
+            Color       = "#7B1FA2",
+            SortOrder   = 249
+        },
+        new {
+            Name        = "Storm Epic Backdrop",
+            Description = "Standing heroically before a dramatic tornado or storm with cinematic scale",
+            Prompt      = @"Transform the subject into an epic storm backdrop portrait. CRITICAL: Preserve the subject's EXACT facial features, identity, skin tone, and expression — absolutely no modifications to the face. COMPOSITION: The subject standing in the foreground, facing the camera, with a MASSIVE dramatic storm system behind them. A huge tornado funnel cloud descending from dark swirling storm clouds directly behind the subject. The subject appears calm and grounded while nature rages behind them. Full-body or three-quarter shot showing the subject small against the enormous scale of the storm. STYLING: Dress the subject in practical outdoor clothing — a plaid flannel shirt, jeans, and boots. Optionally holding a guitar, book, or other personal item. Hair and clothes slightly windswept from the storm winds. SETTING: Wide open flat landscape — prairie, farmland, or plains stretching to the horizon. Dramatic dark storm clouds filling the sky. The tornado funnel cloud is massive and detailed — visible debris at the base, swirling cloud structure. Lightning bolts illuminating the clouds. LIGHTING: Dramatic contrast — dark stormy sky with bright breaks of light. The subject front-lit by a break in the clouds or golden rim light from the storm edge. Cinematic atmospheric lighting. COLOR PALETTE: Dark stormy greys, deep purple-blue clouds, warm golden breaks of light, earth tones. Epic, cinematic, awe-inspiring. ART STYLE: Hyper-realistic cinematic photography — blockbuster movie poster quality. STRICT RULES: Face must remain 100% photorealistic and identity-preserved. No text, no names, no watermarks.",
+            Category    = "Fun",
+            Emoji       = "\U0001F32A\uFE0F",  // 🌪️
+            Color       = "#455A64",
+            SortOrder   = 250
+        },
+        new {
+            Name        = "Sunset Double Exposure",
+            Description = "Large close-up face blended with full-body walking shot at golden sunset",
+            Prompt      = @"Transform the subject into a cinematic double-exposure sunset portrait. CRITICAL: Preserve the subject's EXACT facial features, identity, skin tone, and expression — absolutely no modifications to the face. COMPOSITION: Two layered exposures blended together. LAYER 1 (large, left side): A dramatic close-up of the subject's face — sharp detailed portrait showing eyes, nose, jawline. Filling roughly half the frame. LAYER 2 (within/overlapping): A full-body shot of the SAME subject walking confidently toward the camera on an open road or path, wearing casual stylish clothing — denim jacket, jeans. This full-body figure is blended into and through the close-up face using double-exposure technique. The golden sunset sky and landscape visible through both layers. BLENDING: Seamless double-exposure merge — the walking figure visible within the silhouette and features of the close-up face. Both versions clearly the same person. Golden sunset light unifying both layers. LIGHTING: Rich golden-hour sunset — warm amber and orange tones. Backlit walking figure with sun creating lens flare and rim light. The close-up warmly illuminated. COLOR PALETTE: Golden amber, warm orange, sunset pink, deep blue sky transitioning to warm tones. Romantic, cinematic, aspirational. ART STYLE: Cinematic double-exposure photography — movie poster quality. Emotional, dramatic, visually stunning. STRICT RULES: Both versions of the subject must clearly be the SAME person with identical features. No text, no names, no watermarks.",
+            Category    = "Fun",
+            Emoji       = "\U0001F305",  // 🌅
+            Color       = "#FF8F00",
+            SortOrder   = 251
+        },
+        new {
+            Name        = "Moonlit Blue Portrait",
+            Description = "Romantic portrait in blue outfit with blue roses under moonlit night sky",
+            Prompt      = @"Transform the subject into a romantic moonlit blue portrait. CRITICAL: Preserve the subject's EXACT facial features, identity, skin tone, and expression — absolutely no modifications to the face. COMPOSITION: A dreamy two-panel or double-exposure style portrait. A large close-up of the subject's face looking directly at camera with gentle, serene expression — occupying the upper portion. Below or blended: a second view of the SAME subject from behind or side profile, dressed elegantly, looking at the moonlit scene. STYLING: Dress the subject in an elegant deep blue outfit — flowing blue dress/gown or tailored blue suit as appropriate. Blue roses as accessories — in hair, at the collar, or held. Silver or pearl jewelry — jhumka earrings, delicate chain. SETTING: Romantic night scene — a large glowing full moon in a deep blue night sky. Soft clouds drifting. Blue roses and floral elements framing the composition. A serene night landscape — moonlit water, distant buildings, or garden. LIGHTING: Soft cool moonlight — silver-blue illumination. The moon providing backlighting. Gentle blue ambient glow. Romantic and dreamy. COLOR PALETTE: Deep blue, silver, moonlight white, midnight sky. Monochromatic blue palette with silver accents. Romantic, ethereal, serene. ART STYLE: Romantic fantasy portrait photography — dreamy soft-focus edges with sharp face detail. Ethereal, beautiful, emotionally evocative. STRICT RULES: Face must remain 100% photorealistic and identity-preserved. No text, no names, no watermarks.",
+            Category    = "Fun",
+            Emoji       = "\U0001F319",  // 🌙
+            Color       = "#1A237E",
+            SortOrder   = 252
+        },
+        new {
+            Name        = "Cartoon Buddy Portrait",
+            Description = "Standing next to a giant famous cartoon character in matching outfit",
+            Prompt      = @"Transform the subject into a fun portrait standing next to a giant cartoon character. CRITICAL: Preserve the subject's EXACT facial features, identity, skin tone, and expression — absolutely no modifications to the face. COMPOSITION: The subject standing confidently next to a large 3D-rendered cartoon bird or animal character (a generic chubby angry-looking red bird character — round body, thick eyebrows, small beak — original design, NOT any copyrighted character). The cartoon character is about the same height as the subject or slightly larger. Both facing the camera. STYLING: Dress the subject in an outfit that COLOR-MATCHES the cartoon character — if the character is red, the subject wears an all-red outfit (red blazer/jacket, red pants, red boots/shoes, red sunglasses). Head-to-toe matching color coordination between the subject and the cartoon character. SETTING: Clean solid-colored studio backdrop matching the theme — soft pastel or matching the dominant color. Clean studio floor. Well-lit, fun, commercial feel. LIGHTING: Bright, even, commercial studio lighting. Fun advertising campaign quality. Both the real subject and the 3D character evenly lit. COLOR PALETTE: Bold dominant color (red, blue, or green) shared between subject's outfit and character. Bright, playful, eye-catching. ART STYLE: Commercial product photography meets 3D character rendering. The subject is photorealistic, the cartoon character is 3D CGI rendered. Fun, viral, social-media-ready. STRICT RULES: Face must remain 100% photorealistic and identity-preserved. No copyrighted characters — use original generic designs. No text, no names, no watermarks.",
+            Category    = "Fun",
+            Emoji       = "\U0001F414",  // 🐔
+            Color       = "#F44336",
+            SortOrder   = 253
+        },
+        new {
+            Name        = "Luxury Car Skyline Sunset",
+            Description = "Leaning on luxury car with city skyline at golden sunset",
+            Prompt      = @"Transform the subject into a luxury automotive lifestyle portrait. CRITICAL: Preserve the subject's EXACT facial features, identity, skin tone, and expression — absolutely no modifications to the face. STYLING: Dress the subject in smart casual — a dark navy bomber jacket or blazer over a white t-shirt, light-colored chinos or jeans, clean white sneakers. Stylish aviator sunglasses. Luxury wristwatch. Effortlessly wealthy aesthetic. POSE: Leaning casually against the side or sitting on the hood of a sleek dark luxury sports car (generic design — dark blue or black coupe with aggressive styling). One hand on the car, relaxed confident posture. Full-body shot with the car prominent. SETTING: City skyline at golden sunset — dramatic urban panorama in the background with skyscrapers silhouetted against a golden-orange sky. The scene is on an elevated viewpoint — rooftop parking, hillside road, or waterfront with the city behind. Warm golden-hour light. LIGHTING: Rich golden-hour sunset — warm amber light from the setting sun creating long shadows and warm highlights on the subject and car. The car's paint reflecting the golden sky. Cinematic lens flare. COLOR PALETTE: Deep navy, golden sunset, warm amber, dark car paint, city silhouette. Aspirational, cinematic, luxurious. ART STYLE: Cinematic automotive lifestyle photography — luxury brand campaign quality. Sharp, aspirational, movie-poster feel. STRICT RULES: Face must remain 100% photorealistic and identity-preserved. No real brand logos on the car. No text, no names, no watermarks.",
+            Category    = "Fun",
+            Emoji       = "\U0001F307",  // 🌇
+            Color       = "#FF6F00",
+            SortOrder   = 254
+        },
+        new {
+            Name        = "Vivid Pop Close-up",
+            Description = "Bold extreme close-up with vibrant colored blazer and matching gradient backdrop",
+            Prompt      = @"Transform the subject into a vivid pop-art style extreme close-up portrait. CRITICAL: Preserve the subject's EXACT facial features, identity, skin tone, and expression — absolutely no modifications to the face. FRAMING: Extreme tight close-up — face from mid-forehead to chin, filling the entire frame. Slightly angled three-quarter view. Intensely close and personal. STYLING: The subject wearing a bold vivid-colored blazer or jacket — bright orange, electric blue, or hot pink — visible at the collar and shoulders. Stylish tinted sunglasses or colored-lens aviators matching the outfit tone. Well-groomed appearance. Confident, magnetic expression — slight head turn, knowing gaze. SETTING: Smooth gradient backdrop matching the outfit color — transitioning from the vivid color to a warmer or deeper shade. Completely abstract, no environment. Just pure color behind the close-up face. LIGHTING: Bright, flat, editorial lighting — minimal shadows on the face. Even illumination emphasizing skin texture and the bold color of the clothing. Pop-art level brightness and saturation. COLOR PALETTE: One dominant vivid color (orange, blue, pink) saturating the outfit and backdrop. The face and skin provide warm natural contrast. Bold, punchy, attention-grabbing. ART STYLE: Fashion magazine extreme close-up — Vogue or GQ beauty editorial quality. Bold, confident, unforgettable. STRICT RULES: Face must remain 100% photorealistic and identity-preserved. No face swap, no beautification, no skin smoothing, no reshaping. No text, no names, no watermarks.",
+            Category    = "Fun",
+            Emoji       = "\U0001F4A5",  // 💥
+            Color       = "#FF6D00",
+            SortOrder   = 255
+        },
+        new {
+            Name        = "Dual Smoke Portrait",
+            Description = "Dramatic portrait with red and blue colored smoke swirling around",
+            Prompt      = @"Transform the subject into a dramatic dual-colored smoke portrait. CRITICAL: Preserve the subject's EXACT facial features, identity, skin tone, and expression — absolutely no modifications to the face. FRAMING: Close-up to mid-shot portrait — face and upper body. The subject looking directly at camera with an intense, penetrating gaze. STYLING: Dress the subject in a simple dark outfit — black t-shirt or dark jacket. Minimal styling so the smoke effect takes center stage. Natural hair, possibly slightly tousled. SMOKE EFFECT: Dense colored smoke billowing around the subject from both sides. LEFT SIDE: Rich deep red/crimson smoke curling and swirling around the left side of the face and body. RIGHT SIDE: Deep electric blue/cobalt smoke mirroring on the right side. The two colors meeting and mixing subtly behind the head — creating purple where they blend. The smoke is thick, volumetric, and atmospheric — like real smoke-bomb photography. SETTING: Pure dark/black background. The colored smoke provides all the visual atmosphere. No other environment elements. LIGHTING: The subject's face clearly lit by a frontal key light — face sharp and well-exposed. The smoke is backlit or side-lit to reveal its swirling texture and color density. Dramatic contrast between the lit face and the dark smoky atmosphere. COLOR PALETTE: Deep crimson red, electric blue, purple blend, dark black background. Dramatic, moody, cinematic. ART STYLE: Cinematic smoke-bomb portrait photography. Moody, atmospheric, visually striking. STRICT RULES: Face must remain 100% photorealistic and identity-preserved. No face swap, no beautification, no skin smoothing, no reshaping. No text, no names, no watermarks.",
+            Category    = "Fun",
+            Emoji       = "\U0001F32B\uFE0F",  // 🌫️
+            Color       = "#6A1B9A",
+            SortOrder   = 256
+        },
+        new {
+            Name        = "Retro Rapper Ink Art",
+            Description = "Red and black ink illustration in retro hip-hop style with boombox",
+            Prompt      = @"Transform the subject into a retro hip-hop ink art illustration. CRITICAL: Preserve the subject's EXACT facial features and identity — the illustration must be clearly recognizable as the person. ART STYLE: Bold ink illustration using only RED and BLACK on white paper. Thick confident ink linework — heavy black outlines with red fill for accent areas. No other colors. Graphic novel / comic art quality with high-contrast bold strokes. Slight halftone dot pattern in shaded areas. COMPOSITION: The subject in a dynamic hip-hop pose — pointing at the camera or gesturing with one hand, the other arm holding or resting on a large retro boombox/ghetto blaster. Upper body and face prominent. Confident, commanding rapper energy. STYLING: Draw the subject wearing a hoodie or bomber jacket with the hood partially up. Chunky chain necklace. Dynamic confident expression. The boombox is large and detailed with speakers, dials, and antenna. TECHNIQUE: Bold black ink lines for outlines and shadows. Solid red fills for key elements — parts of clothing, boombox details, background accent shapes. White negative space used effectively. Splatter and ink-drip effects for raw energy. An artist's small signature in the corner. BACKGROUND: Minimal — white with red and black geometric shapes, splatter marks, or abstract urban elements. Not busy — the subject is the focus. STRICT RULES: The subject's face must be clearly recognizable. No text with real names. No watermarks.",
+            Category    = "Fun",
+            Emoji       = "\U0001F3A4",  // 🎤
+            Color       = "#C62828",
+            SortOrder   = 257
+        },
+        new {
+            Name        = "Chess Master Fisheye",
+            Description = "Creative wide-angle fisheye shot playing chess with dramatic perspective",
+            Prompt      = @"Transform the subject into a creative fisheye chess portrait. CRITICAL: Preserve the subject's EXACT facial features, identity, skin tone, and expression — absolutely no modifications to the face. CAMERA EFFECT: Shot with an extreme wide-angle or fisheye lens creating dramatic barrel distortion — the center of the image (hands/chess pieces) appears enlarged and close, while the edges curve away. Creative perspective distortion making the composition dynamic and immersive. COMPOSITION: The subject seated at a chess board, reaching forward with one hand to move or place a chess piece — the hand and chess piece are in the extreme foreground, appearing large due to the wide-angle distortion. The subject's face is behind/above, slightly distorted by the lens but still clearly recognizable. The chess board stretches across the lower frame. STYLING: Dress the subject in a casual open-collar white linen shirt, relaxed and intellectual. Slight stubble, focused intense expression — the strategist at work. SETTING: A clean modern room — soft grey or white walls. The chess board on a table with both black and white pieces in mid-game position. Large chess pieces in the foreground (black queen, king) appear dramatic due to the lens. LIGHTING: Soft overhead studio light with dramatic shadows on the chess pieces. Clean, intellectual atmosphere. COLOR PALETTE: Black and white chess pieces, warm skin tones, clean grey-white room. Sharp, intellectual, dramatic. ART STYLE: Creative perspective fashion/lifestyle photography with unusual lens choice. Visually engaging, artistically bold, social-media-stopping. STRICT RULES: Face must remain recognizable despite the lens distortion. No text, no names, no watermarks.",
+            Category    = "Fun",
+            Emoji       = "\u265F\uFE0F",  // ♟️
+            Color       = "#37474F",
+            SortOrder   = 258
+        },
+        new {
+            Name        = "Luxury Convertible Drive",
+            Description = "Sitting in luxury convertible on city street with cinematic 35mm look",
+            Prompt      = @"Transform the subject into a cinematic luxury convertible driving portrait. CRITICAL: Preserve the subject's EXACT facial features, identity, skin tone, and expression — absolutely no modifications to the face. COMPOSITION: The subject seated in the driver's seat of a luxury convertible sports car (generic design — sleek dark or silver open-top roadster) with the top down. Shot from outside the car at driver's side, slightly above — showing the subject, steering wheel, and the car's sleek interior. STYLING: Dress the subject in a fitted black t-shirt or dark casual top. Hands on the leather steering wheel. A luxury chronograph watch visible. Stylish aviator sunglasses. Wind-tousled hair. Natural confident driving expression — looking slightly toward camera or forward. SETTING: Urban city street — buildings and parked cars softly blurred in the background. City life happening around the car. Daytime with slightly overcast or soft natural light. The car parked or slowly moving on a tree-lined city road. CAMERA STYLE: Cinematic 35mm film aesthetic — subtle film grain, rich color depth, natural lens bokeh. Shallow depth of field — subject and car interior sharp, background creamy smooth. COLOR PALETTE: Dark tones — black, charcoal, leather brown, urban grey. Natural desaturated color grading with warm skin tones. Cinematic, classic, timeless. ART STYLE: Cinematic 35mm street photography — automotive magazine quality. Cool, effortless, aspirational. STRICT RULES: Face must remain 100% photorealistic and identity-preserved. No real brand logos. No text, no names, no watermarks.",
+            Category    = "Fun",
+            Emoji       = "\U0001F3CE\uFE0F",  // 🏎️
+            Color       = "#424242",
+            SortOrder   = 259
+        },
+        new {
+            Name        = "Giant 3D Letter Sculpture",
+            Description = "Sitting casually in front of monumental 3D concrete letter sculpture",
+            Prompt      = @"Transform the subject into a creative portrait with monumental 3D typography. CRITICAL: Preserve the subject's EXACT facial features, identity, skin tone, and expression — absolutely no modifications to the face. COMPOSITION: The subject sitting casually on the ground at the base of MASSIVE 3D concrete or stone letters/numbers that tower behind them. The letters are monumental — each one 3-4 meters tall, casting dramatic shadows. They spell a short word like 'KING', 'BOSS', 'STAR', or the subject's initials — use generic aspirational text. The subject is small relative to the giant letters, creating dramatic scale contrast. STYLING: Dress the subject in smart casual — crisp white shirt or polo, dark jeans, clean sneakers. Holding a single red rose or small prop for visual interest. Relaxed, contemplative pose — sitting cross-legged or with knees up. SETTING: Outdoor urban park or plaza. The 3D letters are raw concrete or weathered stone sculptures sitting on pavement. Trees and urban landscape softly visible in the background. Natural daylight — warm afternoon sun. LIGHTING: Natural golden-hour light casting long dramatic shadows from the giant letters. Warm, cinematic, monumental. COLOR PALETTE: Concrete grey, warm skin tones, white shirt, natural greens and sky. Clean, bold, architectural. ART STYLE: Creative architectural photography — scale play between human and massive sculpture. Cinematic, Instagram-worthy, visually impactful. STRICT RULES: Face must remain 100% photorealistic and identity-preserved. No real names in the text — use generic words. No watermarks.",
+            Category    = "Fun",
+            Emoji       = "\U0001F524",  // 🔤
+            Color       = "#757575",
+            SortOrder   = 260
+        },
+        new {
+            Name        = "Airport Runway Travel",
+            Description = "Standing on airport tarmac with airplane in background travel lifestyle",
+            Prompt      = @"Transform the subject into a cinematic airport runway travel portrait. CRITICAL: Preserve the subject's EXACT facial features, identity, skin tone, and expression — absolutely no modifications to the face. COMPOSITION: The subject standing confidently on an airport tarmac/runway with a large commercial passenger airplane directly behind them. Full-body shot — the subject in the center foreground, the aircraft's nose and fuselage filling the background. STYLING: Dress the subject in a sleek all-black travel outfit — black fitted t-shirt or polo, black joggers or slim pants, clean black sneakers. Dark aviator sunglasses. Pulling a black rolling carry-on suitcase with one hand. Confident power-walk stance as if just disembarked. SETTING: Airport tarmac — wide concrete runway or apron. The airplane is large (generic white commercial jet with a generic airline livery — no real airline branding). Airport ground vehicles, safety-vested crew members slightly visible in the background. Open sky. LIGHTING: Bright overcast daylight — even exposure across the scene. The white airplane reflecting soft daylight. Clean, crisp outdoor lighting. COLOR PALETTE: Black outfit, white airplane, grey tarmac, blue-grey sky. Clean, minimal, jet-setter. ART STYLE: Cinematic travel lifestyle photography — luxury travel magazine or social media influencer quality. Aspirational, powerful, world-traveler energy. STRICT RULES: Face must remain 100% photorealistic and identity-preserved. No real airline logos or names. No text, no names, no watermarks.",
+            Category    = "Fun",
+            Emoji       = "\u2708\uFE0F",  // ✈️
+            Color       = "#546E7A",
+            SortOrder   = 261
+        },
+        new {
+            Name        = "Alien Bar Buddy",
+            Description = "Cheersing drinks with a realistic alien at a dimly lit bar",
+            Prompt      = @"Transform the subject into a fun sci-fi bar scene with an alien. CRITICAL: Preserve the subject's EXACT facial features, identity, skin tone, and expression — absolutely no modifications to the face. COMPOSITION: The subject and a realistic-looking alien creature sitting side by side at a bar counter, clinking glasses in a cheers toast. Both facing the camera in a casual buddy-photo pose. The subject smiling or grinning naturally. The alien friendly and relaxed — mirroring the subject's casual energy. THE ALIEN: A detailed realistic extraterrestrial — smooth grey-green skin, large dark almond eyes, no hair, elongated head. Wearing a casual outfit in a contrasting color to the subject (if subject wears blue, alien wears yellow or vice versa — like matching tracksuits or casual jackets with stripes). The alien has a friendly non-threatening expression. SETTING: A dimly lit atmospheric bar or pub — wooden bar counter, shelves of bottles and glasses behind, warm ambient bar lighting. Other bar patrons subtly visible in the background, some looking surprised or unfazed. STYLING: Dress the subject in a casual tracksuit or sporty jacket (e.g., blue with white stripes). Both holding beer glasses or cocktails. LIGHTING: Warm dim bar lighting — amber overhead lights, soft shadows, cozy atmospheric glow. COLOR PALETTE: Warm amber bar tones, blue and yellow outfit contrast, grey-green alien skin. Fun, warm, comedic. ART STYLE: Hyper-realistic cinematic still — like a scene from a sci-fi comedy film. The alien looks realistic (not cartoonish), the setting is photorealistic, creating a believable impossible scene. STRICT RULES: Face must remain 100% photorealistic and identity-preserved. No text, no names, no watermarks.",
+            Category    = "Fun",
+            Emoji       = "\U0001F47D",  // 👽
+            Color       = "#558B2F",
+            SortOrder   = 262
+        },
+        new {
+            Name        = "Supercar Bird Eye View",
+            Description = "Stepping out of exotic sports car shot from dramatic top-down angle",
+            Prompt      = @"Transform the subject into a dramatic top-down supercar portrait. CRITICAL: Preserve the subject's EXACT facial features, identity, skin tone, and expression — absolutely no modifications to the face. CAMERA ANGLE: Dramatic bird's-eye / top-down perspective — the camera looking straight down or at a steep angle from above. COMPOSITION: The subject stepping out of or sitting in a vibrant exotic sports car with the door open (gull-wing or scissor door lifted up). Shot from above showing the car's sleek roof, the open door, and the subject emerging. The car is bright and eye-catching — vivid red, yellow, or orange. STYLING: Dress the subject in casual smart summer wear — fitted polo or casual shirt, shorts or chinos, clean white sneakers. Aviator sunglasses. Relaxed confident posture — one foot on the ground stepping out, looking up toward the camera. SETTING: Clean bright environment from above — smooth concrete, a driveway, or a luxury hotel entrance. The car parked on clean pavement. Bright daylight from above creating short shadows. LIGHTING: Bright overhead natural sunlight — the top-down angle maximizes the sun's direct illumination. Clean bright exposure. The car's paint gleaming in the light. COLOR PALETTE: Vivid car color (red/yellow/orange), clean white/grey pavement, bright natural tones. Bold, luxury, aspirational. ART STYLE: Creative drone/overhead automotive photography — luxury lifestyle content. Unique angle, visually striking, attention-grabbing. STRICT RULES: Face must remain recognizable from the overhead angle. No real brand logos. No text, no names, no watermarks.",
+            Category    = "Fun",
+            Emoji       = "\U0001F3CE\uFE0F",  // 🏎️
+            Color       = "#D50000",
+            SortOrder   = 263
+        },
+        new {
+            Name        = "Rugged Truck Boss",
+            Description = "All-black outfit standing in front of lifted off-road truck dramatic pose",
+            Prompt      = @"Transform the subject into a rugged truck boss portrait. CRITICAL: Preserve the subject's EXACT facial features, identity, skin tone, and expression — absolutely no modifications to the face. COMPOSITION: The subject standing confidently in front of a large lifted off-road truck or pickup. Full-body shot — the subject centered, the massive truck looming behind and above them. The truck should be imposing — lifted suspension, big off-road tires, LED light bars, aggressive front grille. STYLING: Dress the subject in an all-black power outfit — black v-neck sweater or pullover, white dress shirt collar visible underneath, slim black trousers, polished black shoes. Dark aviator sunglasses. A luxury watch. One hand in pocket or thumbs in belt loops. Alpha confident stance. SETTING: Open outdoor environment — dirt road, rural area, or desert/farmland setting. Overcast dramatic sky — heavy grey clouds creating moody atmosphere. The truck parked on dirt or gravel. Dust or haze in the air. LIGHTING: Overcast dramatic — soft diffused light from the grey sky. The truck's LED lights glowing. Moody, powerful atmosphere. The subject well-lit despite the overcast sky. COLOR PALETTE: All black outfit, matte black truck, grey sky, brown dirt. Dark, powerful, commanding. ART STYLE: Automotive lifestyle photography — truck/SUV advertisement quality. Masculine, powerful, aspirational. STRICT RULES: Face must remain 100% photorealistic and identity-preserved. No real brand logos on the truck. No text, no names, no watermarks.",
+            Category    = "Fun",
+            Emoji       = "\U0001F6FB",  // 🛻
+            Color       = "#263238",
+            SortOrder   = 264
+        },
+        new {
+            Name        = "Color Match Auto",
+            Description = "Outfit perfectly color-matched to a sports car for bold fashion-auto fusion",
+            Prompt      = @"Transform the subject into a bold color-matched automotive fashion portrait. CRITICAL: Preserve the subject's EXACT facial features, identity, skin tone, and expression — absolutely no modifications to the face. KEY CONCEPT: The subject's ENTIRE outfit perfectly matches the color of the car behind them — creating a bold monochromatic fashion-meets-automotive visual. If the car is red, the outfit is entirely red. If blue, entirely blue. One striking dominant color shared between human and machine. STYLING: Dress the subject in a head-to-toe outfit in one vivid color — a fitted v-neck sweater or knit polo, matching or complementary trousers. Dark sunglasses for contrast. One hand adjusting sunglasses or touching hair. Confident fashion-forward stance. COMPOSITION: The subject standing directly in front of a low-slung sports car (generic aggressive coupe design). The car and outfit are the SAME vivid color. Full-body or three-quarter shot showing the color coordination. The car's grille, headlights, and front clearly visible behind the subject. SETTING: Clean simple background — urban parking area or studio-like clean environment. The focus is entirely on the color-matched subject and car combo. LIGHTING: Bright clean lighting emphasizing the vivid color saturation. Both the car paint and outfit fabric catching light beautifully. Sharp, commercial, editorial. COLOR PALETTE: One dominant vivid color (red, blue, orange, green) shared by outfit and car + dark sunglasses + clean background. Bold, striking, scroll-stopping. ART STYLE: Automotive fashion photography — luxury brand x car collaboration campaign quality. Bold, creative, visually impactful. STRICT RULES: Face must remain 100% photorealistic and identity-preserved. No real brand logos. No text, no names, no watermarks.",
+            Category    = "Fun",
+            Emoji       = "\U0001F3A8",  // 🎨
+            Color       = "#D32F2F",
+            SortOrder   = 265
+        },
+        // ── Add future styles here as new entries in this array ──
+    };
+
+    foreach (var s in incrementalStyles)
+    {
+        try
+        {
+            // Force-clear from DeletedStyleSeeds so the style always appears
+            await db.Database.ExecuteSqlRawAsync(
+                "DELETE FROM DeletedStyleSeeds WHERE Name = @p0", s.Name);
+
+            // Insert if not already present; update if it exists (prompt may have changed)
+            await db.Database.ExecuteSqlRawAsync($@"
+                IF NOT EXISTS (SELECT 1 FROM StylePresets WHERE Name = @p0)
+                    INSERT INTO StylePresets
+                        (Name, Description, PromptTemplate, Category, IconEmoji, AccentColor, IsActive, SortOrder)
+                    VALUES
+                        (@p0, @p1, @p2, @p3, @p4, @p5, 1, @p6)
+                ELSE
+                    UPDATE StylePresets SET
+                        Description   = @p1,
+                        PromptTemplate = @p2,
+                        Category      = @p3,
+                        IconEmoji     = @p4,
+                        AccentColor   = @p5,
+                        SortOrder     = @p6
+                    WHERE Name = @p0",
+                s.Name, s.Description, s.Prompt, s.Category, s.Emoji, s.Color, s.SortOrder);
+        }
+        catch (Exception ex)
+        {
+            app.Logger.LogWarning(ex, "Incremental style seed '{Name}' failed (non-fatal)", s.Name);
+        }
+    }
 }
 
 // Configure the HTTP request pipeline.

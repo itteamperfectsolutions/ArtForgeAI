@@ -62,17 +62,17 @@ def get_birefnet():
 # ── Processing functions ──
 
 def extract_mask(preds, input_size):
-    """Extract the best mask from model output (handles various output formats)."""
-    # Models return different structures:
-    # BRIA: (list_of_masks, list_of_features) — use preds[0][0] (first mask)
-    # BiRefNet: similar structure
+    """Extract the best mask from model output (handles various output formats).
+    Both BRIA and BiRefNet return multi-scale outputs; the last element is the
+    most refined mask — matching their official usage: model(x)[-1].sigmoid()
+    """
     if isinstance(preds, (list, tuple)):
-        first = preds[0]
-        if isinstance(first, (list, tuple)):
-            # List of masks at different scales — use the first (finest)
-            mask_tensor = first[0]
+        # Use the last element — the most refined segmentation mask
+        last = preds[-1]
+        if isinstance(last, (list, tuple)):
+            mask_tensor = last[-1]
         else:
-            mask_tensor = first
+            mask_tensor = last
     else:
         mask_tensor = preds
 
