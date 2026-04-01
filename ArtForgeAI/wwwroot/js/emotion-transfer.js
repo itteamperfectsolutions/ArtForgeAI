@@ -83,8 +83,35 @@ window.emotionTransfer = (() => {
         return canvas.toDataURL('image/png').split(',')[1];
     }
 
+    /**
+     * Download all emotion images as a ZIP file using JSZip.
+     * @param {string[]} base64Images - Array of base64 PNG strings (no prefix)
+     * @param {string[]} labels - Array of emotion labels for filenames
+     */
+    async function downloadAllAsZip(base64Images, labels) {
+        const zip = new JSZip();
+        const timestamp = new Date().toISOString().slice(0, 10).replace(/-/g, '');
+
+        for (let i = 0; i < base64Images.length; i++) {
+            const b64 = base64Images[i];
+            if (!b64) continue;
+            const fileName = `emotion_${labels[i].replace(/\s+/g, '_')}_${timestamp}.png`;
+            zip.file(fileName, b64, { base64: true });
+        }
+
+        const blob = await zip.generateAsync({ type: 'blob' });
+        const link = document.createElement('a');
+        link.href = URL.createObjectURL(blob);
+        link.download = `emotions_all_${timestamp}.zip`;
+        document.body.appendChild(link);
+        link.click();
+        document.body.removeChild(link);
+        URL.revokeObjectURL(link.href);
+    }
+
     return {
-        renderEmotionGrid
+        renderEmotionGrid,
+        downloadAllAsZip
     };
 
 })();

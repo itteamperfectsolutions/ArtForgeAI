@@ -92,7 +92,13 @@
                             @onclick="GenerateAllEmotions" disabled="@_isProcessing">
                         &#127917; Generate All Emotions
                     </button>
-                    <p class="et-cost-hint">Generates all @_emotionPresets.Length emotions &middot; Cost: 5 coins</p>
+                    <p class="et-cost-hint">Parallel generation (10 calls) &middot; Cost: 5 coins</p>
+
+                    <button class="btn-secondary" style="width:100%;padding:0.55rem;font-size:0.9rem;margin-top:0.4rem;"
+                            @onclick="GenerateEmotionGrid" disabled="@_isProcessing">
+                        &#127912; Generate Emotion Grid (1 call)
+                    </button>
+                    <p class="et-cost-hint">Single AI call generates all emotions in one image &middot; Cost: 2 coins</p>
                 }
             </div>
         </div>
@@ -139,6 +145,9 @@
                     <button class="btn-primary-gradient" style="font-size:0.85rem;padding:0.4rem 0.85rem;" @onclick="DownloadGridStrip">
                         &#128424; Download Grid
                     </button>
+                    <button class="btn-secondary" style="font-size:0.85rem;padding:0.4rem 0.85rem;" @onclick="DownloadAllEmotions">
+                        &#128230; Download All (ZIP)
+                    </button>
                     @if (_enlargedIndex >= 0 && _gridResults[_enlargedIndex] != null)
                     {
                         <button class="btn-secondary" style="font-size:0.85rem;padding:0.4rem 0.85rem;" @onclick="DownloadEnlargedEmotion">
@@ -161,6 +170,23 @@
                     </div>
                 </div>
             }
+        }
+        else if (!string.IsNullOrEmpty(_gridImageDataUrl))
+        {
+            <div class="right-panel-card">
+                <div class="right-panel-label">Emotion Grid (Single Generation)</div>
+                <div class="et-enlarged-view">
+                    <img src="@_gridImageDataUrl" alt="All emotions grid" />
+                </div>
+                <div class="et-actions">
+                    <button class="btn-primary-gradient" style="font-size:0.85rem;padding:0.4rem 0.85rem;" @onclick="DownloadGridImage">
+                        &#128424; Download Grid Image
+                    </button>
+                    <button class="btn-secondary" style="font-size: 0.85rem; padding: 0.4rem 0.85rem;" @onclick="StartNew">
+                        &#10024; Process Another
+                    </button>
+                </div>
+            </div>
         }
         else if (!string.IsNullOrEmpty(_singleResultDataUrl))
         {
@@ -289,6 +315,9 @@
     private int _gridCompleted;
     private int _gridTotal;
     private int _enlargedIndex = -1;
+
+    // Single-call grid image
+    private string? _gridImageDataUrl;
 
     // ── Lifecycle ──
 
@@ -617,6 +646,116 @@
         }
     }
 
+    // ── Single-call emotion grid ──
+
+    private async Task GenerateEmotionGrid()
+    {
+        if (string.IsNullOrEmpty(_uploadedFullPath)) return;
+
+        if (!await TryDebitCoins(ArtForgeAI.Models.FeatureAccess.GetCost("EmotionTransfer"), "Emotion Transfer generation"))
+            return;
+
+        _isProcessing = true;
+        _processingStatus = "Generating all emotions in a single image...";
+        _errorMessage = null;
+        _gridTotal = 0;
+        _gridReady = false;
+        _singleResultDataUrl = null;
+        _gridImageDataUrl = null;
+        StateHasChanged();
+
+        try
+        {
+            var emotionList = string.Join(", ", _emotionPresets.Select(p => $"{p.Label} ({p.Description})"));
+
+            var prompt = "Create a grid image showing this person's face with 10 different emotions. " +
+                         "Arrange the faces in 2 rows of 5. " +
+                         "Label each face clearly below it. " +
+                         $"The 10 emotions in order are: {emotionList}. " +
+                         "CRITICAL RULES: " +
+                         "1. Each face in the grid must show the SAME person with a DIFFERENT expression/emotion. " +
+                         "2. Maintain the person's EXACT identity across all 10 faces — same face shape, eye color, nose, jawline, skin tone, hair. " +
+                         "3. Only the facial EXPRESSION changes between each cell — mouth, eyes, eyebrows, facial muscles. " +
+                         "4. Keep consistent lighting, background (plain neutral), and framing across all cells. " +
+                         "5. Each emotion must be clearly distinct and recognizable. " +
+                         "6. The result should look like a professional emotion reference sheet." +
+                         ArtForgeAI.Models.StylePreset.FacialIdentitySuffix;
+
+            var request = new ArtForgeAI.Models.GenerationRequest
+            {
+                Prompt = prompt,
+                ReferenceImagePaths = [_uploadedFullPath],
+                Provider = ArtForgeAI.Models.ImageProvider.Gemini,
+                EnhancePrompt = false,
+                Width = 1536,
+                Height = 1024,
+                UserId = _userId.ToString()
+            };
+
+            var result = await ImageGenService.GenerateImageAsync(request);
+
+            if (result.Success && !string.IsNullOrEmpty(result.LocalImagePath))
+            {
+                var resultPath = ResolveFullPath(result.LocalImagePath);
+                var resultBytes = await File.ReadAllBytesAsync(resultPath);
+                _gridImageDataUrl = "data:image/png;base64," + Convert.ToBase64String(resultBytes);
+            }
+            else
+            {
+                _errorMessage = "Emotion grid generation failed: " + (result.ErrorMessage ?? "Unknown error");
+            }
+        }
+        catch (Exception ex)
+        {
+            Logger.LogError(ex, "Emotion grid generation failed");
+            _errorMessage = "Emotion grid generation failed: " + ex.Message;
+        }
+        finally
+        {
+            _isProcessing = false;
+            _processingStatus = "";
+            StateHasChanged();
+        }
+    }
+
+    private async Task DownloadGridImage()
+    {
+        if (string.IsNullOrEmpty(_gridImageDataUrl)) return;
+        var base64 = _gridImageDataUrl[(_gridImageDataUrl.IndexOf(",", StringComparison.Ordinal) + 1)..];
+        var fileName = $"emotion_grid_single_{DateTime.Now:yyyyMMdd_HHmmss}.png";
+        await JS.InvokeVoidAsync("downloadFileFromBytes", fileName, "image/png", base64);
+    }
+
+    private async Task DownloadAllEmotions()
+    {
+        // Download each emotion as a separate file via JSZip
+        try
+        {
+            var validEntries = new List<(string Label, string Base64)>();
+            for (int i = 0; i < _emotionPresets.Length; i++)
+            {
+                if (_gridResults[i] != null)
+                {
+                    var dataUrl = _gridResults[i]!;
+                    var b64 = dataUrl[(dataUrl.IndexOf(",", StringComparison.Ordinal) + 1)..];
+                    validEntries.Add((_emotionPresets[i].Label, b64));
+                }
+            }
+
+            if (validEntries.Count == 0) return;
+
+            await JS.InvokeVoidAsync("emotionTransfer.downloadAllAsZip",
+                validEntries.Select(e => e.Base64).ToArray(),
+                validEntries.Select(e => e.Label).ToArray());
+        }
+        catch (Exception ex)
+        {
+            Logger.LogWarning(ex, "Download all emotions failed");
+            _errorMessage = "Failed to create ZIP download.";
+            StateHasChanged();
+        }
+    }
+
     // ── Navigation ──
 
     private void EnlargeEmotion(int index)
@@ -652,6 +791,7 @@
         _enlargedIndex = -1;
         _showComparison = false;
         _comparisonResultUrl = null;
+        _gridImageDataUrl = null;
         _errorMessage = null;
     }
 
