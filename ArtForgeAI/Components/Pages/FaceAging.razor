@@ -605,7 +605,7 @@
         if (string.IsNullOrEmpty(_singleResultDataUrl)) return;
         var base64 = _singleResultDataUrl[((_singleResultDataUrl.IndexOf(",", StringComparison.Ordinal) + 1))..];
         var fileName = $"face_age_{_lastTransformAge}_{DateTime.Now:yyyyMMdd_HHmmss}.png";
-        await JS.InvokeVoidAsync("downloadFileFromBytes", fileName, "image/png", base64);
+        await DownloadWithDpi(base64, fileName);
     }
 
     private async Task DownloadEnlargedStage()
@@ -615,7 +615,7 @@
         var base64 = dataUrl[(dataUrl.IndexOf(",", StringComparison.Ordinal) + 1)..];
         var preset = _agePresets[_enlargedIndex];
         var fileName = $"face_age_{preset.Label.Replace(" ", "_")}_{DateTime.Now:yyyyMMdd_HHmmss}.png";
-        await JS.InvokeVoidAsync("downloadFileFromBytes", fileName, "image/png", base64);
+        await DownloadWithDpi(base64, fileName);
     }
 
     private async Task DownloadTimelineStrip()
@@ -629,7 +629,7 @@
             if (!string.IsNullOrEmpty(base64))
             {
                 var fileName = $"face_aging_timeline_{DateTime.Now:yyyyMMdd_HHmmss}.png";
-                await JS.InvokeVoidAsync("downloadFileFromBytes", fileName, "image/png", base64);
+                await DownloadWithDpi(base64, fileName);
             }
         }
         catch (Exception ex)
@@ -690,6 +690,26 @@
             return false;
         }
         return true;
+    }
+
+    /// <summary>Re-encode a PNG with 300 DPI metadata embedded.</summary>
+    private static string EmbedDpi300(string base64Png, int dpi = 300)
+    {
+        var bytes = Convert.FromBase64String(base64Png);
+        using var img = SixLabors.ImageSharp.Image.Load<SixLabors.ImageSharp.PixelFormats.Rgba32>(bytes);
+        img.Metadata.HorizontalResolution = dpi;
+        img.Metadata.VerticalResolution = dpi;
+        img.Metadata.ResolutionUnits = SixLabors.ImageSharp.Metadata.PixelResolutionUnit.PixelsPerInch;
+
+        using var ms = new MemoryStream();
+        img.SaveAsPng(ms, new SixLabors.ImageSharp.Formats.Png.PngEncoder());
+        return Convert.ToBase64String(ms.ToArray());
+    }
+
+    private async Task DownloadWithDpi(string base64Png, string fileName)
+    {
+        var dpiBase64 = await Task.Run(() => EmbedDpi300(base64Png));
+        await JS.InvokeVoidAsync("downloadFileFromBytes", fileName, "image/png", dpiBase64);
     }
 
     private string ResolveFullPath(string webRelativePath) =>

@@ -62,7 +62,7 @@
 
                 @if (!string.IsNullOrEmpty(_uploadedPath))
                 {
-                    <hr style="margin: 0.5rem 0; border-color: var(--border-color);" />
+                    <hr style="margin: 0.3rem 0; border-color: var(--border-color);" />
 
                     @* Emotion presets *@
                     <div class="mb-3">
@@ -80,15 +80,15 @@
                         </div>
                     </div>
 
-                    <button class="btn-primary-gradient" style="width:100%;padding:0.55rem;font-size:0.9rem;"
+                    <button class="btn-primary-gradient" style="width:100%;padding:0.4rem;font-size:0.85rem;"
                             @onclick="TransformEmotion" disabled="@(_isProcessing || string.IsNullOrEmpty(_selectedEmotion))">
                         &#10024; Apply @(string.IsNullOrEmpty(_selectedEmotion) ? "Emotion" : _selectedEmotion)
                     </button>
                     <p class="et-cost-hint">Cost: @ArtForgeAI.Models.FeatureAccess.GetCost("EmotionTransfer") coins</p>
 
-                    <hr style="margin: 0.75rem 0; border-color: var(--border-color);" />
+                    <hr style="margin: 0.4rem 0; border-color: var(--border-color);" />
 
-                    <button class="btn-secondary" style="width:100%;padding:0.55rem;font-size:0.9rem;"
+                    <button class="btn-secondary" style="width:100%;padding:0.4rem;font-size:0.85rem;"
                             @onclick="GenerateAllEmotions" disabled="@_isProcessing">
                         &#127917; Generate All Emotions
                     </button>
@@ -611,7 +611,7 @@
         if (string.IsNullOrEmpty(_singleResultDataUrl)) return;
         var base64 = _singleResultDataUrl[(_singleResultDataUrl.IndexOf(",", StringComparison.Ordinal) + 1)..];
         var fileName = $"emotion_{_lastEmotion}_{DateTime.Now:yyyyMMdd_HHmmss}.png";
-        await JS.InvokeVoidAsync("downloadFileFromBytes", fileName, "image/png", base64);
+        await DownloadWithDpi(base64, fileName);
     }
 
     private async Task DownloadEnlargedEmotion()
@@ -621,7 +621,7 @@
         var base64 = dataUrl[(dataUrl.IndexOf(",", StringComparison.Ordinal) + 1)..];
         var preset = _emotionPresets[_enlargedIndex];
         var fileName = $"emotion_{preset.Label}_{DateTime.Now:yyyyMMdd_HHmmss}.png";
-        await JS.InvokeVoidAsync("downloadFileFromBytes", fileName, "image/png", base64);
+        await DownloadWithDpi(base64, fileName);
     }
 
     private async Task DownloadGridStrip()
@@ -635,7 +635,7 @@
             if (!string.IsNullOrEmpty(base64))
             {
                 var fileName = $"emotion_grid_{DateTime.Now:yyyyMMdd_HHmmss}.png";
-                await JS.InvokeVoidAsync("downloadFileFromBytes", fileName, "image/png", base64);
+                await DownloadWithDpi(base64, fileName);
             }
         }
         catch (Exception ex)
@@ -723,12 +723,12 @@
         if (string.IsNullOrEmpty(_gridImageDataUrl)) return;
         var base64 = _gridImageDataUrl[(_gridImageDataUrl.IndexOf(",", StringComparison.Ordinal) + 1)..];
         var fileName = $"emotion_grid_single_{DateTime.Now:yyyyMMdd_HHmmss}.png";
-        await JS.InvokeVoidAsync("downloadFileFromBytes", fileName, "image/png", base64);
+        await DownloadWithDpi(base64, fileName);
     }
 
     private async Task DownloadAllEmotions()
     {
-        // Download each emotion as a separate file via JSZip
+        // Download each emotion as a separate file via JSZip, with 300 DPI
         try
         {
             var validEntries = new List<(string Label, string Base64)>();
@@ -738,7 +738,8 @@
                 {
                     var dataUrl = _gridResults[i]!;
                     var b64 = dataUrl[(dataUrl.IndexOf(",", StringComparison.Ordinal) + 1)..];
-                    validEntries.Add((_emotionPresets[i].Label, b64));
+                    var dpiB64 = await Task.Run(() => EmbedDpi300(b64));
+                    validEntries.Add((_emotionPresets[i].Label, dpiB64));
                 }
             }
 
@@ -812,6 +813,26 @@
 
     private string ResolveFullPath(string webRelativePath) =>
         System.IO.Path.Combine(Env.WebRootPath, webRelativePath.Replace("/", System.IO.Path.DirectorySeparatorChar.ToString()));
+
+    /// <summary>Re-encode a PNG with 300 DPI metadata embedded.</summary>
+    private static string EmbedDpi300(string base64Png, int dpi = 300)
+    {
+        var bytes = Convert.FromBase64String(base64Png);
+        using var img = Image.Load<Rgba32>(bytes);
+        img.Metadata.HorizontalResolution = dpi;
+        img.Metadata.VerticalResolution = dpi;
+        img.Metadata.ResolutionUnits = SixLabors.ImageSharp.Metadata.PixelResolutionUnit.PixelsPerInch;
+
+        using var ms = new MemoryStream();
+        img.SaveAsPng(ms, new SixLabors.ImageSharp.Formats.Png.PngEncoder());
+        return Convert.ToBase64String(ms.ToArray());
+    }
+
+    private async Task DownloadWithDpi(string base64Png, string fileName)
+    {
+        var dpiBase64 = await Task.Run(() => EmbedDpi300(base64Png));
+        await JS.InvokeVoidAsync("downloadFileFromBytes", fileName, "image/png", dpiBase64);
+    }
 
     private static byte[] ResizeForProcessing(byte[] imageBytes, int maxDimension)
     {
