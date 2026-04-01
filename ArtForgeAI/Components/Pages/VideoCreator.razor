@@ -1,0 +1,571 @@
+@page "/video-creator"
+@rendermode InteractiveServer
+@attribute [Authorize]
+@inject IJSRuntime JS
+@inject IWebHostEnvironment Env
+@inject ILogger<VideoCreator> Logger
+@inject IImageStorageService ImageStorage
+@inject IGeminiVideoService VideoService
+@inject ISubscriptionService SubscriptionService
+@inject ICoinService CoinService
+@inject AuthenticationStateProvider AuthState
+@inject NavigationManager Nav
+@implements IDisposable
+
+<PageTitle>ArtForge AI - Video Creator</PageTitle>
+
+<link href="css/video-creator.css" rel="stylesheet" />
+
+<div class="page-header page-header-lg">
+    <h2>Video Creator</h2>
+    <p>Generate short AI videos from text, images, or video clips</p>
+</div>
+
+<div class="create-layout">
+    @* ── Left column: controls ── *@
+    <div class="create-left">
+        <div class="card">
+            <div class="card-body">
+
+                @* Mode selector *@
+                <div class="vc-mode-tabs">
+                    <button class="vc-mode-tab @(_selectedMode == VideoMode.TextToVideo ? "active" : "")"
+                            @onclick='() => SetMode(VideoMode.TextToVideo)' disabled="@_isGenerating">
+                        &#128221; Text to Video
+                    </button>
+                    <button class="vc-mode-tab @(_selectedMode == VideoMode.ImageToVideo ? "active" : "")"
+                            @onclick='() => SetMode(VideoMode.ImageToVideo)' disabled="@_isGenerating">
+                        &#128247; Image to Video
+                    </button>
+                    <button class="vc-mode-tab @(_selectedMode == VideoMode.VideoToVideo ? "active" : "")"
+                            @onclick='() => SetMode(VideoMode.VideoToVideo)' disabled="@_isGenerating">
+                        &#127909; Video to Video
+                    </button>
+                </div>
+
+                @* Upload area (Image or Video mode) *@
+                @if (_selectedMode != VideoMode.TextToVideo)
+                {
+                    <div class="mb-3">
+                        <label class="form-label">
+                            @(_selectedMode == VideoMode.ImageToVideo ? "Upload an Image" : "Upload a Video Clip")
+                        </label>
+
+                        @if (!string.IsNullOrEmpty(_uploadedPath))
+                        {
+                            <div class="vc-uploaded-preview">
+                                <button class="ref-thumb-remove" @onclick="RemoveUpload" disabled="@_isGenerating"
+                                        style="position:absolute;top:4px;right:4px;z-index:20;">&#10005;</button>
+                                @if (_selectedMode == VideoMode.ImageToVideo)
+                                {
+                                    <img src="@_uploadedDataUrl" alt="Uploaded image" class="vc-preview-img" />
+                                }
+                                else
+                                {
+                                    <video src="@_uploadedDataUrl" class="vc-preview-video" controls muted></video>
+                                }
+                            </div>
+                        }
+                        else
+                        {
+                            <label class="upload-area upload-area-compact @(_isUploading ? "disabled" : "")">
+                                <span class="upload-icon">
+                                    @if (_selectedMode == VideoMode.ImageToVideo)
+                                    {
+                                        <text>&#128247;</text>
+                                    }
+                                    else
+                                    {
+                                        <text>&#127909;</text>
+                                    }
+                                </span>
+                                <span>
+                                    @(_selectedMode == VideoMode.ImageToVideo
+                                        ? "Upload an image"
+                                        : "Upload a short video clip")
+                                </span>
+                                <span style="font-size: 0.7rem; color: var(--text-muted); margin-left: 0.5rem;">
+                                    @(_selectedMode == VideoMode.ImageToVideo
+                                        ? "JPG, PNG up to 10 MB"
+                                        : "MP4, WebM up to 20 MB, max 10s")
+                                </span>
+                                <InputFile OnChange="HandleFileUpload"
+                                           accept="@(_selectedMode == VideoMode.ImageToVideo ? ".jpg,.jpeg,.png,.webp" : ".mp4,.webm")"
+                                           style="display:none"
+                                           disabled="@(_isGenerating || _isUploading)" />
+                            </label>
+                        }
+                        @if (_isUploading)
+                        {
+                            <div class="upload-progress-bar" style="margin-top: 0.35rem;">
+                                <div class="upload-progress-fill" style="width: 50%"></div>
+                                <span class="upload-progress-text">Uploading...</span>
+                            </div>
+                        }
+                    </div>
+                }
+
+                @* Prompt *@
+                <div class="mb-3">
+                    <label class="form-label">Describe Your Video</label>
+                    <textarea class="form-control" rows="3" @bind="_prompt" @bind:event="oninput"
+                              placeholder="e.g., The kid is fighting alongside Avengers in a destroyed city with epic explosions..."
+                              disabled="@_isGenerating"
+                              style="font-size: 0.85rem; resize: vertical;"></textarea>
+                </div>
+
+                @* Settings *@
+                <div class="vc-settings-row mb-3">
+                    <div>
+                        <label>Aspect Ratio</label>
+                        <select @bind="_aspectRatio" disabled="@_isGenerating">
+                            <option value="16:9">16:9 Landscape</option>
+                            <option value="9:16">9:16 Portrait</option>
+                            <option value="1:1">1:1 Square</option>
+                        </select>
+                    </div>
+                    <div>
+                        <label>Duration</label>
+                        <select @bind="_durationSeconds" disabled="@_isGenerating">
+                            <option value="4">4 seconds</option>
+                            <option value="6">6 seconds</option>
+                            <option value="8">8 seconds</option>
+                        </select>
+                    </div>
+                </div>
+
+                @* Generate button *@
+                <button class="btn-primary-gradient" style="width:100%;padding:0.5rem;font-size:0.85rem;"
+                        @onclick="GenerateVideo" disabled="@(!CanGenerate)">
+                    &#127909; Generate Video &middot; @ArtForgeAI.Models.FeatureAccess.GetCost("VideoCreator") coins
+                </button>
+
+                @if (_isGenerating)
+                {
+                    <button class="btn-secondary" style="width:100%;padding:0.4rem;font-size:0.8rem;margin-top:0.35rem;"
+                            @onclick="CancelGeneration">
+                        &#10006; Cancel
+                    </button>
+                }
+            </div>
+        </div>
+
+        @if (!string.IsNullOrEmpty(_errorMessage))
+        {
+            <div class="card" style="margin-top: 0.75rem; border-left: 3px solid var(--danger);">
+                <div class="card-body" style="padding: 0.75rem 1rem; color: var(--danger); font-size: 0.85rem;">
+                    <strong>Error:</strong> @_errorMessage
+                </div>
+            </div>
+        }
+    </div>
+
+    @* ── Right column: results ── *@
+    <div class="create-right">
+        @if (_isGenerating)
+        {
+            @* Progress display *@
+            <div class="right-panel-card">
+                <div class="right-panel-label">Generating Video...</div>
+                <div class="vc-progress-container">
+                    <div class="processing-spinner" style="width:36px;height:36px;"></div>
+                    <div class="vc-progress-timer">@FormatElapsed(_elapsedSeconds)</div>
+                    <div class="vc-progress-estimate">Estimated: 1–3 minutes</div>
+                    <div class="vc-progress-bar">
+                        <div class="vc-progress-bar-fill"></div>
+                    </div>
+                </div>
+            </div>
+        }
+        else if (_generatedVideoDataUrl != null)
+        {
+            @* Video result *@
+            <div class="right-panel-card">
+                <div class="right-panel-label">&#127909; Generated Video</div>
+                <div class="vc-video-player">
+                    <video src="@_generatedVideoDataUrl" autoplay loop controls></video>
+                </div>
+                <div class="vc-actions">
+                    <button class="btn-primary-gradient" style="font-size:0.85rem;padding:0.4rem 0.85rem;"
+                            @onclick="DownloadVideo">
+                        &#128424; Download MP4
+                    </button>
+                    <button class="btn-secondary" style="font-size:0.85rem;padding:0.4rem 0.85rem;"
+                            @onclick="StartNew">
+                        &#10024; Create Another
+                    </button>
+                </div>
+            </div>
+        }
+        else
+        {
+            @* Placeholder *@
+            <div class="right-panel-card">
+                <div class="vc-video-placeholder">
+                    <span class="vc-placeholder-icon">&#127909;</span>
+                    <span>Your generated video will appear here</span>
+                    <span style="font-size: 0.75rem;">Select a mode, write a prompt, and hit Generate</span>
+                </div>
+            </div>
+        }
+
+        @* Session history *@
+        @if (_sessionHistory.Count > 0)
+        {
+            <div class="right-panel-card" style="margin-top: 0.75rem;">
+                <div class="right-panel-label">Session History</div>
+                <div class="vc-history">
+                    @for (int i = _sessionHistory.Count - 1; i >= 0; i--)
+                    {
+                        var idx = i;
+                        var item = _sessionHistory[idx];
+                        <div class="vc-history-item @(_activeHistoryIndex == idx ? "active" : "")"
+                             @onclick="() => LoadHistoryItem(idx)">
+                            <div class="vc-history-thumb">&#127909;</div>
+                            <div class="vc-history-info">
+                                <div class="vc-history-prompt">@item.Prompt</div>
+                                <div class="vc-history-meta">@item.Mode &middot; @item.Duration s &middot; @item.AspectRatio</div>
+                            </div>
+                        </div>
+                    }
+                </div>
+            </div>
+        }
+    </div>
+</div>
+
+@code {
+    // ── Enums ──
+    private enum VideoMode { TextToVideo, ImageToVideo, VideoToVideo }
+
+    private record HistoryItem(string Prompt, string Mode, int Duration, string AspectRatio, string DataUrl, byte[] VideoBytes);
+
+    // ── State ──
+    private VideoMode _selectedMode = VideoMode.TextToVideo;
+    private string _prompt = "";
+    private string _aspectRatio = "16:9";
+    private int _durationSeconds = 8;
+
+    // Upload
+    private string? _uploadedPath;
+    private string? _uploadedDataUrl;
+    private byte[]? _uploadedBytes;
+    private string? _uploadedMimeType;
+    private bool _isUploading;
+
+    // Generation
+    private bool _isGenerating;
+    private int _elapsedSeconds;
+    private string? _errorMessage;
+    private CancellationTokenSource? _cts;
+    private System.Threading.Timer? _timer;
+
+    // Result
+    private string? _generatedVideoDataUrl;
+    private byte[]? _generatedVideoBytes;
+
+    // History
+    private List<HistoryItem> _sessionHistory = new();
+    private int _activeHistoryIndex = -1;
+
+    // Auth
+    private int _userId;
+    private bool _isSuperAdmin;
+
+    private bool CanGenerate =>
+        !_isGenerating && !_isUploading
+        && !string.IsNullOrWhiteSpace(_prompt)
+        && (_selectedMode == VideoMode.TextToVideo || !string.IsNullOrEmpty(_uploadedPath));
+
+    // ── Lifecycle ──
+
+    protected override async Task OnInitializedAsync()
+    {
+        var authState = await AuthState.GetAuthenticationStateAsync();
+        var user = authState.User;
+        _isSuperAdmin = user.IsInRole("SuperAdmin");
+
+        var userIdStr = user.FindFirstValue(System.Security.Claims.ClaimTypes.NameIdentifier);
+        if (int.TryParse(userIdStr, out var uid))
+        {
+            _userId = uid;
+            if (!_isSuperAdmin)
+            {
+                if (!await SubscriptionService.HasFeatureAccessAsync(uid, ArtForgeAI.Models.FeatureAccess.VideoCreator))
+                {
+                    Nav.NavigateTo("/pricing", forceLoad: true);
+                    return;
+                }
+            }
+        }
+    }
+
+    public void Dispose()
+    {
+        _cts?.Cancel();
+        _cts?.Dispose();
+        _timer?.Dispose();
+    }
+
+    // ── Mode switching ──
+
+    private async Task SetMode(VideoMode mode)
+    {
+        if (_selectedMode == mode) return;
+        _selectedMode = mode;
+        await RemoveUpload();
+        _errorMessage = null;
+    }
+
+    // ── File upload ──
+
+    private async Task HandleFileUpload(InputFileChangeEventArgs e)
+    {
+        var file = e.File;
+        if (file is null) return;
+
+        _isUploading = true;
+        _errorMessage = null;
+        StateHasChanged();
+
+        try
+        {
+            if (_selectedMode == VideoMode.ImageToVideo)
+            {
+                // Image upload — max 10 MB
+                if (file.Size > 10 * 1024 * 1024)
+                {
+                    _errorMessage = "Image file is too large. Maximum size is 10 MB.";
+                    return;
+                }
+
+                using var stream = file.OpenReadStream(10 * 1024 * 1024);
+                var ms = new MemoryStream();
+                await stream.CopyToAsync(ms);
+                ms.Position = 0;
+
+                _uploadedPath = await ImageStorage.SaveUploadedFileAsync(ms, file.Name);
+                var fullPath = ResolveFullPath(_uploadedPath);
+                _uploadedBytes = await File.ReadAllBytesAsync(fullPath);
+
+                var ext = file.Name.EndsWith(".png", StringComparison.OrdinalIgnoreCase) ? "png" : "jpeg";
+                _uploadedMimeType = $"image/{ext}";
+                _uploadedDataUrl = $"data:{_uploadedMimeType};base64," + Convert.ToBase64String(_uploadedBytes);
+            }
+            else
+            {
+                // Video upload — max 20 MB
+                if (file.Size > 20 * 1024 * 1024)
+                {
+                    _errorMessage = "Video file is too large. Maximum size is 20 MB.";
+                    return;
+                }
+
+                using var stream = file.OpenReadStream(20 * 1024 * 1024);
+                var ms = new MemoryStream();
+                await stream.CopyToAsync(ms);
+
+                _uploadedBytes = ms.ToArray();
+                _uploadedMimeType = file.Name.EndsWith(".webm", StringComparison.OrdinalIgnoreCase)
+                    ? "video/webm" : "video/mp4";
+
+                // Save to wwwroot/uploads for consistency
+                ms.Position = 0;
+                _uploadedPath = await ImageStorage.SaveUploadedFileAsync(ms, file.Name);
+                _uploadedDataUrl = $"data:{_uploadedMimeType};base64," + Convert.ToBase64String(_uploadedBytes);
+            }
+        }
+        catch (Exception ex)
+        {
+            Logger.LogError(ex, "Upload failed");
+            _errorMessage = "Upload failed. Please try again.";
+        }
+        finally
+        {
+            _isUploading = false;
+            StateHasChanged();
+        }
+    }
+
+    private async Task RemoveUpload()
+    {
+        if (!string.IsNullOrEmpty(_uploadedPath))
+            await ImageStorage.DeleteImageAsync(_uploadedPath);
+
+        _uploadedPath = null;
+        _uploadedDataUrl = null;
+        _uploadedBytes = null;
+        _uploadedMimeType = null;
+    }
+
+    // ── Video generation ──
+
+    private async Task GenerateVideo()
+    {
+        if (!CanGenerate) return;
+
+        var cost = ArtForgeAI.Models.FeatureAccess.GetCost("VideoCreator");
+        if (!await TryDebitCoins(cost, "Video Creator generation"))
+            return;
+
+        _isGenerating = true;
+        _elapsedSeconds = 0;
+        _errorMessage = null;
+        _generatedVideoDataUrl = null;
+        _generatedVideoBytes = null;
+        StateHasChanged();
+
+        // Start elapsed timer
+        _timer = new System.Threading.Timer(async _ =>
+        {
+            _elapsedSeconds++;
+            await InvokeAsync(StateHasChanged);
+        }, null, 1000, 1000);
+
+        _cts = new CancellationTokenSource();
+
+        try
+        {
+            byte[] videoBytes;
+
+            switch (_selectedMode)
+            {
+                case VideoMode.TextToVideo:
+                    videoBytes = await VideoService.GenerateVideoAsync(
+                        _prompt, _aspectRatio, _durationSeconds,
+                        onProgress: null, ct: _cts.Token);
+                    break;
+
+                case VideoMode.ImageToVideo:
+                    var imagePrompt = $"Maintain the exact identity, facial features, and appearance of the person in the reference image. {_prompt}";
+                    videoBytes = await VideoService.GenerateVideoFromImageAsync(
+                        imagePrompt, _uploadedBytes!, _uploadedMimeType!,
+                        _aspectRatio, _durationSeconds,
+                        onProgress: null, ct: _cts.Token);
+                    break;
+
+                case VideoMode.VideoToVideo:
+                    videoBytes = await VideoService.GenerateVideoFromVideoAsync(
+                        _prompt, _uploadedBytes!, _uploadedMimeType!,
+                        _aspectRatio, _durationSeconds,
+                        onProgress: null, ct: _cts.Token);
+                    break;
+
+                default:
+                    throw new InvalidOperationException("Unknown mode");
+            }
+
+            _generatedVideoBytes = videoBytes;
+            _generatedVideoDataUrl = "data:video/mp4;base64," + Convert.ToBase64String(videoBytes);
+
+            // Add to session history
+            _sessionHistory.Add(new HistoryItem(
+                _prompt, _selectedMode.ToString(), _durationSeconds,
+                _aspectRatio, _generatedVideoDataUrl, videoBytes));
+            _activeHistoryIndex = _sessionHistory.Count - 1;
+        }
+        catch (OperationCanceledException)
+        {
+            _errorMessage = "Video generation was cancelled.";
+            await RefundCoins(cost, "Video Creator generation (cancelled)");
+        }
+        catch (TimeoutException)
+        {
+            _errorMessage = "Video generation timed out. Please try again.";
+            await RefundCoins(cost, "Video Creator generation (timeout)");
+        }
+        catch (Exception ex)
+        {
+            Logger.LogError(ex, "Video generation failed");
+            _errorMessage = "Video generation failed: " + ex.Message;
+            await RefundCoins(cost, "Video Creator generation (failed)");
+        }
+        finally
+        {
+            _timer?.Dispose();
+            _timer = null;
+            _cts?.Dispose();
+            _cts = null;
+            _isGenerating = false;
+            StateHasChanged();
+        }
+    }
+
+    private void CancelGeneration()
+    {
+        _cts?.Cancel();
+    }
+
+    // ── Download ──
+
+    private async Task DownloadVideo()
+    {
+        if (_generatedVideoBytes == null) return;
+        var base64 = Convert.ToBase64String(_generatedVideoBytes);
+        var fileName = $"video_{DateTime.Now:yyyyMMdd_HHmmss}.mp4";
+        await JS.InvokeVoidAsync("downloadFileFromBytes", fileName, "video/mp4", base64);
+    }
+
+    // ── History ──
+
+    private void LoadHistoryItem(int index)
+    {
+        if (index < 0 || index >= _sessionHistory.Count) return;
+        var item = _sessionHistory[index];
+        _generatedVideoDataUrl = item.DataUrl;
+        _generatedVideoBytes = item.VideoBytes;
+        _activeHistoryIndex = index;
+        StateHasChanged();
+    }
+
+    // ── Navigation ──
+
+    private async Task StartNew()
+    {
+        _generatedVideoDataUrl = null;
+        _generatedVideoBytes = null;
+        _prompt = "";
+        _errorMessage = null;
+        _activeHistoryIndex = -1;
+        await RemoveUpload();
+        StateHasChanged();
+    }
+
+    // ── Helpers ──
+
+    private async Task<bool> TryDebitCoins(int cost, string description)
+    {
+        if (_isSuperAdmin) return true;
+
+        if (!await CoinService.DebitCoinsAsync(_userId, cost, ArtForgeAI.Models.CoinTransactionType.GenerationSpend, description))
+        {
+            _errorMessage = "Insufficient coins. Please top up to continue.";
+            StateHasChanged();
+            return false;
+        }
+        return true;
+    }
+
+    private async Task RefundCoins(int amount, string description)
+    {
+        if (_isSuperAdmin) return;
+        try
+        {
+            await CoinService.CreditCoinsAsync(_userId, amount, ArtForgeAI.Models.CoinTransactionType.Refund, description);
+        }
+        catch (Exception ex)
+        {
+            Logger.LogWarning(ex, "Coin refund failed for user {UserId}", _userId);
+        }
+    }
+
+    private string ResolveFullPath(string webRelativePath) =>
+        System.IO.Path.Combine(Env.WebRootPath, webRelativePath.Replace("/", System.IO.Path.DirectorySeparatorChar.ToString()));
+
+    private static string FormatElapsed(int totalSeconds)
+    {
+        var minutes = totalSeconds / 60;
+        var seconds = totalSeconds % 60;
+        return $"{minutes}:{seconds:D2}";
+    }
+}

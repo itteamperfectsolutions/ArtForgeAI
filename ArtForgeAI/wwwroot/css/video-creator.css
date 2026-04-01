@@ -1,0 +1,256 @@
+/* ── Video Creator Tool Styles ── */
+
+/* Mode selector tabs */
+.vc-mode-tabs {
+    display: flex;
+    gap: 0.25rem;
+    margin-bottom: 0.75rem;
+}
+
+.vc-mode-tab {
+    flex: 1;
+    padding: 0.4rem 0.3rem;
+    border: 2px solid var(--border-color);
+    border-radius: var(--radius-sm);
+    background: var(--bg-secondary);
+    color: var(--text-secondary);
+    cursor: pointer;
+    transition: all 0.2s ease;
+    font-size: 0.72rem;
+    font-weight: 600;
+    text-align: center;
+    white-space: nowrap;
+}
+
+.vc-mode-tab:hover {
+    border-color: var(--primary);
+    background: var(--bg-tertiary);
+}
+
+.vc-mode-tab.active {
+    border-color: var(--primary);
+    background: rgba(99, 102, 241, 0.15);
+    color: var(--text-primary);
+    box-shadow: 0 0 0 2px rgba(99, 102, 241, 0.3);
+}
+
+/* Upload preview */
+.vc-uploaded-preview {
+    position: relative;
+    border-radius: var(--radius-sm);
+    overflow: hidden;
+    background: var(--bg-tertiary);
+    max-height: 180px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+}
+
+.vc-preview-img {
+    max-width: 100%;
+    max-height: 180px;
+    display: block;
+    object-fit: contain;
+}
+
+.vc-preview-video {
+    max-width: 100%;
+    max-height: 180px;
+    display: block;
+    border-radius: var(--radius-sm);
+}
+
+/* Settings row */
+.vc-settings-row {
+    display: flex;
+    gap: 0.75rem;
+    align-items: end;
+}
+
+.vc-settings-row > div {
+    flex: 1;
+}
+
+.vc-settings-row label {
+    font-size: 0.75rem;
+    font-weight: 600;
+    color: var(--text-secondary);
+    margin-bottom: 0.2rem;
+    display: block;
+}
+
+.vc-settings-row select {
+    width: 100%;
+    padding: 0.35rem 0.5rem;
+    border: 1px solid var(--border-color);
+    border-radius: var(--radius-sm);
+    background: var(--bg-secondary);
+    color: var(--text-primary);
+    font-size: 0.8rem;
+}
+
+/* Video player result */
+.vc-video-player {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    padding: 0.5rem;
+    background: var(--bg-tertiary);
+    border-radius: var(--radius-sm);
+    min-height: 300px;
+}
+
+.vc-video-player video {
+    max-width: 100%;
+    max-height: 500px;
+    border-radius: var(--radius-sm);
+}
+
+.vc-video-placeholder {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    min-height: 300px;
+    color: var(--text-muted);
+    font-size: 0.85rem;
+    gap: 0.5rem;
+}
+
+.vc-video-placeholder .vc-placeholder-icon {
+    font-size: 3rem;
+    opacity: 0.4;
+}
+
+/* Progress display */
+.vc-progress-container {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    min-height: 300px;
+    gap: 1rem;
+    padding: 2rem;
+}
+
+.vc-progress-timer {
+    font-size: 1.5rem;
+    font-weight: 700;
+    color: var(--text-primary);
+    font-variant-numeric: tabular-nums;
+}
+
+.vc-progress-estimate {
+    font-size: 0.8rem;
+    color: var(--text-muted);
+}
+
+.vc-progress-bar {
+    width: 100%;
+    max-width: 300px;
+    height: 4px;
+    border-radius: 2px;
+    background: var(--bg-tertiary);
+    overflow: hidden;
+}
+
+.vc-progress-bar-fill {
+    height: 100%;
+    border-radius: 2px;
+    background: linear-gradient(90deg, var(--primary), var(--primary-light, #818cf8));
+    animation: vc-pulse 2s ease-in-out infinite;
+}
+
+@keyframes vc-pulse {
+    0%, 100% { opacity: 0.6; width: 30%; }
+    50% { opacity: 1; width: 70%; }
+}
+
+/* Actions row */
+.vc-actions {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.4rem;
+    justify-content: center;
+    padding-top: 0.5rem;
+}
+
+/* Session history */
+.vc-history {
+    display: flex;
+    flex-direction: column;
+    gap: 0.4rem;
+    margin-top: 0.75rem;
+}
+
+.vc-history-item {
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+    padding: 0.4rem;
+    border: 1px solid var(--border-color);
+    border-radius: var(--radius-sm);
+    background: var(--bg-secondary);
+    cursor: pointer;
+    transition: all 0.2s ease;
+}
+
+.vc-history-item:hover {
+    border-color: var(--primary);
+    background: var(--bg-tertiary);
+}
+
+.vc-history-item.active {
+    border-color: var(--primary);
+    background: rgba(99, 102, 241, 0.1);
+}
+
+.vc-history-thumb {
+    width: 48px;
+    height: 36px;
+    border-radius: 4px;
+    background: var(--bg-tertiary);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 1.2rem;
+    flex-shrink: 0;
+}
+
+.vc-history-info {
+    flex: 1;
+    min-width: 0;
+}
+
+.vc-history-prompt {
+    font-size: 0.72rem;
+    color: var(--text-primary);
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+
+.vc-history-meta {
+    font-size: 0.65rem;
+    color: var(--text-muted);
+}
+
+/* Responsive */
+@media (max-width: 768px) {
+    .vc-mode-tabs {
+        flex-direction: column;
+    }
+
+    .vc-settings-row {
+        flex-direction: column;
+        gap: 0.5rem;
+    }
+
+    .vc-video-player {
+        min-height: 200px;
+    }
+
+    .vc-video-player video {
+        max-height: 300px;
+    }
+}
