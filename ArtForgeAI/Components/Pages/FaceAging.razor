@@ -98,17 +98,15 @@
 
                     <button class="btn-primary-gradient" style="width:100%;padding:0.55rem;font-size:0.9rem;"
                             @onclick="TransformAge" disabled="@_isProcessing">
-                        &#10024; Transform to Age @_selectedAge
+                        &#10024; Transform to Age @_selectedAge &middot; @ArtForgeAI.Models.FeatureAccess.GetCost("FaceAging") coins
                     </button>
-                    <p class="fa-cost-hint">Cost: @ArtForgeAI.Models.FeatureAccess.GetCost("FaceAging") coins</p>
 
-                    <hr style="margin: 0.75rem 0; border-color: var(--border-color);" />
+                    <hr style="margin: 0.5rem 0; border-color: var(--border-color);" />
 
                     <button class="btn-secondary" style="width:100%;padding:0.55rem;font-size:0.9rem;"
                             @onclick="GenerateTimeline" disabled="@_isProcessing">
-                        &#9203; Generate Full Timeline
+                        &#9203; Generate Full Timeline &middot; 5 coins
                     </button>
-                    <p class="fa-cost-hint">Generates all 5 age stages &middot; Cost: 5 coins</p>
                 }
             </div>
         </div>

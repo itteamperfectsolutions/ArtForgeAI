@@ -82,23 +82,20 @@
 
                     <button class="btn-primary-gradient" style="width:100%;padding:0.4rem;font-size:0.85rem;"
                             @onclick="TransformEmotion" disabled="@(_isProcessing || string.IsNullOrEmpty(_selectedEmotion))">
-                        &#10024; Apply @(string.IsNullOrEmpty(_selectedEmotion) ? "Emotion" : _selectedEmotion)
+                        &#10024; Apply @(string.IsNullOrEmpty(_selectedEmotion) ? "Emotion" : _selectedEmotion) &middot; @ArtForgeAI.Models.FeatureAccess.GetCost("EmotionTransfer") coins
                     </button>
-                    <p class="et-cost-hint">Cost: @ArtForgeAI.Models.FeatureAccess.GetCost("EmotionTransfer") coins</p>
 
                     <hr style="margin: 0.4rem 0; border-color: var(--border-color);" />
 
                     <button class="btn-secondary" style="width:100%;padding:0.4rem;font-size:0.85rem;"
                             @onclick="GenerateAllEmotions" disabled="@_isProcessing">
-                        &#127917; Generate All Emotions
+                        &#127917; Generate All Emotions &middot; 5 coins
                     </button>
-                    <p class="et-cost-hint">Parallel generation (10 calls) &middot; Cost: 5 coins</p>
 
-                    <button class="btn-secondary" style="width:100%;padding:0.55rem;font-size:0.9rem;margin-top:0.4rem;"
+                    <button class="btn-secondary" style="width:100%;padding:0.4rem;font-size:0.85rem;margin-top:0.35rem;"
                             @onclick="GenerateEmotionGrid" disabled="@_isProcessing">
-                        &#127912; Generate Emotion Grid (1 call)
+                        &#127912; Emotion Grid (Single Call) &middot; 2 coins
                     </button>
-                    <p class="et-cost-hint">Single AI call generates all emotions in one image &middot; Cost: 2 coins</p>
                 }
             </div>
         </div>
