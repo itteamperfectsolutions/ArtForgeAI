@@ -1,0 +1,691 @@
+@page "/emotion-transfer"
+@rendermode InteractiveServer
+@attribute [Authorize]
+@inject IJSRuntime JS
+@inject IWebHostEnvironment Env
+@inject ILogger<EmotionTransfer> Logger
+@inject IImageStorageService ImageStorage
+@inject IImageGenerationService ImageGenService
+@inject OnnxBgRemovalService BgRemoval
+@inject ISubscriptionService SubscriptionService
+@inject ICoinService CoinService
+@inject AuthenticationStateProvider AuthState
+@inject NavigationManager Nav
+@using SixLabors.ImageSharp
+@using SixLabors.ImageSharp.PixelFormats
+@using SixLabors.ImageSharp.Processing
+@implements IDisposable
+
+<PageTitle>ArtForge AI - Emotion Transfer</PageTitle>
+
+<link href="css/emotion-transfer.css" rel="stylesheet" />
+
+<div class="page-header page-header-lg">
+    <h2>Emotion Transfer</h2>
+    <p>Transform facial expressions — apply any emotion to a portrait</p>
+</div>
+
+<div class="create-layout">
+    @* ── Left column: controls ── *@
+    <div class="create-left">
+        <div class="card">
+            <div class="card-body">
+
+                @* Upload area *@
+                <div class="mb-3">
+                    <label class="form-label">Upload a Portrait</label>
+                    @if (!string.IsNullOrEmpty(_uploadedPath))
+                    {
+                        <div class="et-uploaded-preview">
+                            <button class="ref-thumb-remove" @onclick="RemovePhoto" disabled="@_isProcessing"
+                                    style="position:absolute;top:4px;right:4px;z-index:20;">&#10005;</button>
+                            <img src="@_uploadedDataUrl" alt="Uploaded portrait" class="et-preview-img" />
+                        </div>
+                    }
+                    else
+                    {
+                        <label class="upload-area upload-area-compact @(_isUploading ? "disabled" : "")">
+                            <span class="upload-icon">&#128247;</span>
+                            <span>Upload a portrait photo</span>
+                            <span style="font-size: 0.7rem; color: var(--text-muted); margin-left: 0.5rem;">JPG, PNG up to 10MB</span>
+                            <InputFile OnChange="HandleFileUpload" accept=".jpg,.jpeg,.png,.webp" style="display:none" disabled="@(_isProcessing || _isUploading)" />
+                        </label>
+                    }
+                    @if (_isUploading)
+                    {
+                        <div class="upload-progress-bar" style="margin-top: 0.35rem;">
+                            <div class="upload-progress-fill" style="width: 50%"></div>
+                            <span class="upload-progress-text">Uploading...</span>
+                        </div>
+                    }
+                </div>
+
+                @if (!string.IsNullOrEmpty(_uploadedPath))
+                {
+                    <hr style="margin: 0.5rem 0; border-color: var(--border-color);" />
+
+                    @* Emotion presets *@
+                    <div class="mb-3">
+                        <label class="form-label">Select Emotion</label>
+                        <div class="et-preset-grid">
+                            @foreach (var preset in _emotionPresets)
+                            {
+                                <button class="et-preset-btn @(_selectedEmotion == preset.Label ? "active" : "")"
+                                        @onclick="() => SelectEmotion(preset)"
+                                        disabled="@_isProcessing">
+                                    <span class="et-preset-emoji">@((MarkupString)preset.Emoji)</span>
+                                    <span class="et-preset-label">@preset.Label</span>
+                                </button>
+                            }
+                        </div>
+                    </div>
+
+                    <button class="btn-primary-gradient" style="width:100%;padding:0.55rem;font-size:0.9rem;"
+                            @onclick="TransformEmotion" disabled="@(_isProcessing || string.IsNullOrEmpty(_selectedEmotion))">
+                        &#10024; Apply @(string.IsNullOrEmpty(_selectedEmotion) ? "Emotion" : _selectedEmotion)
+                    </button>
+                    <p class="et-cost-hint">Cost: @ArtForgeAI.Models.FeatureAccess.GetCost("EmotionTransfer") coins</p>
+
+                    <hr style="margin: 0.75rem 0; border-color: var(--border-color);" />
+
+                    <button class="btn-secondary" style="width:100%;padding:0.55rem;font-size:0.9rem;"
+                            @onclick="GenerateAllEmotions" disabled="@_isProcessing">
+                        &#127917; Generate All Emotions
+                    </button>
+                    <p class="et-cost-hint">Generates all @_emotionPresets.Length emotions &middot; Cost: 5 coins</p>
+                }
+            </div>
+        </div>
+
+        @if (!string.IsNullOrEmpty(_errorMessage))
+        {
+            <div class="card" style="margin-top: 0.75rem; border-left: 3px solid var(--danger);">
+                <div class="card-body" style="padding: 0.75rem 1rem; color: var(--danger); font-size: 0.85rem;">
+                    <strong>Error:</strong> @_errorMessage
+                </div>
+            </div>
+        }
+    </div>
+
+    @* ── Right column: results ── *@
+    <div class="create-right">
+        @if (_gridReady)
+        {
+            <div class="right-panel-card">
+                <div class="right-panel-label">All Emotions</div>
+                <div class="et-emotions-grid">
+                    @for (int i = 0; i < _emotionPresets.Length; i++)
+                    {
+                        var idx = i;
+                        var preset = _emotionPresets[idx];
+                        var dataUrl = _gridResults[idx];
+                        <div class="et-grid-cell @(dataUrl != null ? "ready" : "pending") @(_enlargedIndex == idx ? "selected" : "")"
+                             @onclick="() => EnlargeEmotion(idx)">
+                            @if (dataUrl != null)
+                            {
+                                <img src="@dataUrl" alt="@preset.Label" />
+                            }
+                            else
+                            {
+                                <div class="et-grid-placeholder">
+                                    <div class="processing-spinner" style="width:20px;height:20px;"></div>
+                                </div>
+                            }
+                            <span class="et-grid-label">@((MarkupString)preset.Emoji) @preset.Label</span>
+                        </div>
+                    }
+                </div>
+                <div class="et-actions">
+                    <button class="btn-primary-gradient" style="font-size:0.85rem;padding:0.4rem 0.85rem;" @onclick="DownloadGridStrip">
+                        &#128424; Download Grid
+                    </button>
+                    @if (_enlargedIndex >= 0 && _gridResults[_enlargedIndex] != null)
+                    {
+                        <button class="btn-secondary" style="font-size:0.85rem;padding:0.4rem 0.85rem;" @onclick="DownloadEnlargedEmotion">
+                            &#128424; Download @(_emotionPresets[_enlargedIndex].Label)
+                        </button>
+                    }
+                    <button class="btn-secondary" style="font-size: 0.85rem; padding: 0.4rem 0.85rem;" @onclick="StartNew">
+                        &#10024; Process Another
+                    </button>
+                </div>
+            </div>
+
+            @* Enlarged view *@
+            @if (_enlargedIndex >= 0 && _gridResults[_enlargedIndex] != null)
+            {
+                <div class="right-panel-card" style="margin-top: 0.75rem;">
+                    <div class="right-panel-label">@((MarkupString)_emotionPresets[_enlargedIndex].Emoji) @(_emotionPresets[_enlargedIndex].Label)</div>
+                    <div class="et-enlarged-view">
+                        <img src="@_gridResults[_enlargedIndex]" alt="@_emotionPresets[_enlargedIndex].Label" />
+                    </div>
+                </div>
+            }
+        }
+        else if (!string.IsNullOrEmpty(_singleResultDataUrl))
+        {
+            <div class="right-panel-card">
+                <div class="right-panel-label">@((MarkupString)_lastEmoji) @_lastEmotion</div>
+                <div class="et-enlarged-view">
+                    <img src="@_singleResultDataUrl" alt="@_lastEmotion result" />
+                </div>
+                <div class="et-actions">
+                    <button class="btn-primary-gradient" style="font-size:0.85rem;padding:0.4rem 0.85rem;" @onclick="DownloadSingleResult">
+                        &#128424; Download Result
+                    </button>
+                    <button class="btn-secondary" style="font-size: 0.85rem; padding: 0.4rem 0.85rem;" @onclick="StartNew">
+                        &#10024; Process Another
+                    </button>
+                </div>
+            </div>
+        }
+    </div>
+</div>
+
+@* ── Processing overlay ── *@
+@if (_isProcessing)
+{
+    <div class="pp-processing-overlay">
+        <div class="pp-processing-modal">
+            <div class="processing-spinner" style="width:36px;height:36px;margin:0 auto 1rem;"></div>
+            <p style="margin:0;font-size:0.95rem;color:var(--text-primary);">@_processingStatus</p>
+            @if (_gridTotal > 0)
+            {
+                <div class="fa-timeline-progress">
+                    <div class="fa-timeline-progress-fill" style="width: @((_gridCompleted * 100) / _gridTotal)%"></div>
+                </div>
+                <p style="margin:0.5rem 0 0;font-size:0.8rem;color:var(--text-muted);">@_gridCompleted / @_gridTotal emotions complete</p>
+            }
+        </div>
+    </div>
+}
+
+@* ── Before/After comparison overlay ── *@
+@if (_showComparison)
+{
+    <div class="pp-processing-overlay" style="z-index:1000;">
+        <div style="background:var(--bg-primary);border-radius:var(--radius-lg);padding:1.25rem;max-width:700px;width:95%;max-height:90vh;overflow-y:auto;box-shadow:0 8px 32px rgba(0,0,0,0.4);">
+            <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:0.75rem;">
+                <span style="font-weight:600;font-size:1rem;color:var(--text-primary);">Emotion Transfer — Compare</span>
+                <button class="gs-design-remove" @onclick="RejectResult" style="width:24px;height:24px;">&#10005;</button>
+            </div>
+            <div style="display:grid;grid-template-columns:1fr 1fr;gap:0.75rem;">
+                <div style="text-align:center;">
+                    <span style="display:block;font-size:0.78rem;font-weight:500;color:var(--text-muted);margin-bottom:0.35rem;">Original</span>
+                    <div style="border-radius:var(--radius-sm);overflow:hidden;background:var(--bg-tertiary);">
+                        <img src="@_uploadedDataUrl" alt="Original"
+                             style="max-width:100%;max-height:350px;display:block;margin:0 auto;object-fit:contain;" />
+                    </div>
+                </div>
+                <div style="text-align:center;">
+                    <span style="display:block;font-size:0.78rem;font-weight:500;color:var(--text-muted);margin-bottom:0.35rem;">@((MarkupString)_comparisonEmoji) @_comparisonEmotion</span>
+                    <div style="border-radius:var(--radius-sm);overflow:hidden;background:var(--bg-tertiary);">
+                        <img src="@_comparisonResultUrl" alt="@_comparisonEmotion"
+                             style="max-width:100%;max-height:350px;display:block;margin:0 auto;object-fit:contain;" />
+                    </div>
+                </div>
+            </div>
+            <p style="font-size:0.72rem;color:var(--text-muted);margin:0.5rem 0 0.75rem 0;text-align:center;">
+                Compare the original with the emotion-transformed result.
+            </p>
+            <div style="display:flex;gap:0.5rem;justify-content:center;">
+                <button class="btn-primary-gradient" style="padding:0.5rem 1.5rem;font-size:0.9rem;" @onclick="AcceptResult">
+                    &#10004; Accept
+                </button>
+                <button class="btn-secondary" style="padding:0.5rem 1.5rem;font-size:0.9rem;" @onclick="RejectResult">
+                    &#10006; Reject
+                </button>
+            </div>
+        </div>
+    </div>
+}
+
+@code {
+    // ── Emotion presets ──
+    private record EmotionPreset(string Label, string Emoji, string Description);
+    private static readonly EmotionPreset[] _emotionPresets =
+    [
+        new("Happy",      "&#128522;", "bright smile, raised cheeks, joyful eyes"),
+        new("Sad",        "&#128546;", "downturned mouth, softer drooping eyes, melancholic look"),
+        new("Angry",      "&#128544;", "furrowed brows, tense jaw, intense glare"),
+        new("Surprised",  "&#128558;", "wide open eyes, raised eyebrows, slightly open mouth"),
+        new("Disgusted",  "&#129326;", "scrunched nose, curled upper lip, narrowed eyes"),
+        new("Fearful",    "&#128552;", "wide eyes, slightly open mouth, tense forehead"),
+        new("Neutral",    "&#128528;", "relaxed face, no strong emotion, calm expression"),
+        new("Laughing",   "&#128518;", "big open smile, squinted eyes, visible teeth, joyful"),
+        new("Crying",     "&#128557;", "tears streaming down cheeks, sad furrowed brows"),
+        new("Wink",       "&#128521;", "one eye closed in a wink, slight playful smile")
+    ];
+
+    // ── State ──
+    private string? _uploadedPath;
+    private string? _uploadedDataUrl;
+    private byte[]? _uploadedBytes;
+    private string? _uploadedFullPath;
+    private bool _isUploading;
+    private bool _isProcessing;
+    private string _processingStatus = "";
+    private string? _errorMessage;
+    private int _userId;
+    private bool _isSuperAdmin;
+
+    // Emotion selection
+    private string _selectedEmotion = "";
+
+    // Single transform
+    private string? _singleResultDataUrl;
+    private string _lastEmotion = "";
+    private string _lastEmoji = "";
+
+    // Comparison modal
+    private bool _showComparison;
+    private string? _comparisonResultUrl;
+    private string _comparisonEmotion = "";
+    private string _comparisonEmoji = "";
+
+    // All-emotions grid
+    private bool _gridReady;
+    private string?[] _gridResults = new string?[10];
+    private int _gridCompleted;
+    private int _gridTotal;
+    private int _enlargedIndex = -1;
+
+    // ── Lifecycle ──
+
+    protected override async Task OnInitializedAsync()
+    {
+        var authState = await AuthState.GetAuthenticationStateAsync();
+        var user = authState.User;
+        _isSuperAdmin = user.IsInRole("SuperAdmin");
+
+        var userIdStr = user.FindFirstValue(System.Security.Claims.ClaimTypes.NameIdentifier);
+        if (int.TryParse(userIdStr, out var uid))
+        {
+            _userId = uid;
+            if (!_isSuperAdmin)
+            {
+                if (!await SubscriptionService.HasFeatureAccessAsync(uid, ArtForgeAI.Models.FeatureAccess.EmotionTransfer))
+                {
+                    Nav.NavigateTo("/pricing", forceLoad: true);
+                    return;
+                }
+            }
+        }
+    }
+
+    public void Dispose() { }
+
+    // ── Upload ──
+
+    private async Task HandleFileUpload(InputFileChangeEventArgs e)
+    {
+        var file = e.File;
+        if (file is null) return;
+
+        if (file.Size > ImageUploadHelper.DefaultMaxUploadSize)
+        {
+            if (file.Size > ImageUploadHelper.MaxReadSize)
+            {
+                _errorMessage = $"File is too large ({ImageUploadHelper.FormatFileSize(file.Size)}). Maximum allowed is {ImageUploadHelper.FormatFileSize(ImageUploadHelper.MaxReadSize)}.";
+                StateHasChanged();
+                return;
+            }
+            try
+            {
+                using var readMs = new MemoryStream();
+                await file.OpenReadStream(ImageUploadHelper.MaxReadSize).CopyToAsync(readMs);
+                var compressed = ImageUploadHelper.CompressToFit(readMs.ToArray(), file.Name);
+                await ProcessUpload(file.Name, compressed);
+            }
+            catch (Exception ex)
+            {
+                Logger.LogError(ex, "Image compression failed");
+                _errorMessage = "Failed to compress the image. Please try a smaller file.";
+                StateHasChanged();
+            }
+            return;
+        }
+
+        using var stream = file.OpenReadStream(ImageUploadHelper.MaxReadSize);
+        var ms = new MemoryStream();
+        await stream.CopyToAsync(ms);
+        await ProcessUpload(file.Name, ms);
+    }
+
+    private async Task ProcessUpload(string fileName, MemoryStream dataStream)
+    {
+        _isUploading = true;
+        _errorMessage = null;
+        ResetResults();
+        StateHasChanged();
+
+        try
+        {
+            dataStream.Position = 0;
+            _uploadedPath = await ImageStorage.SaveUploadedFileAsync(dataStream, fileName);
+            _uploadedFullPath = ResolveFullPath(_uploadedPath);
+            _uploadedBytes = await File.ReadAllBytesAsync(_uploadedFullPath);
+
+            var ext = _uploadedPath.EndsWith(".png", StringComparison.OrdinalIgnoreCase) ? "png" : "jpeg";
+            _uploadedDataUrl = $"data:image/{ext};base64," + Convert.ToBase64String(_uploadedBytes);
+
+            // Validate face presence
+            try
+            {
+                var resized = ResizeForProcessing(_uploadedBytes, 1200);
+                var bgResult = await BgRemoval.RemoveBackgroundWithBoundsAsync(resized);
+                double subH = bgResult.SubjectBottom - bgResult.SubjectTop;
+                double subW = bgResult.SubjectRight - bgResult.SubjectLeft;
+                if (subH < 0.05 || subW < 0.05)
+                {
+                    _errorMessage = "No face detected. Please upload a clear portrait photo.";
+                    _uploadedPath = null;
+                    _uploadedDataUrl = null;
+                    _uploadedBytes = null;
+                    _uploadedFullPath = null;
+                    return;
+                }
+            }
+            catch (Exception ex)
+            {
+                Logger.LogWarning(ex, "Face detection failed, proceeding anyway");
+            }
+        }
+        catch (Exception ex)
+        {
+            Logger.LogError(ex, "Upload failed");
+            _errorMessage = "Upload failed. Please try again.";
+        }
+        finally
+        {
+            _isUploading = false;
+            StateHasChanged();
+        }
+    }
+
+    // ── Emotion selection ──
+
+    private void SelectEmotion(EmotionPreset preset)
+    {
+        _selectedEmotion = preset.Label;
+    }
+
+    // ── Single emotion transform ──
+
+    private async Task TransformEmotion()
+    {
+        if (string.IsNullOrEmpty(_uploadedFullPath) || string.IsNullOrEmpty(_selectedEmotion)) return;
+
+        var preset = _emotionPresets.First(p => p.Label == _selectedEmotion);
+
+        if (!await TryDebitCoins(ArtForgeAI.Models.FeatureAccess.GetCost("EmotionTransfer"), "Emotion Transfer generation"))
+            return;
+
+        _isProcessing = true;
+        _processingStatus = $"Applying {preset.Label} emotion...";
+        _errorMessage = null;
+        _gridTotal = 0;
+        StateHasChanged();
+
+        try
+        {
+            var result = await GenerateEmotionImage(_uploadedFullPath, preset);
+
+            if (result.Success && !string.IsNullOrEmpty(result.LocalImagePath))
+            {
+                var resultPath = ResolveFullPath(result.LocalImagePath);
+                var resultBytes = await File.ReadAllBytesAsync(resultPath);
+                var resultDataUrl = "data:image/png;base64," + Convert.ToBase64String(resultBytes);
+
+                _comparisonResultUrl = resultDataUrl;
+                _comparisonEmotion = preset.Label;
+                _comparisonEmoji = preset.Emoji;
+                _showComparison = true;
+            }
+            else
+            {
+                _errorMessage = "Emotion transfer failed: " + (result.ErrorMessage ?? "Unknown error");
+            }
+        }
+        catch (Exception ex)
+        {
+            Logger.LogError(ex, "Emotion transfer failed");
+            _errorMessage = "Emotion transfer failed: " + ex.Message;
+        }
+        finally
+        {
+            _isProcessing = false;
+            _processingStatus = "";
+            StateHasChanged();
+        }
+    }
+
+    // ── Comparison modal ──
+
+    private void AcceptResult()
+    {
+        _singleResultDataUrl = _comparisonResultUrl;
+        _lastEmotion = _comparisonEmotion;
+        _lastEmoji = _comparisonEmoji;
+        _showComparison = false;
+        _gridReady = false;
+        StateHasChanged();
+    }
+
+    private void RejectResult()
+    {
+        _showComparison = false;
+        _comparisonResultUrl = null;
+        StateHasChanged();
+    }
+
+    // ── All emotions grid ──
+
+    private async Task GenerateAllEmotions()
+    {
+        if (string.IsNullOrEmpty(_uploadedFullPath)) return;
+
+        if (!await TryDebitCoins(5, "Emotion Transfer All Emotions"))
+            return;
+
+        _isProcessing = true;
+        _processingStatus = "Generating all emotions...";
+        _errorMessage = null;
+        _gridResults = new string?[_emotionPresets.Length];
+        _gridCompleted = 0;
+        _gridTotal = _emotionPresets.Length;
+        _gridReady = true;
+        _singleResultDataUrl = null;
+        _enlargedIndex = -1;
+        StateHasChanged();
+
+        var tasks = new Task[_emotionPresets.Length];
+        for (int i = 0; i < _emotionPresets.Length; i++)
+        {
+            var idx = i;
+            var preset = _emotionPresets[idx];
+            tasks[idx] = Task.Run(async () =>
+            {
+                try
+                {
+                    var result = await GenerateEmotionImage(_uploadedFullPath!, preset);
+                    if (result.Success && !string.IsNullOrEmpty(result.LocalImagePath))
+                    {
+                        var resultPath = ResolveFullPath(result.LocalImagePath);
+                        var resultBytes = await File.ReadAllBytesAsync(resultPath);
+                        _gridResults[idx] = "data:image/png;base64," + Convert.ToBase64String(resultBytes);
+                    }
+                }
+                catch (Exception ex)
+                {
+                    Logger.LogWarning(ex, "Emotion grid stage {Emotion} failed", preset.Label);
+                }
+                finally
+                {
+                    Interlocked.Increment(ref _gridCompleted);
+                    await InvokeAsync(StateHasChanged);
+                }
+            });
+        }
+
+        await Task.WhenAll(tasks);
+
+        _isProcessing = false;
+        _processingStatus = "";
+
+        for (int i = 0; i < _gridResults.Length; i++)
+        {
+            if (_gridResults[i] != null) { _enlargedIndex = i; break; }
+        }
+
+        var failedCount = _gridResults.Count(r => r == null);
+        if (failedCount > 0 && failedCount < _emotionPresets.Length)
+            _errorMessage = $"{failedCount} emotion(s) failed to generate. Click on completed ones to view.";
+        else if (failedCount == _emotionPresets.Length)
+            _errorMessage = "All emotions failed. Please try again.";
+
+        StateHasChanged();
+    }
+
+    // ── Gemini emotion generation ──
+
+    private async Task<ArtForgeAI.Models.GenerationResult> GenerateEmotionImage(string imagePath, EmotionPreset preset)
+    {
+        var prompt = $"Transform this person's facial expression to show a {preset.Label.ToLower()} emotion: {preset.Description}. " +
+                     "CRITICAL RULES: " +
+                     "1. ONLY change the facial EXPRESSION — modify the mouth, eyes, eyebrows, and facial muscles to convey the target emotion. " +
+                     "2. Maintain the person's EXACT identity — same face shape, eye color, nose structure, lip shape, jawline, skin tone, and all distinguishing facial marks (moles, dimples, scars). " +
+                     "3. Keep the EXACT SAME hair, clothing, lighting, background, pose, and head angle. " +
+                     "4. Do NOT change the person's age, skin color, ethnicity, or any identifying features. " +
+                     "5. The expression change must look natural and photorealistic — as if the person genuinely made that expression. " +
+                     "6. The result should be indistinguishable from a real photograph." +
+                     ArtForgeAI.Models.StylePreset.FacialIdentitySuffix;
+
+        var request = new ArtForgeAI.Models.GenerationRequest
+        {
+            Prompt = prompt,
+            ReferenceImagePaths = [imagePath],
+            Provider = ArtForgeAI.Models.ImageProvider.Gemini,
+            EnhancePrompt = false,
+            Width = 1024,
+            Height = 1024,
+            UserId = _userId.ToString()
+        };
+
+        return await ImageGenService.GenerateImageAsync(request);
+    }
+
+    // ── Downloads ──
+
+    private async Task DownloadSingleResult()
+    {
+        if (string.IsNullOrEmpty(_singleResultDataUrl)) return;
+        var base64 = _singleResultDataUrl[(_singleResultDataUrl.IndexOf(",", StringComparison.Ordinal) + 1)..];
+        var fileName = $"emotion_{_lastEmotion}_{DateTime.Now:yyyyMMdd_HHmmss}.png";
+        await JS.InvokeVoidAsync("downloadFileFromBytes", fileName, "image/png", base64);
+    }
+
+    private async Task DownloadEnlargedEmotion()
+    {
+        if (_enlargedIndex < 0 || _gridResults[_enlargedIndex] == null) return;
+        var dataUrl = _gridResults[_enlargedIndex]!;
+        var base64 = dataUrl[(dataUrl.IndexOf(",", StringComparison.Ordinal) + 1)..];
+        var preset = _emotionPresets[_enlargedIndex];
+        var fileName = $"emotion_{preset.Label}_{DateTime.Now:yyyyMMdd_HHmmss}.png";
+        await JS.InvokeVoidAsync("downloadFileFromBytes", fileName, "image/png", base64);
+    }
+
+    private async Task DownloadGridStrip()
+    {
+        try
+        {
+            var base64 = await JS.InvokeAsync<string>("emotionTransfer.renderEmotionGrid",
+                _gridResults,
+                _emotionPresets.Select(p => p.Label).ToArray());
+
+            if (!string.IsNullOrEmpty(base64))
+            {
+                var fileName = $"emotion_grid_{DateTime.Now:yyyyMMdd_HHmmss}.png";
+                await JS.InvokeVoidAsync("downloadFileFromBytes", fileName, "image/png", base64);
+            }
+        }
+        catch (Exception ex)
+        {
+            Logger.LogWarning(ex, "Emotion grid render failed");
+            _errorMessage = "Failed to render emotion grid.";
+            StateHasChanged();
+        }
+    }
+
+    // ── Navigation ──
+
+    private void EnlargeEmotion(int index)
+    {
+        if (_gridResults[index] != null)
+            _enlargedIndex = index;
+    }
+
+    private async Task StartNew()
+    {
+        await RemovePhoto();
+        StateHasChanged();
+    }
+
+    private async Task RemovePhoto()
+    {
+        if (!string.IsNullOrEmpty(_uploadedPath))
+            await ImageStorage.DeleteImageAsync(_uploadedPath);
+
+        _uploadedPath = null;
+        _uploadedDataUrl = null;
+        _uploadedBytes = null;
+        _uploadedFullPath = null;
+        _selectedEmotion = "";
+        ResetResults();
+    }
+
+    private void ResetResults()
+    {
+        _singleResultDataUrl = null;
+        _gridReady = false;
+        _gridResults = new string?[_emotionPresets.Length];
+        _enlargedIndex = -1;
+        _showComparison = false;
+        _comparisonResultUrl = null;
+        _errorMessage = null;
+    }
+
+    // ── Helpers ──
+
+    private async Task<bool> TryDebitCoins(int cost, string description)
+    {
+        if (_isSuperAdmin) return true;
+
+        if (!await CoinService.DebitCoinsAsync(_userId, cost, ArtForgeAI.Models.CoinTransactionType.GenerationSpend, description))
+        {
+            _errorMessage = "Insufficient coins. Please top up to continue.";
+            StateHasChanged();
+            return false;
+        }
+        return true;
+    }
+
+    private string ResolveFullPath(string webRelativePath) =>
+        System.IO.Path.Combine(Env.WebRootPath, webRelativePath.Replace("/", System.IO.Path.DirectorySeparatorChar.ToString()));
+
+    private static byte[] ResizeForProcessing(byte[] imageBytes, int maxDimension)
+    {
+        using var img = Image.Load<Rgba32>(imageBytes);
+        if (img.Width <= maxDimension && img.Height <= maxDimension)
+            return imageBytes;
+
+        var scale = (double)maxDimension / Math.Max(img.Width, img.Height);
+        int newW = (int)(img.Width * scale);
+        int newH = (int)(img.Height * scale);
+        img.Mutate(ctx => ctx.Resize(newW, newH));
+
+        using var ms = new MemoryStream();
+        img.SaveAsPng(ms);
+        return ms.ToArray();
+    }
+}

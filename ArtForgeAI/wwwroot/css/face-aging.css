@@ -1,0 +1,245 @@
+/* ── Face Aging Tool Styles ── */
+
+/* Uploaded preview */
+.fa-uploaded-preview {
+    position: relative;
+    border-radius: var(--radius-sm);
+    overflow: hidden;
+    background: var(--bg-tertiary);
+    max-height: 280px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+}
+
+.fa-preview-img {
+    max-width: 100%;
+    max-height: 280px;
+    display: block;
+    object-fit: contain;
+}
+
+/* ── Age Preset Buttons ── */
+.fa-preset-row {
+    display: flex;
+    gap: 0.4rem;
+    flex-wrap: wrap;
+}
+
+.fa-preset-btn {
+    flex: 1 1 0;
+    min-width: 60px;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 0.15rem;
+    padding: 0.5rem 0.25rem;
+    border: 2px solid var(--border-color);
+    border-radius: var(--radius-sm);
+    background: var(--bg-secondary);
+    color: var(--text-primary);
+    cursor: pointer;
+    transition: all 0.2s ease;
+    font-size: 0.75rem;
+}
+
+.fa-preset-btn:hover {
+    border-color: var(--primary);
+    background: var(--bg-tertiary);
+}
+
+.fa-preset-btn.active {
+    border-color: var(--primary);
+    background: rgba(99, 102, 241, 0.15);
+    box-shadow: 0 0 0 2px rgba(99, 102, 241, 0.3);
+}
+
+.fa-preset-emoji {
+    font-size: 1.3rem;
+    line-height: 1;
+}
+
+.fa-preset-label {
+    font-weight: 600;
+    font-size: 0.7rem;
+    white-space: nowrap;
+}
+
+.fa-preset-age {
+    font-size: 0.65rem;
+    color: var(--text-muted);
+}
+
+/* ── Age Slider ── */
+.fa-age-slider {
+    width: 100%;
+    height: 6px;
+    -webkit-appearance: none;
+    appearance: none;
+    background: var(--bg-tertiary);
+    border-radius: 3px;
+    outline: none;
+    margin: 0.5rem 0 0.25rem;
+}
+
+.fa-age-slider::-webkit-slider-thumb {
+    -webkit-appearance: none;
+    appearance: none;
+    width: 20px;
+    height: 20px;
+    border-radius: 50%;
+    background: var(--primary);
+    cursor: pointer;
+    box-shadow: 0 2px 6px rgba(99, 102, 241, 0.4);
+    transition: transform 0.15s ease;
+}
+
+.fa-age-slider::-webkit-slider-thumb:hover {
+    transform: scale(1.15);
+}
+
+.fa-age-slider::-moz-range-thumb {
+    width: 20px;
+    height: 20px;
+    border-radius: 50%;
+    background: var(--primary);
+    cursor: pointer;
+    border: none;
+    box-shadow: 0 2px 6px rgba(99, 102, 241, 0.4);
+}
+
+.fa-slider-labels {
+    display: flex;
+    justify-content: space-between;
+    font-size: 0.65rem;
+    color: var(--text-muted);
+    padding: 0 2px;
+}
+
+.fa-cost-hint {
+    font-size: 0.7rem;
+    color: var(--text-muted);
+    margin: 0.25rem 0 0 0;
+    text-align: center;
+}
+
+/* ── Timeline Strip ── */
+.fa-timeline-strip {
+    display: flex;
+    gap: 0.5rem;
+    overflow-x: auto;
+    padding: 0.75rem 0;
+    scrollbar-width: thin;
+}
+
+.fa-timeline-stage {
+    flex: 0 0 auto;
+    width: 130px;
+    text-align: center;
+    cursor: pointer;
+    transition: transform 0.2s ease;
+}
+
+.fa-timeline-stage:hover {
+    transform: scale(1.03);
+}
+
+.fa-timeline-stage.ready img {
+    width: 130px;
+    height: 130px;
+    object-fit: cover;
+    border-radius: var(--radius-sm);
+    border: 2px solid var(--border-color);
+    transition: border-color 0.2s ease;
+}
+
+.fa-timeline-stage.ready:hover img {
+    border-color: var(--primary);
+}
+
+.fa-timeline-placeholder {
+    width: 130px;
+    height: 130px;
+    border-radius: var(--radius-sm);
+    background: var(--bg-tertiary);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    border: 2px dashed var(--border-color);
+}
+
+.fa-timeline-label {
+    display: block;
+    font-size: 0.72rem;
+    font-weight: 600;
+    color: var(--text-secondary);
+    margin-top: 0.3rem;
+}
+
+.fa-timeline-actions {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.4rem;
+    justify-content: center;
+    padding-top: 0.5rem;
+}
+
+/* ── Timeline Progress Bar ── */
+.fa-timeline-progress {
+    width: 100%;
+    height: 6px;
+    background: var(--bg-tertiary);
+    border-radius: 3px;
+    overflow: hidden;
+    margin-top: 0.75rem;
+}
+
+.fa-timeline-progress-fill {
+    height: 100%;
+    background: linear-gradient(90deg, var(--primary), #818cf8);
+    border-radius: 3px;
+    transition: width 0.3s ease;
+}
+
+/* ── Enlarged View ── */
+.fa-enlarged-view {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    padding: 0.5rem;
+    background: var(--bg-tertiary);
+    border-radius: var(--radius-sm);
+}
+
+.fa-enlarged-view img {
+    max-width: 100%;
+    max-height: 450px;
+    object-fit: contain;
+    border-radius: var(--radius-sm);
+}
+
+/* ── Responsive ── */
+@media (max-width: 768px) {
+    .fa-preset-row {
+        gap: 0.3rem;
+    }
+
+    .fa-preset-btn {
+        min-width: 50px;
+        padding: 0.4rem 0.15rem;
+    }
+
+    .fa-preset-emoji {
+        font-size: 1.1rem;
+    }
+
+    .fa-timeline-stage {
+        width: 100px;
+    }
+
+    .fa-timeline-stage.ready img,
+    .fa-timeline-placeholder {
+        width: 100px;
+        height: 100px;
+    }
+}

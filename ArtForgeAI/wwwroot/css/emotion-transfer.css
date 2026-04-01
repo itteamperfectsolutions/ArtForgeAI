@@ -1,0 +1,181 @@
+/* ── Emotion Transfer Tool Styles ── */
+
+/* Uploaded preview */
+.et-uploaded-preview {
+    position: relative;
+    border-radius: var(--radius-sm);
+    overflow: hidden;
+    background: var(--bg-tertiary);
+    max-height: 280px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+}
+
+.et-preview-img {
+    max-width: 100%;
+    max-height: 280px;
+    display: block;
+    object-fit: contain;
+}
+
+/* ── Emotion Preset Grid ── */
+.et-preset-grid {
+    display: grid;
+    grid-template-columns: repeat(5, 1fr);
+    gap: 0.4rem;
+}
+
+.et-preset-btn {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 0.1rem;
+    padding: 0.45rem 0.2rem;
+    border: 2px solid var(--border-color);
+    border-radius: var(--radius-sm);
+    background: var(--bg-secondary);
+    color: var(--text-primary);
+    cursor: pointer;
+    transition: all 0.2s ease;
+    font-size: 0.7rem;
+}
+
+.et-preset-btn:hover {
+    border-color: var(--primary);
+    background: var(--bg-tertiary);
+}
+
+.et-preset-btn.active {
+    border-color: var(--primary);
+    background: rgba(99, 102, 241, 0.15);
+    box-shadow: 0 0 0 2px rgba(99, 102, 241, 0.3);
+}
+
+.et-preset-emoji {
+    font-size: 1.4rem;
+    line-height: 1;
+}
+
+.et-preset-label {
+    font-weight: 600;
+    font-size: 0.62rem;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    max-width: 100%;
+}
+
+.et-cost-hint {
+    font-size: 0.7rem;
+    color: var(--text-muted);
+    margin: 0.25rem 0 0 0;
+    text-align: center;
+}
+
+/* ── All Emotions Grid ── */
+.et-emotions-grid {
+    display: grid;
+    grid-template-columns: repeat(5, 1fr);
+    gap: 0.5rem;
+    padding: 0.5rem 0;
+}
+
+.et-grid-cell {
+    text-align: center;
+    cursor: pointer;
+    transition: transform 0.2s ease;
+}
+
+.et-grid-cell:hover {
+    transform: scale(1.03);
+}
+
+.et-grid-cell.selected img {
+    border-color: var(--primary);
+    box-shadow: 0 0 0 2px rgba(99, 102, 241, 0.4);
+}
+
+.et-grid-cell.ready img {
+    width: 100%;
+    aspect-ratio: 1;
+    object-fit: cover;
+    border-radius: var(--radius-sm);
+    border: 2px solid var(--border-color);
+    transition: border-color 0.2s ease;
+}
+
+.et-grid-cell.ready:hover img {
+    border-color: var(--primary);
+}
+
+.et-grid-placeholder {
+    width: 100%;
+    aspect-ratio: 1;
+    border-radius: var(--radius-sm);
+    background: var(--bg-tertiary);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    border: 2px dashed var(--border-color);
+}
+
+.et-grid-label {
+    display: block;
+    font-size: 0.68rem;
+    font-weight: 600;
+    color: var(--text-secondary);
+    margin-top: 0.25rem;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+
+.et-actions {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.4rem;
+    justify-content: center;
+    padding-top: 0.5rem;
+}
+
+/* ── Enlarged View ── */
+.et-enlarged-view {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    padding: 0.5rem;
+    background: var(--bg-tertiary);
+    border-radius: var(--radius-sm);
+}
+
+.et-enlarged-view img {
+    max-width: 100%;
+    max-height: 450px;
+    object-fit: contain;
+    border-radius: var(--radius-sm);
+}
+
+/* ── Responsive ── */
+@media (max-width: 768px) {
+    .et-preset-grid {
+        grid-template-columns: repeat(5, 1fr);
+        gap: 0.3rem;
+    }
+
+    .et-preset-btn {
+        padding: 0.35rem 0.1rem;
+    }
+
+    .et-preset-emoji {
+        font-size: 1.1rem;
+    }
+
+    .et-preset-label {
+        font-size: 0.58rem;
+    }
+
+    .et-emotions-grid {
+        grid-template-columns: repeat(3, 1fr);
+    }
+}

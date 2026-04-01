@@ -1,0 +1,713 @@
+@page "/face-aging"
+@rendermode InteractiveServer
+@attribute [Authorize]
+@inject IJSRuntime JS
+@inject IWebHostEnvironment Env
+@inject ILogger<FaceAging> Logger
+@inject IImageStorageService ImageStorage
+@inject IImageGenerationService ImageGenService
+@inject OnnxBgRemovalService BgRemoval
+@inject ISubscriptionService SubscriptionService
+@inject ICoinService CoinService
+@inject AuthenticationStateProvider AuthState
+@inject NavigationManager Nav
+@using SixLabors.ImageSharp
+@using SixLabors.ImageSharp.PixelFormats
+@using SixLabors.ImageSharp.Processing
+@implements IDisposable
+
+<PageTitle>ArtForge AI - Face Aging</PageTitle>
+
+<link href="css/face-aging.css" rel="stylesheet" />
+
+<div class="page-header page-header-lg">
+    <h2>Face Aging &amp; De-aging</h2>
+    <p>See how a face looks at different ages — from child to senior</p>
+</div>
+
+<div class="create-layout">
+    @* ── Left column: controls ── *@
+    <div class="create-left">
+        <div class="card">
+            <div class="card-body">
+
+                @* Upload area *@
+                <div class="mb-3">
+                    <label class="form-label">Upload a Portrait</label>
+                    @if (!string.IsNullOrEmpty(_uploadedPath))
+                    {
+                        <div class="fa-uploaded-preview">
+                            <button class="ref-thumb-remove" @onclick="RemovePhoto" disabled="@_isProcessing"
+                                    style="position:absolute;top:4px;right:4px;z-index:20;">&#10005;</button>
+                            <img src="@_uploadedDataUrl" alt="Uploaded portrait" class="fa-preview-img" />
+                        </div>
+                    }
+                    else
+                    {
+                        <label class="upload-area upload-area-compact @(_isUploading ? "disabled" : "")">
+                            <span class="upload-icon">&#128247;</span>
+                            <span>Upload a portrait photo</span>
+                            <span style="font-size: 0.7rem; color: var(--text-muted); margin-left: 0.5rem;">JPG, PNG up to 10MB</span>
+                            <InputFile OnChange="HandleFileUpload" accept=".jpg,.jpeg,.png,.webp" style="display:none" disabled="@(_isProcessing || _isUploading)" />
+                        </label>
+                    }
+                    @if (_isUploading)
+                    {
+                        <div class="upload-progress-bar" style="margin-top: 0.35rem;">
+                            <div class="upload-progress-fill" style="width: 50%"></div>
+                            <span class="upload-progress-text">Uploading...</span>
+                        </div>
+                    }
+                </div>
+
+                @if (!string.IsNullOrEmpty(_uploadedPath))
+                {
+                    <hr style="margin: 0.5rem 0; border-color: var(--border-color);" />
+
+                    @* Age presets *@
+                    <div class="mb-3">
+                        <label class="form-label">Age Presets</label>
+                        <div class="fa-preset-row">
+                            @foreach (var preset in _agePresets)
+                            {
+                                <button class="fa-preset-btn @(_selectedPreset == preset.Label ? "active" : "")"
+                                        @onclick="() => SelectPreset(preset)"
+                                        disabled="@_isProcessing">
+                                    <span class="fa-preset-emoji">@((MarkupString)preset.Emoji)</span>
+                                    <span class="fa-preset-label">@preset.Label</span>
+                                    <span class="fa-preset-age">~@(preset.Age)y</span>
+                                </button>
+                            }
+                        </div>
+                    </div>
+
+                    @* Custom age slider *@
+                    <div class="mb-3">
+                        <label class="form-label">Custom Age: <strong>@_selectedAge years</strong></label>
+                        <input type="range" class="fa-age-slider" min="5" max="80" step="1"
+                               @bind="_selectedAge" @bind:event="oninput"
+                               @onchange="OnSliderChanged"
+                               disabled="@_isProcessing" />
+                        <div class="fa-slider-labels">
+                            <span>5</span>
+                            <span>25</span>
+                            <span>50</span>
+                            <span>80</span>
+                        </div>
+                    </div>
+
+                    <button class="btn-primary-gradient" style="width:100%;padding:0.55rem;font-size:0.9rem;"
+                            @onclick="TransformAge" disabled="@_isProcessing">
+                        &#10024; Transform to Age @_selectedAge
+                    </button>
+                    <p class="fa-cost-hint">Cost: @ArtForgeAI.Models.FeatureAccess.GetCost("FaceAging") coins</p>
+
+                    <hr style="margin: 0.75rem 0; border-color: var(--border-color);" />
+
+                    <button class="btn-secondary" style="width:100%;padding:0.55rem;font-size:0.9rem;"
+                            @onclick="GenerateTimeline" disabled="@_isProcessing">
+                        &#9203; Generate Full Timeline
+                    </button>
+                    <p class="fa-cost-hint">Generates all 5 age stages &middot; Cost: 5 coins</p>
+                }
+            </div>
+        </div>
+
+        @if (!string.IsNullOrEmpty(_errorMessage))
+        {
+            <div class="card" style="margin-top: 0.75rem; border-left: 3px solid var(--danger);">
+                <div class="card-body" style="padding: 0.75rem 1rem; color: var(--danger); font-size: 0.85rem;">
+                    <strong>Error:</strong> @_errorMessage
+                </div>
+            </div>
+        }
+    </div>
+
+    @* ── Right column: results ── *@
+    <div class="create-right">
+        @if (_timelineReady)
+        {
+            <div class="right-panel-card">
+                <div class="right-panel-label">Age Timeline</div>
+                <div class="fa-timeline-strip">
+                    @for (int i = 0; i < _agePresets.Length; i++)
+                    {
+                        var idx = i;
+                        var preset = _agePresets[idx];
+                        var dataUrl = _timelineResults[idx];
+                        <div class="fa-timeline-stage @(dataUrl != null ? "ready" : "pending")"
+                             @onclick="() => EnlargeStage(idx)">
+                            @if (dataUrl != null)
+                            {
+                                <img src="@dataUrl" alt="@preset.Label" />
+                            }
+                            else
+                            {
+                                <div class="fa-timeline-placeholder">
+                                    <div class="processing-spinner" style="width:24px;height:24px;"></div>
+                                </div>
+                            }
+                            <span class="fa-timeline-label">@preset.Label</span>
+                        </div>
+                    }
+                </div>
+                <div class="fa-timeline-actions">
+                    <button class="btn-primary-gradient" style="font-size:0.85rem;padding:0.4rem 0.85rem;" @onclick="DownloadTimelineStrip">
+                        &#128424; Download Timeline Strip
+                    </button>
+                    @if (_enlargedIndex >= 0 && _timelineResults[_enlargedIndex] != null)
+                    {
+                        <button class="btn-secondary" style="font-size:0.85rem;padding:0.4rem 0.85rem;" @onclick="DownloadEnlargedStage">
+                            &#128424; Download @(_agePresets[_enlargedIndex].Label)
+                        </button>
+                    }
+                    <button class="btn-secondary" style="font-size: 0.85rem; padding: 0.4rem 0.85rem;" @onclick="StartNew">
+                        &#10024; Process Another
+                    </button>
+                </div>
+            </div>
+
+            @* Enlarged view *@
+            @if (_enlargedIndex >= 0 && _timelineResults[_enlargedIndex] != null)
+            {
+                <div class="right-panel-card" style="margin-top: 0.75rem;">
+                    <div class="right-panel-label">@(_agePresets[_enlargedIndex].Label) (~@(_agePresets[_enlargedIndex].Age) years)</div>
+                    <div class="fa-enlarged-view">
+                        <img src="@_timelineResults[_enlargedIndex]" alt="@_agePresets[_enlargedIndex].Label" />
+                    </div>
+                </div>
+            }
+        }
+        else if (!string.IsNullOrEmpty(_singleResultDataUrl))
+        {
+            <div class="right-panel-card">
+                <div class="right-panel-label">Result — Age @_lastTransformAge</div>
+                <div class="fa-enlarged-view">
+                    <img src="@_singleResultDataUrl" alt="Age @_lastTransformAge result" />
+                </div>
+                <div class="fa-timeline-actions">
+                    <button class="btn-primary-gradient" style="font-size:0.85rem;padding:0.4rem 0.85rem;" @onclick="DownloadSingleResult">
+                        &#128424; Download Result
+                    </button>
+                    <button class="btn-secondary" style="font-size: 0.85rem; padding: 0.4rem 0.85rem;" @onclick="StartNew">
+                        &#10024; Process Another
+                    </button>
+                </div>
+            </div>
+        }
+    </div>
+</div>
+
+@* ── Processing overlay ── *@
+@if (_isProcessing)
+{
+    <div class="pp-processing-overlay">
+        <div class="pp-processing-modal">
+            <div class="processing-spinner" style="width:36px;height:36px;margin:0 auto 1rem;"></div>
+            <p style="margin:0;font-size:0.95rem;color:var(--text-primary);">@_processingStatus</p>
+            @if (_timelineTotal > 0)
+            {
+                <div class="fa-timeline-progress">
+                    <div class="fa-timeline-progress-fill" style="width: @((_timelineCompleted * 100) / _timelineTotal)%"></div>
+                </div>
+                <p style="margin:0.5rem 0 0;font-size:0.8rem;color:var(--text-muted);">@_timelineCompleted / @_timelineTotal stages complete</p>
+            }
+        </div>
+    </div>
+}
+
+@* ── Before/After comparison overlay ── *@
+@if (_showComparison)
+{
+    <div class="pp-processing-overlay" style="z-index:1000;">
+        <div style="background:var(--bg-primary);border-radius:var(--radius-lg);padding:1.25rem;max-width:700px;width:95%;max-height:90vh;overflow-y:auto;box-shadow:0 8px 32px rgba(0,0,0,0.4);">
+            <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:0.75rem;">
+                <span style="font-weight:600;font-size:1rem;color:var(--text-primary);">Age Transform — Compare</span>
+                <button class="gs-design-remove" @onclick="RejectResult" style="width:24px;height:24px;">&#10005;</button>
+            </div>
+            <div style="display:grid;grid-template-columns:1fr 1fr;gap:0.75rem;">
+                <div style="text-align:center;">
+                    <span style="display:block;font-size:0.78rem;font-weight:500;color:var(--text-muted);margin-bottom:0.35rem;">Original</span>
+                    <div style="border-radius:var(--radius-sm);overflow:hidden;background:var(--bg-tertiary);">
+                        <img src="@_uploadedDataUrl" alt="Original"
+                             style="max-width:100%;max-height:350px;display:block;margin:0 auto;object-fit:contain;" />
+                    </div>
+                </div>
+                <div style="text-align:center;">
+                    <span style="display:block;font-size:0.78rem;font-weight:500;color:var(--text-muted);margin-bottom:0.35rem;">Age @_comparisonAge</span>
+                    <div style="border-radius:var(--radius-sm);overflow:hidden;background:var(--bg-tertiary);">
+                        <img src="@_comparisonResultUrl" alt="Age @_comparisonAge"
+                             style="max-width:100%;max-height:350px;display:block;margin:0 auto;object-fit:contain;" />
+                    </div>
+                </div>
+            </div>
+            <p style="font-size:0.72rem;color:var(--text-muted);margin:0.5rem 0 0.75rem 0;text-align:center;">
+                Compare the original with the age-transformed result.
+            </p>
+            <div style="display:flex;gap:0.5rem;justify-content:center;">
+                <button class="btn-primary-gradient" style="padding:0.5rem 1.5rem;font-size:0.9rem;" @onclick="AcceptResult">
+                    &#10004; Accept
+                </button>
+                <button class="btn-secondary" style="padding:0.5rem 1.5rem;font-size:0.9rem;" @onclick="RejectResult">
+                    &#10006; Reject
+                </button>
+            </div>
+        </div>
+    </div>
+}
+
+@code {
+    // ── Age presets ──
+    private record AgePreset(string Label, int Age, string Emoji);
+    private static readonly AgePreset[] _agePresets =
+    [
+        new("Child",        5,  "&#128118;"),
+        new("Teen",         15, "&#129489;"),
+        new("Young Adult",  25, "&#128100;"),
+        new("Middle-aged",  45, "&#128104;"),
+        new("Senior",       70, "&#128116;")
+    ];
+
+    // ── State ──
+    private string? _uploadedPath;
+    private string? _uploadedDataUrl;
+    private byte[]? _uploadedBytes;
+    private string? _uploadedFullPath;
+    private bool _isUploading;
+    private bool _isProcessing;
+    private string _processingStatus = "";
+    private string? _errorMessage;
+    private int _userId;
+    private bool _isSuperAdmin;
+
+    // Age selection
+    private int _selectedAge = 25;
+    private string _selectedPreset = "";
+
+    // Single transform
+    private string? _singleResultDataUrl;
+    private int _lastTransformAge;
+
+    // Comparison modal
+    private bool _showComparison;
+    private string? _comparisonResultUrl;
+    private int _comparisonAge;
+
+    // Timeline
+    private bool _timelineReady;
+    private string?[] _timelineResults = new string?[5];
+    private int _timelineCompleted;
+    private int _timelineTotal;
+    private int _enlargedIndex = -1;
+
+    // ── Lifecycle ──
+
+    protected override async Task OnInitializedAsync()
+    {
+        var authState = await AuthState.GetAuthenticationStateAsync();
+        var user = authState.User;
+        _isSuperAdmin = user.IsInRole("SuperAdmin");
+
+        var userIdStr = user.FindFirstValue(System.Security.Claims.ClaimTypes.NameIdentifier);
+        if (int.TryParse(userIdStr, out var uid))
+        {
+            _userId = uid;
+            if (!_isSuperAdmin)
+            {
+                if (!await SubscriptionService.HasFeatureAccessAsync(uid, ArtForgeAI.Models.FeatureAccess.FaceAging))
+                {
+                    Nav.NavigateTo("/pricing", forceLoad: true);
+                    return;
+                }
+            }
+        }
+    }
+
+    public void Dispose() { }
+
+    // ── Upload ──
+
+    private async Task HandleFileUpload(InputFileChangeEventArgs e)
+    {
+        var file = e.File;
+        if (file is null) return;
+
+        if (file.Size > ImageUploadHelper.DefaultMaxUploadSize)
+        {
+            if (file.Size > ImageUploadHelper.MaxReadSize)
+            {
+                _errorMessage = $"File is too large ({ImageUploadHelper.FormatFileSize(file.Size)}). Maximum allowed is {ImageUploadHelper.FormatFileSize(ImageUploadHelper.MaxReadSize)}.";
+                StateHasChanged();
+                return;
+            }
+            try
+            {
+                using var readMs = new MemoryStream();
+                await file.OpenReadStream(ImageUploadHelper.MaxReadSize).CopyToAsync(readMs);
+                var compressed = ImageUploadHelper.CompressToFit(readMs.ToArray(), file.Name);
+                await ProcessUpload(file.Name, compressed);
+            }
+            catch (Exception ex)
+            {
+                Logger.LogError(ex, "Image compression failed");
+                _errorMessage = "Failed to compress the image. Please try a smaller file.";
+                StateHasChanged();
+            }
+            return;
+        }
+
+        using var stream = file.OpenReadStream(ImageUploadHelper.MaxReadSize);
+        var ms = new MemoryStream();
+        await stream.CopyToAsync(ms);
+        await ProcessUpload(file.Name, ms);
+    }
+
+    private async Task ProcessUpload(string fileName, MemoryStream dataStream)
+    {
+        _isUploading = true;
+        _errorMessage = null;
+        ResetResults();
+        StateHasChanged();
+
+        try
+        {
+            dataStream.Position = 0;
+            _uploadedPath = await ImageStorage.SaveUploadedFileAsync(dataStream, fileName);
+            _uploadedFullPath = ResolveFullPath(_uploadedPath);
+            _uploadedBytes = await File.ReadAllBytesAsync(_uploadedFullPath);
+
+            var ext = _uploadedPath.EndsWith(".png", StringComparison.OrdinalIgnoreCase) ? "png" : "jpeg";
+            _uploadedDataUrl = $"data:image/{ext};base64," + Convert.ToBase64String(_uploadedBytes);
+
+            // Validate face detection
+            try
+            {
+                var resized = ResizeForProcessing(_uploadedBytes, 1200);
+                var bgResult = await BgRemoval.RemoveBackgroundWithBoundsAsync(resized);
+                double subH = bgResult.SubjectBottom - bgResult.SubjectTop;
+                double subW = bgResult.SubjectRight - bgResult.SubjectLeft;
+                if (subH < 0.05 || subW < 0.05)
+                {
+                    _errorMessage = "No face detected. Please upload a clear portrait photo.";
+                    _uploadedPath = null;
+                    _uploadedDataUrl = null;
+                    _uploadedBytes = null;
+                    _uploadedFullPath = null;
+                    return;
+                }
+            }
+            catch (Exception ex)
+            {
+                Logger.LogWarning(ex, "Face detection failed, proceeding anyway");
+            }
+        }
+        catch (Exception ex)
+        {
+            Logger.LogError(ex, "Upload failed");
+            _errorMessage = "Upload failed. Please try again.";
+        }
+        finally
+        {
+            _isUploading = false;
+            StateHasChanged();
+        }
+    }
+
+    // ── Preset selection ──
+
+    private void SelectPreset(AgePreset preset)
+    {
+        _selectedPreset = preset.Label;
+        _selectedAge = preset.Age;
+    }
+
+    private void OnSliderChanged()
+    {
+        _selectedPreset = "";
+    }
+
+    // ── Single age transform ──
+
+    private async Task TransformAge()
+    {
+        if (string.IsNullOrEmpty(_uploadedFullPath)) return;
+
+        // Debit coins
+        if (!await TryDebitCoins(ArtForgeAI.Models.FeatureAccess.GetCost("FaceAging"), "Face Aging generation"))
+            return;
+
+        _isProcessing = true;
+        _processingStatus = $"Transforming face to age {_selectedAge}...";
+        _errorMessage = null;
+        _timelineTotal = 0;
+        StateHasChanged();
+
+        try
+        {
+            var result = await GenerateAgedImage(_uploadedFullPath, _selectedAge);
+
+            if (result.Success && !string.IsNullOrEmpty(result.LocalImagePath))
+            {
+                var resultPath = ResolveFullPath(result.LocalImagePath);
+                var resultBytes = await File.ReadAllBytesAsync(resultPath);
+                var resultDataUrl = "data:image/png;base64," + Convert.ToBase64String(resultBytes);
+
+                _comparisonResultUrl = resultDataUrl;
+                _comparisonAge = _selectedAge;
+                _showComparison = true;
+            }
+            else
+            {
+                _errorMessage = "Age transform failed: " + (result.ErrorMessage ?? "Unknown error");
+            }
+        }
+        catch (Exception ex)
+        {
+            Logger.LogError(ex, "Age transform failed");
+            _errorMessage = "Age transform failed: " + ex.Message;
+        }
+        finally
+        {
+            _isProcessing = false;
+            _processingStatus = "";
+            StateHasChanged();
+        }
+    }
+
+    // ── Comparison modal ──
+
+    private void AcceptResult()
+    {
+        _singleResultDataUrl = _comparisonResultUrl;
+        _lastTransformAge = _comparisonAge;
+        _showComparison = false;
+        _timelineReady = false;
+        StateHasChanged();
+    }
+
+    private void RejectResult()
+    {
+        _showComparison = false;
+        _comparisonResultUrl = null;
+        StateHasChanged();
+    }
+
+    // ── Timeline generation ──
+
+    private async Task GenerateTimeline()
+    {
+        if (string.IsNullOrEmpty(_uploadedFullPath)) return;
+
+        // Debit 5 coins for timeline
+        if (!await TryDebitCoins(5, "Face Aging Timeline"))
+            return;
+
+        _isProcessing = true;
+        _processingStatus = "Generating age timeline...";
+        _errorMessage = null;
+        _timelineResults = new string?[5];
+        _timelineCompleted = 0;
+        _timelineTotal = 5;
+        _timelineReady = true;
+        _singleResultDataUrl = null;
+        _enlargedIndex = -1;
+        StateHasChanged();
+
+        var tasks = new Task[5];
+        for (int i = 0; i < _agePresets.Length; i++)
+        {
+            var idx = i;
+            var preset = _agePresets[idx];
+            tasks[idx] = Task.Run(async () =>
+            {
+                try
+                {
+                    var result = await GenerateAgedImage(_uploadedFullPath!, preset.Age);
+                    if (result.Success && !string.IsNullOrEmpty(result.LocalImagePath))
+                    {
+                        var resultPath = ResolveFullPath(result.LocalImagePath);
+                        var resultBytes = await File.ReadAllBytesAsync(resultPath);
+                        _timelineResults[idx] = "data:image/png;base64," + Convert.ToBase64String(resultBytes);
+                    }
+                }
+                catch (Exception ex)
+                {
+                    Logger.LogWarning(ex, "Timeline stage {Stage} failed", preset.Label);
+                }
+                finally
+                {
+                    Interlocked.Increment(ref _timelineCompleted);
+                    await InvokeAsync(StateHasChanged);
+                }
+            });
+        }
+
+        await Task.WhenAll(tasks);
+
+        _isProcessing = false;
+        _processingStatus = "";
+
+        // Auto-select first available stage
+        for (int i = 0; i < _timelineResults.Length; i++)
+        {
+            if (_timelineResults[i] != null) { _enlargedIndex = i; break; }
+        }
+
+        var failedCount = _timelineResults.Count(r => r == null);
+        if (failedCount > 0 && failedCount < 5)
+            _errorMessage = $"{failedCount} stage(s) failed to generate. Click on completed stages to view.";
+        else if (failedCount == 5)
+            _errorMessage = "All timeline stages failed. Please try again.";
+
+        StateHasChanged();
+    }
+
+    // ── Gemini age generation ──
+
+    private async Task<ArtForgeAI.Models.GenerationResult> GenerateAgedImage(string imagePath, int targetAge)
+    {
+        var ageDescription = targetAge switch
+        {
+            <= 7   => $"a young child of about {targetAge} years old, with soft childlike features, round face, smooth skin, and youthful proportions",
+            <= 18  => $"a teenager of about {targetAge} years old, with developing facial features, youthful skin, and adolescent proportions",
+            <= 30  => $"a young adult of about {targetAge} years old, with mature but youthful facial features, smooth skin, and defined bone structure",
+            <= 55  => $"a middle-aged person of about {targetAge} years old, with some fine lines and wrinkles, slightly less firm skin, and mature facial features",
+            _      => $"an elderly person of about {targetAge} years old, with visible wrinkles, age spots, greying or white hair, and aged skin texture"
+        };
+
+        var prompt = $"Transform this person's face to look like {ageDescription}. " +
+                     "CRITICAL RULES: " +
+                     "1. Maintain the person's EXACT identity — same face shape, eye color, nose structure, lip shape, jawline, and all distinguishing facial marks. " +
+                     "2. Only change AGE-RELATED features: skin texture, wrinkles, facial volume, hair color/style (greying for older, natural for younger), bone structure proportions appropriate for the target age. " +
+                     "3. Keep the EXACT SAME pose, expression, lighting, clothing, and background as the original photo. " +
+                     "4. The result must look natural and photorealistic — not cartoonish or AI-generated. " +
+                     "5. The person must be clearly recognizable as the same individual at a different age." +
+                     ArtForgeAI.Models.StylePreset.FacialIdentitySuffix;
+
+        var request = new ArtForgeAI.Models.GenerationRequest
+        {
+            Prompt = prompt,
+            ReferenceImagePaths = [imagePath],
+            Provider = ArtForgeAI.Models.ImageProvider.Gemini,
+            EnhancePrompt = false,
+            Width = 1024,
+            Height = 1024,
+            UserId = _userId.ToString()
+        };
+
+        return await ImageGenService.GenerateImageAsync(request);
+    }
+
+    // ── Downloads ──
+
+    private async Task DownloadSingleResult()
+    {
+        if (string.IsNullOrEmpty(_singleResultDataUrl)) return;
+        var base64 = _singleResultDataUrl[((_singleResultDataUrl.IndexOf(",", StringComparison.Ordinal) + 1))..];
+        var fileName = $"face_age_{_lastTransformAge}_{DateTime.Now:yyyyMMdd_HHmmss}.png";
+        await JS.InvokeVoidAsync("downloadFileFromBytes", fileName, "image/png", base64);
+    }
+
+    private async Task DownloadEnlargedStage()
+    {
+        if (_enlargedIndex < 0 || _timelineResults[_enlargedIndex] == null) return;
+        var dataUrl = _timelineResults[_enlargedIndex]!;
+        var base64 = dataUrl[(dataUrl.IndexOf(",", StringComparison.Ordinal) + 1)..];
+        var preset = _agePresets[_enlargedIndex];
+        var fileName = $"face_age_{preset.Label.Replace(" ", "_")}_{DateTime.Now:yyyyMMdd_HHmmss}.png";
+        await JS.InvokeVoidAsync("downloadFileFromBytes", fileName, "image/png", base64);
+    }
+
+    private async Task DownloadTimelineStrip()
+    {
+        try
+        {
+            var base64 = await JS.InvokeAsync<string>("faceAging.renderTimelineStrip",
+                _timelineResults,
+                _agePresets.Select(p => p.Label).ToArray());
+
+            if (!string.IsNullOrEmpty(base64))
+            {
+                var fileName = $"face_aging_timeline_{DateTime.Now:yyyyMMdd_HHmmss}.png";
+                await JS.InvokeVoidAsync("downloadFileFromBytes", fileName, "image/png", base64);
+            }
+        }
+        catch (Exception ex)
+        {
+            Logger.LogWarning(ex, "Timeline strip render failed");
+            _errorMessage = "Failed to render timeline strip.";
+            StateHasChanged();
+        }
+    }
+
+    // ── Navigation ──
+
+    private void EnlargeStage(int index)
+    {
+        if (_timelineResults[index] != null)
+            _enlargedIndex = index;
+    }
+
+    private async Task StartNew()
+    {
+        await RemovePhoto();
+        StateHasChanged();
+    }
+
+    private async Task RemovePhoto()
+    {
+        if (!string.IsNullOrEmpty(_uploadedPath))
+            await ImageStorage.DeleteImageAsync(_uploadedPath);
+
+        _uploadedPath = null;
+        _uploadedDataUrl = null;
+        _uploadedBytes = null;
+        _uploadedFullPath = null;
+        ResetResults();
+    }
+
+    private void ResetResults()
+    {
+        _singleResultDataUrl = null;
+        _timelineReady = false;
+        _timelineResults = new string?[5];
+        _enlargedIndex = -1;
+        _showComparison = false;
+        _comparisonResultUrl = null;
+        _errorMessage = null;
+    }
+
+    // ── Helpers ──
+
+    private async Task<bool> TryDebitCoins(int cost, string description)
+    {
+        if (_isSuperAdmin) return true;
+
+        if (!await CoinService.DebitCoinsAsync(_userId, cost, ArtForgeAI.Models.CoinTransactionType.GenerationSpend, description))
+        {
+            _errorMessage = "Insufficient coins. Please top up to continue.";
+            StateHasChanged();
+            return false;
+        }
+        return true;
+    }
+
+    private string ResolveFullPath(string webRelativePath) =>
+        System.IO.Path.Combine(Env.WebRootPath, webRelativePath.Replace("/", System.IO.Path.DirectorySeparatorChar.ToString()));
+
+    private static byte[] ResizeForProcessing(byte[] imageBytes, int maxDimension)
+    {
+        using var img = SixLabors.ImageSharp.Image.Load<SixLabors.ImageSharp.PixelFormats.Rgba32>(imageBytes);
+        if (img.Width <= maxDimension && img.Height <= maxDimension)
+            return imageBytes;
+
+        var scale = (double)maxDimension / Math.Max(img.Width, img.Height);
+        int newW = (int)(img.Width * scale);
+        int newH = (int)(img.Height * scale);
+        img.Mutate(ctx => ctx.Resize(newW, newH));
+
+        using var ms = new MemoryStream();
+        img.SaveAsPng(ms);
+        return ms.ToArray();
+    }
+}

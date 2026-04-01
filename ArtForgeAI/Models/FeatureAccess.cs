@@ -22,14 +22,16 @@ public static class FeatureAccess
     public const string EmbroideryArt = "EmbroideryArt";
     public const string BackgroundRemoval = "BackgroundRemoval";
     public const string SignatureDayDesign = "SignatureDayDesign";
+    public const string FaceAging = "FaceAging";
+    public const string EmotionTransfer = "EmotionTransfer";
 
     /// <summary>Plan name to allowed features mapping</summary>
     public static readonly Dictionary<string, string[]> PlanFeatures = new()
     {
         ["Free"] = [QuickStyle],
         ["Starter"] = [QuickStyle, Home, StyleTransfer, StyleRemix, Gallery],
-        ["Pro"] = [QuickStyle, Home, StyleTransfer, StyleRemix, Gallery, MosaicPoster, PassportPhoto, ImageViewer, Settings, NegativeScan, AutoEnhance, PhotoCollages, Merger, EmbroideryArt, BackgroundRemoval, SignatureDayDesign],
-        ["Enterprise"] = [QuickStyle, Home, StyleTransfer, StyleRemix, Gallery, MosaicPoster, PassportPhoto, ImageViewer, Settings, PhotoExpand, GangSheet, ShapeCutSheet, NegativeScan, AutoEnhance, PhotoCollages, Merger, EmbroideryArt, BackgroundRemoval, SignatureDayDesign]
+        ["Pro"] = [QuickStyle, Home, StyleTransfer, StyleRemix, Gallery, MosaicPoster, PassportPhoto, ImageViewer, Settings, NegativeScan, AutoEnhance, PhotoCollages, Merger, EmbroideryArt, BackgroundRemoval, SignatureDayDesign, FaceAging, EmotionTransfer],
+        ["Enterprise"] = [QuickStyle, Home, StyleTransfer, StyleRemix, Gallery, MosaicPoster, PassportPhoto, ImageViewer, Settings, PhotoExpand, GangSheet, ShapeCutSheet, NegativeScan, AutoEnhance, PhotoCollages, Merger, EmbroideryArt, BackgroundRemoval, SignatureDayDesign, FaceAging, EmotionTransfer]
     };
 
     /// <summary>Coin cost per generation for each feature</summary>
@@ -50,14 +52,16 @@ public static class FeatureAccess
         [Merger] = 3,
         [EmbroideryArt] = 3,
         [BackgroundRemoval] = 2,
-        [SignatureDayDesign] = 0
+        [SignatureDayDesign] = 0,
+        [FaceAging] = 2,
+        [EmotionTransfer] = 2
     };
 
     /// <summary>All feature keys</summary>
     public static readonly string[] AllFeatures =
     [
         QuickStyle, Home, StyleTransfer, StyleRemix, Gallery, MosaicPoster,
-        PassportPhoto, ImageViewer, Settings, PhotoExpand, GangSheet, ShapeCutSheet, NegativeScan, AutoEnhance, PhotoCollages, Merger, EmbroideryArt, BackgroundRemoval, SignatureDayDesign
+        PassportPhoto, ImageViewer, Settings, PhotoExpand, GangSheet, ShapeCutSheet, NegativeScan, AutoEnhance, PhotoCollages, Merger, EmbroideryArt, BackgroundRemoval, SignatureDayDesign, FaceAging, EmotionTransfer
     ];
 
     public static int GetCost(string featureKey) =>
