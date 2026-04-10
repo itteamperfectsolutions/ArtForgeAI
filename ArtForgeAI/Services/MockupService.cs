@@ -96,31 +96,33 @@ public class MockupService
         int outputHeight = 1200)
     {
         using var product = new Image<Rgba32>(outputWidth, outputHeight);
-        var bgColor = Color.ParseHex(productColor);
+        Color bgColor;
+        if (!Color.TryParseHex(productColor, out bgColor))
+            bgColor = Color.White;
         product.Mutate(ctx => ctx.Fill(bgColor));
 
         using var logo = Image.Load<Rgba32>(logoBytes);
         int logoW = (int)(logo.Width * logoScale);
         int logoH = (int)(logo.Height * logoScale);
-        if (logoW > 0 && logoH > 0)
+        logoW = Math.Max(logoW, 1);
+        logoH = Math.Max(logoH, 1);
+
+        logo.Mutate(ctx =>
         {
-            logo.Mutate(ctx =>
-            {
-                ctx.Resize(logoW, logoH);
-                if (Math.Abs(logoRotation) > 0.1f)
-                    ctx.Rotate(logoRotation);
-            });
+            ctx.Resize(logoW, logoH);
+            if (Math.Abs(logoRotation) > 0.1f)
+                ctx.Rotate(logoRotation);
+        });
 
-            if (logoOpacity < 1.0f)
-            {
-                logo.Mutate(ctx => ctx.Opacity(logoOpacity));
-            }
-
-            int posX = (int)(logoX * outputWidth) - (logo.Width / 2);
-            int posY = (int)(logoY * outputHeight) - (logo.Height / 2);
-
-            product.Mutate(ctx => ctx.DrawImage(logo, new Point(posX, posY), 1f));
+        if (logoOpacity < 1.0f)
+        {
+            logo.Mutate(ctx => ctx.Opacity(logoOpacity));
         }
+
+        int posX = (int)(logoX * outputWidth) - (logo.Width / 2);
+        int posY = (int)(logoY * outputHeight) - (logo.Height / 2);
+
+        product.Mutate(ctx => ctx.DrawImage(logo, new Point(posX, posY), 1f));
 
         product.Metadata.HorizontalResolution = 300;
         product.Metadata.VerticalResolution = 300;
