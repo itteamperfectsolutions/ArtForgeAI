@@ -1,0 +1,475 @@
+/* ── Mockup Studio Styles ── */
+
+/* ─────────────────────────────────────────
+   Stage 1 — Product Grid
+───────────────────────────────────────── */
+
+/* Category filter tabs */
+.ms-category-tabs {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.4rem;
+    margin-bottom: 1.25rem;
+}
+
+.ms-tab {
+    padding: 0.4rem 1rem;
+    border: 2px solid var(--border-color);
+    border-radius: var(--radius-pill, 999px);
+    background: var(--bg-secondary);
+    color: var(--text-secondary);
+    cursor: pointer;
+    font-size: 0.8rem;
+    font-weight: 600;
+    white-space: nowrap;
+    transition: all 0.2s ease;
+}
+
+.ms-tab:hover {
+    border-color: var(--primary);
+    color: var(--text-primary);
+    background: var(--bg-tertiary);
+}
+
+.ms-tab.active {
+    border-color: var(--primary);
+    background: var(--primary);
+    color: #ffffff;
+    box-shadow: 0 0 0 3px rgba(99, 102, 241, 0.2);
+}
+
+/* 5-column product grid */
+.ms-product-grid {
+    display: grid;
+    grid-template-columns: repeat(5, 1fr);
+    gap: 1rem;
+}
+
+/* Product card */
+.ms-product-card {
+    background: var(--bg-secondary);
+    border: 2px solid var(--border-color);
+    border-radius: var(--radius-lg);
+    overflow: hidden;
+    cursor: pointer;
+    transition: transform 0.2s ease, box-shadow 0.2s ease, border-color 0.2s ease;
+    position: relative;
+}
+
+.ms-product-card:hover {
+    transform: translateY(-4px);
+    box-shadow: 0 12px 24px rgba(0, 0, 0, 0.1);
+    border-color: var(--primary);
+}
+
+.ms-product-card.locked {
+    opacity: 0.5;
+    cursor: not-allowed;
+}
+
+.ms-product-card.locked:hover {
+    transform: none;
+    box-shadow: none;
+    border-color: var(--border-color);
+}
+
+/* Lock overlay (top-right) */
+.ms-lock-overlay {
+    position: absolute;
+    top: 0.5rem;
+    right: 0.5rem;
+    width: 28px;
+    height: 28px;
+    background: var(--bg-primary);
+    border: 1px solid var(--border-color);
+    border-radius: 50%;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 0.8rem;
+    color: var(--text-muted);
+    z-index: 2;
+}
+
+/* Square preview area for SVG + logo */
+.ms-product-preview {
+    position: relative;
+    width: 100%;
+    aspect-ratio: 1 / 1;
+    background: var(--bg-tertiary);
+    overflow: hidden;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+}
+
+.ms-product-preview svg,
+.ms-product-preview img:not(.ms-grid-logo) {
+    width: 100%;
+    height: 100%;
+    object-fit: contain;
+}
+
+/* Logo overlaid and centered in the preview */
+.ms-grid-logo {
+    position: absolute;
+    top: 50%;
+    left: 50%;
+    transform: translate(-50%, -50%);
+    max-width: 40%;
+    max-height: 40%;
+    object-fit: contain;
+    pointer-events: none;
+}
+
+/* Truncated product name below preview */
+.ms-product-name {
+    padding: 0.5rem 0.75rem;
+    font-size: 0.8rem;
+    font-weight: 600;
+    color: var(--text-primary);
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    text-align: center;
+}
+
+/* ─────────────────────────────────────────
+   Stage 2 — Customization
+───────────────────────────────────────── */
+
+/* 2-column layout: expandable preview + fixed controls */
+.ms-customize-layout {
+    display: grid;
+    grid-template-columns: 1fr 320px;
+    gap: 1.5rem;
+    align-items: start;
+}
+
+/* Preview panel — dark canvas */
+.ms-preview-panel {
+    background: var(--bg-primary);
+    border: 2px solid var(--border-color);
+    border-radius: var(--radius-lg);
+    min-height: 400px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    position: relative;
+    overflow: hidden;
+}
+
+/* Draggable logo inside the preview */
+.ms-logo-draggable {
+    position: absolute;
+    cursor: grab;
+    user-select: none;
+    touch-action: none;
+}
+
+.ms-logo-draggable:active {
+    cursor: grabbing;
+}
+
+/* Controls panel — vertical column */
+.ms-controls-panel {
+    display: flex;
+    flex-direction: column;
+    gap: 0.75rem;
+}
+
+/* Bordered card per control section */
+.ms-control-group {
+    background: var(--bg-secondary);
+    border: 1px solid var(--border-color);
+    border-radius: var(--radius-sm);
+    padding: 0.75rem 1rem;
+    display: flex;
+    flex-direction: column;
+    gap: 0.5rem;
+}
+
+/* Small uppercase label */
+.ms-control-label {
+    font-size: 0.7rem;
+    font-weight: 700;
+    text-transform: uppercase;
+    letter-spacing: 0.06em;
+    color: var(--text-muted);
+    margin-bottom: 0.15rem;
+}
+
+/* Color swatch row */
+.ms-color-picker {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.4rem;
+    align-items: center;
+}
+
+.ms-color-swatch {
+    width: 24px;
+    height: 24px;
+    border-radius: 50%;
+    cursor: pointer;
+    border: 2px solid transparent;
+    transition: transform 0.15s ease, border-color 0.15s ease;
+    flex-shrink: 0;
+}
+
+.ms-color-swatch:hover {
+    transform: scale(1.15);
+}
+
+.ms-color-swatch.active {
+    border-color: var(--primary);
+    box-shadow: 0 0 0 2px var(--bg-secondary), 0 0 0 4px var(--primary);
+}
+
+/* Zone selector */
+.ms-zone-selector {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.35rem;
+}
+
+.ms-zone-btn {
+    padding: 0.3rem 0.65rem;
+    border: 1px solid var(--border-color);
+    border-radius: var(--radius-pill, 999px);
+    background: var(--bg-tertiary);
+    color: var(--text-secondary);
+    font-size: 0.75rem;
+    font-weight: 600;
+    cursor: pointer;
+    transition: all 0.15s ease;
+    white-space: nowrap;
+}
+
+.ms-zone-btn:hover {
+    border-color: var(--primary);
+    color: var(--text-primary);
+}
+
+.ms-zone-btn.active {
+    border-color: var(--primary);
+    background: var(--primary);
+    color: #ffffff;
+}
+
+/* Slider row — range + value display */
+.ms-slider-row {
+    display: flex;
+    align-items: center;
+    gap: 0.6rem;
+}
+
+.ms-slider-row input[type="range"] {
+    flex: 1;
+    height: 4px;
+    accent-color: var(--primary);
+    cursor: pointer;
+}
+
+.ms-slider-row .ms-slider-value {
+    min-width: 2.5rem;
+    text-align: right;
+    font-size: 0.78rem;
+    font-weight: 600;
+    color: var(--text-secondary);
+}
+
+/* Material selector */
+.ms-material-selector {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.35rem;
+}
+
+.ms-material-btn {
+    padding: 0.28rem 0.6rem;
+    border: 1px solid var(--border-color);
+    border-radius: var(--radius-sm);
+    background: var(--bg-tertiary);
+    color: var(--text-secondary);
+    font-size: 0.72rem;
+    font-weight: 600;
+    cursor: pointer;
+    transition: all 0.15s ease;
+    white-space: nowrap;
+}
+
+.ms-material-btn:hover {
+    border-color: var(--primary);
+    color: var(--text-primary);
+}
+
+.ms-material-btn.active {
+    border-color: var(--primary);
+    background: rgba(99, 102, 241, 0.12);
+    color: var(--primary);
+}
+
+/* Tagline text input */
+.ms-text-input {
+    width: 100%;
+    padding: 0.4rem 0.65rem;
+    border: 1px solid var(--border-color);
+    border-radius: var(--radius-sm);
+    background: var(--bg-primary);
+    color: var(--text-primary);
+    font-size: 0.82rem;
+    transition: border-color 0.2s ease, box-shadow 0.2s ease;
+    box-sizing: border-box;
+}
+
+.ms-text-input:focus {
+    outline: none;
+    border-color: var(--primary);
+    box-shadow: 0 0 0 3px rgba(99, 102, 241, 0.15);
+}
+
+.ms-text-input::placeholder {
+    color: var(--text-muted);
+}
+
+/* Toggle row — checkbox + label */
+.ms-toggle-row {
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+    cursor: pointer;
+}
+
+.ms-toggle-row input[type="checkbox"] {
+    width: 16px;
+    height: 16px;
+    accent-color: var(--primary);
+    cursor: pointer;
+    flex-shrink: 0;
+}
+
+.ms-toggle-row span {
+    font-size: 0.8rem;
+    color: var(--text-secondary);
+    font-weight: 500;
+}
+
+/* Action buttons row */
+.ms-actions {
+    display: flex;
+    gap: 0.5rem;
+    flex-wrap: wrap;
+    align-items: center;
+}
+
+.ms-actions button {
+    flex: 1;
+    min-width: 120px;
+    padding: 0.55rem 1rem;
+    border: none;
+    border-radius: var(--radius-sm);
+    font-size: 0.82rem;
+    font-weight: 700;
+    cursor: pointer;
+    transition: all 0.2s ease;
+}
+
+/* Back button with arrow */
+.ms-back-btn {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.4rem;
+    padding: 0.4rem 0.85rem;
+    border: 2px solid var(--border-color);
+    border-radius: var(--radius-sm);
+    background: var(--bg-secondary);
+    color: var(--text-secondary);
+    font-size: 0.8rem;
+    font-weight: 600;
+    cursor: pointer;
+    transition: all 0.2s ease;
+    margin-bottom: 1rem;
+}
+
+.ms-back-btn::before {
+    content: "\2190"; /* left arrow ← */
+    font-size: 1rem;
+    line-height: 1;
+}
+
+.ms-back-btn:hover {
+    border-color: var(--primary);
+    color: var(--text-primary);
+    background: var(--bg-tertiary);
+}
+
+/* ─────────────────────────────────────────
+   Responsive Breakpoints
+───────────────────────────────────────── */
+
+/* 1024px — 4-column grid, single-column customize */
+@media (max-width: 1024px) {
+    .ms-product-grid {
+        grid-template-columns: repeat(4, 1fr);
+    }
+
+    .ms-customize-layout {
+        grid-template-columns: 1fr;
+    }
+
+    .ms-controls-panel {
+        flex-direction: row;
+        flex-wrap: wrap;
+    }
+
+    .ms-control-group {
+        flex: 1 1 calc(50% - 0.375rem);
+        min-width: 240px;
+    }
+}
+
+/* 768px — 3 columns */
+@media (max-width: 768px) {
+    .ms-product-grid {
+        grid-template-columns: repeat(3, 1fr);
+    }
+
+    .ms-controls-panel {
+        flex-direction: column;
+    }
+
+    .ms-control-group {
+        flex: unset;
+    }
+
+    .ms-preview-panel {
+        min-height: 280px;
+    }
+}
+
+/* 480px — 2 columns */
+@media (max-width: 480px) {
+    .ms-product-grid {
+        grid-template-columns: repeat(2, 1fr);
+        gap: 0.6rem;
+    }
+
+    .ms-category-tabs {
+        gap: 0.3rem;
+    }
+
+    .ms-tab {
+        font-size: 0.72rem;
+        padding: 0.35rem 0.75rem;
+    }
+
+    .ms-actions {
+        flex-direction: column;
+    }
+
+    .ms-actions button {
+        flex: unset;
+        width: 100%;
+    }
+}
