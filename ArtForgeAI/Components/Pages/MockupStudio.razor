@@ -1,0 +1,648 @@
+@page "/mockup-studio"
+@rendermode InteractiveServer
+@attribute [Authorize]
+@inject IJSRuntime JS
+@inject IWebHostEnvironment Env
+@inject ILogger<MockupStudio> Logger
+@inject IImageStorageService ImageStorage
+@inject IImageGenerationService ImageGenService
+@inject ISubscriptionService SubscriptionService
+@inject ICoinService CoinService
+@inject AuthenticationStateProvider AuthState
+@inject NavigationManager Nav
+@inject MockupService MockupSvc
+@using ArtForgeAI.Services
+@using ArtForgeAI.Models
+@using SixLabors.ImageSharp
+@using SixLabors.ImageSharp.PixelFormats
+@using SixLabors.ImageSharp.Processing
+@implements IDisposable
+
+<PageTitle>ArtForge AI - Mockup Studio</PageTitle>
+
+<link href="css/mockup-studio.css" rel="stylesheet" />
+<script src="js/mockup-studio.js"></script>
+
+<div class="page-header page-header-lg">
+    <h2>Mockup Studio</h2>
+    <p>Preview your logo or design on 20+ products — mugs, t-shirts, caps, and more</p>
+</div>
+
+@if (_stage == Stage.Upload)
+{
+    @* ── STAGE 1: Upload + Product Grid ── *@
+    <div class="create-layout">
+        <div class="create-left">
+            <div class="card">
+                <div class="card-body">
+                    <div class="mb-3">
+                        <label class="form-label">Upload Your Logo or Image</label>
+                        @if (!string.IsNullOrEmpty(_uploadedDataUrl))
+                        {
+                            <div class="et-uploaded-preview">
+                                <button class="ref-thumb-remove" @onclick="RemoveUpload" disabled="@_isProcessing"
+                                        style="position:absolute;top:4px;right:4px;z-index:20;">&#10005;</button>
+                                <img src="@_uploadedDataUrl" alt="Uploaded logo" class="et-preview-img" />
+                            </div>
+                        }
+                        else
+                        {
+                            <label class="upload-area upload-area-compact @(_isUploading ? "disabled" : "")">
+                                <span class="upload-icon">&#128083;</span>
+                                <span>Upload a logo or image</span>
+                                <span style="font-size:0.7rem;color:var(--text-muted);margin-left:0.5rem;">PNG, SVG, JPG — transparent background recommended</span>
+                                <InputFile OnChange="HandleFileUpload" accept=".jpg,.jpeg,.png,.webp,.svg" style="display:none" disabled="@(_isProcessing || _isUploading)" />
+                            </label>
+                        }
+                        @if (_isUploading)
+                        {
+                            <div class="upload-progress-bar" style="margin-top:0.35rem;">
+                                <div class="upload-progress-fill" style="width:50%"></div>
+                                <span class="upload-progress-text">Uploading...</span>
+                            </div>
+                        }
+                    </div>
+
+                    @if (!string.IsNullOrEmpty(_uploadedDataUrl))
+                    {
+                        <hr style="margin:0.3rem 0;border-color:var(--border-color);" />
+                        <button class="btn-primary-gradient" style="width:100%;padding:0.4rem;font-size:0.85rem;"
+                                @onclick="DownloadAllMockups" disabled="@_isProcessing">
+                            &#128230; Download All (ZIP) &middot; 5 coins
+                        </button>
+                    }
+                </div>
+            </div>
+
+            @if (!string.IsNullOrEmpty(_errorMessage))
+            {
+                <div class="card" style="margin-top:0.75rem;border-left:3px solid var(--danger);">
+                    <div class="card-body" style="padding:0.75rem 1rem;color:var(--danger);font-size:0.85rem;">
+                        <strong>Error:</strong> @_errorMessage
+                    </div>
+                </div>
+            }
+        </div>
+
+        <div class="create-right">
+            @if (!string.IsNullOrEmpty(_uploadedDataUrl))
+            {
+                <div class="right-panel-card">
+                    <div class="right-panel-label">Product Mockups</div>
+
+                    <div class="ms-category-tabs">
+                        @foreach (var cat in _categories)
+                        {
+                            <button class="ms-tab @(_selectedCategory == cat ? "active" : "")"
+                                    @onclick="() => _selectedCategory = cat">@cat</button>
+                        }
+                    </div>
+
+                    <div class="ms-product-grid">
+                        @foreach (var product in FilteredProducts)
+                        {
+                            var p = product;
+                            var isLocked = !_availableSlugs.Contains(p.Slug);
+                            <div class="ms-product-card @(isLocked ? "locked" : "")"
+                                 @onclick="() => OpenCustomize(p)" title="@(isLocked ? "Upgrade plan to unlock" : $"Customize {p.Name}")">
+
+                                @if (isLocked)
+                                {
+                                    <span class="ms-lock-overlay">&#128274;</span>
+                                }
+
+                                <div class="ms-product-preview">
+                                    <img src="mockup-templates/@(p.Slug).svg" alt="@p.Name" style="width:100%;height:100%;" />
+                                    @if (!string.IsNullOrEmpty(_uploadedDataUrl))
+                                    {
+                                        <img src="@_uploadedDataUrl" class="ms-grid-logo" alt="Logo" />
+                                    }
+                                </div>
+                                <div class="ms-product-name">@p.Name</div>
+                            </div>
+                        }
+                    </div>
+                </div>
+            }
+            else
+            {
+                <div class="right-panel-card" style="display:flex;align-items:center;justify-content:center;min-height:300px;">
+                    <p style="color:var(--text-muted);font-size:0.9rem;">Upload a logo to see mockup previews</p>
+                </div>
+            }
+        </div>
+    </div>
+}
+else if (_stage == Stage.Customize)
+{
+    @* ── STAGE 2: Product Customization ── *@
+    <button class="ms-back-btn" @onclick="BackToGrid">&#8592; Back to all products</button>
+
+    <div class="ms-customize-layout">
+        <div class="ms-preview-panel" id="ms-preview-container">
+            <img src="mockup-templates/@(_activeProduct!.Slug).svg" alt="@_activeProduct.Name"
+                 style="width:80%;height:80%;position:absolute;" />
+            @if (!string.IsNullOrEmpty(_uploadedDataUrl))
+            {
+                <img src="@_uploadedDataUrl" class="ms-logo-draggable" alt="Logo"
+                     style="left:@(_logoX * 100)%;top:@(_logoY * 100)%;transform:translate(-50%,-50%) scale(@_logoScale) rotate(@(_logoRotation)deg);opacity:@_logoOpacity;" />
+            }
+        </div>
+
+        <div class="ms-controls-panel">
+            <h3 style="margin:0 0 0.3rem;font-size:1rem;color:var(--text-primary);">@_activeProduct!.Name</h3>
+
+            @if (_activeProduct.Zones.Length > 1)
+            {
+                <div class="ms-control-group">
+                    <span class="ms-control-label">Placement Zone</span>
+                    <div class="ms-zone-selector">
+                        @foreach (var zone in _activeProduct.Zones)
+                        {
+                            var z = zone;
+                            <button class="ms-zone-btn @(_selectedZone == z ? "active" : "")"
+                                    @onclick="() => _selectedZone = z">@FormatZoneName(z)</button>
+                        }
+                    </div>
+                </div>
+            }
+
+            <div class="ms-control-group">
+                <span class="ms-control-label">Logo Size</span>
+                <div class="ms-slider-row">
+                    <input type="range" min="0.1" max="2.0" step="0.05" @bind="_logoScale" @bind:event="oninput" />
+                    <span class="ms-slider-value">@($"{_logoScale:F1}x")</span>
+                </div>
+            </div>
+
+            <div class="ms-control-group">
+                <span class="ms-control-label">Rotation</span>
+                <div class="ms-slider-row">
+                    <input type="range" min="0" max="360" step="1" @bind="_logoRotation" @bind:event="oninput" />
+                    <span class="ms-slider-value">@($"{_logoRotation:F0}")&deg;</span>
+                </div>
+            </div>
+
+            <div class="ms-control-group">
+                <span class="ms-control-label">Opacity</span>
+                <div class="ms-slider-row">
+                    <input type="range" min="0.1" max="1.0" step="0.05" @bind="_logoOpacity" @bind:event="oninput" />
+                    <span class="ms-slider-value">@($"{(int)(_logoOpacity * 100)}%")</span>
+                </div>
+            </div>
+
+            <div class="ms-control-group">
+                <span class="ms-control-label">Product Color</span>
+                <div class="ms-color-picker">
+                    @foreach (var color in _activeProduct.Colors)
+                    {
+                        var c = color;
+                        <div class="ms-color-swatch @(_selectedColor == c ? "active" : "")"
+                             style="background-color:@c;" @onclick="() => _selectedColor = c"
+                             title="@c"></div>
+                    }
+                </div>
+            </div>
+
+            @if (_activeProduct.Materials.Length > 1)
+            {
+                <div class="ms-control-group">
+                    <span class="ms-control-label">Material / Finish</span>
+                    <div class="ms-material-selector">
+                        @foreach (var mat in _activeProduct.Materials)
+                        {
+                            var m = mat;
+                            <button class="ms-material-btn @(_selectedMaterial == m ? "active" : "")"
+                                    @onclick="() => _selectedMaterial = m">@m</button>
+                        }
+                    </div>
+                </div>
+            }
+
+            <div class="ms-control-group">
+                <span class="ms-control-label">Text Overlay (optional)</span>
+                <input class="ms-text-input" type="text" placeholder="Add a tagline..." @bind="_overlayText" />
+            </div>
+
+            <div class="ms-control-group">
+                <span class="ms-control-label">Effects</span>
+                <div class="ms-toggle-row">
+                    <span class="ms-toggle-label">Drop Shadow</span>
+                    <input type="checkbox" @bind="_shadowEnabled" />
+                </div>
+                <div class="ms-toggle-row">
+                    <span class="ms-toggle-label">Outline</span>
+                    <input type="checkbox" @bind="_outlineEnabled" />
+                </div>
+            </div>
+
+            <div class="ms-actions">
+                <button class="btn-primary-gradient" @onclick="DownloadMockup" disabled="@_isProcessing">
+                    &#128424; Download &middot; @FeatureAccess.GetCost("MockupStudio") coin
+                </button>
+                <button class="btn-secondary" @onclick="AiEnhanceMockup" disabled="@(_isProcessing || !_canAiEnhance)">
+                    &#10024; AI Enhance &middot; 3 coins
+                </button>
+            </div>
+
+            @if (!string.IsNullOrEmpty(_aiResultDataUrl))
+            {
+                <div class="ms-control-group" style="margin-top:0.5rem;">
+                    <span class="ms-control-label">AI-Enhanced Result</span>
+                    <div style="background:var(--bg-tertiary);border-radius:var(--radius-sm);padding:0.5rem;text-align:center;">
+                        <img src="@_aiResultDataUrl" alt="AI enhanced" style="max-width:100%;max-height:250px;border-radius:var(--radius-sm);" />
+                        <div style="margin-top:0.4rem;">
+                            <button class="btn-primary-gradient" style="font-size:0.8rem;padding:0.3rem 0.8rem;" @onclick="DownloadAiResult">
+                                &#128424; Download AI Mockup
+                            </button>
+                        </div>
+                    </div>
+                </div>
+            }
+        </div>
+    </div>
+}
+
+@if (_isProcessing)
+{
+    <div class="pp-processing-overlay">
+        <div class="pp-processing-modal">
+            <div class="processing-spinner" style="width:36px;height:36px;margin:0 auto 1rem;"></div>
+            <p style="margin:0;font-size:0.95rem;color:var(--text-primary);">@_processingStatus</p>
+        </div>
+    </div>
+}
+
+@code {
+    private enum Stage { Upload, Customize }
+
+    private Stage _stage = Stage.Upload;
+    private string? _uploadedPath;
+    private string? _uploadedDataUrl;
+    private byte[]? _uploadedBytes;
+    private string? _uploadedFullPath;
+    private bool _isUploading;
+    private bool _isProcessing;
+    private string _processingStatus = "";
+    private string? _errorMessage;
+    private int _userId;
+    private bool _isSuperAdmin;
+    private string _userPlan = "Free";
+
+    private readonly string[] _categories = ["All", "Drinkware", "Apparel", "Stationery", "Home", "Promotional"];
+    private string _selectedCategory = "All";
+    private string[] _availableSlugs = [];
+
+    private MockupProduct? _activeProduct;
+    private string _selectedZone = "front";
+    private float _logoX = 0.5f;
+    private float _logoY = 0.5f;
+    private float _logoScale = 1.0f;
+    private float _logoRotation = 0f;
+    private float _logoOpacity = 1.0f;
+    private string _selectedColor = "#FFFFFF";
+    private string _selectedMaterial = "";
+    private string _overlayText = "";
+    private bool _shadowEnabled;
+    private bool _outlineEnabled;
+    private string? _aiResultDataUrl;
+    private string? _aiResultPath;
+    private bool _canAiEnhance;
+
+    private MockupProduct[] FilteredProducts =>
+        _selectedCategory == "All"
+            ? MockupService.AllProducts
+            : MockupService.AllProducts.Where(p => p.Category == _selectedCategory).ToArray();
+
+    protected override async Task OnInitializedAsync()
+    {
+        var authState = await AuthState.GetAuthenticationStateAsync();
+        var user = authState.User;
+        _isSuperAdmin = user.IsInRole("SuperAdmin");
+
+        var userIdStr = user.FindFirstValue(System.Security.Claims.ClaimTypes.NameIdentifier);
+        if (int.TryParse(userIdStr, out var uid))
+        {
+            _userId = uid;
+            if (!_isSuperAdmin)
+            {
+                if (!await SubscriptionService.HasFeatureAccessAsync(uid, FeatureAccess.MockupStudio))
+                {
+                    Nav.NavigateTo("/pricing", forceLoad: true);
+                    return;
+                }
+            }
+
+            _userPlan = await SubscriptionService.GetCurrentPlanNameAsync(uid);
+            _availableSlugs = _isSuperAdmin
+                ? MockupService.AllProducts.Select(p => p.Slug).ToArray()
+                : MockupService.GetAvailableProductSlugs(_userPlan);
+
+            _canAiEnhance = _isSuperAdmin || _userPlan != "Free";
+        }
+    }
+
+    public void Dispose() { }
+
+    private async Task HandleFileUpload(InputFileChangeEventArgs e)
+    {
+        var file = e.File;
+        if (file is null) return;
+
+        if (file.Size > ImageUploadHelper.DefaultMaxUploadSize)
+        {
+            if (file.Size > ImageUploadHelper.MaxReadSize)
+            {
+                _errorMessage = $"File is too large ({ImageUploadHelper.FormatFileSize(file.Size)}). Maximum allowed is {ImageUploadHelper.FormatFileSize(ImageUploadHelper.MaxReadSize)}.";
+                StateHasChanged();
+                return;
+            }
+            try
+            {
+                using var readMs = new MemoryStream();
+                await file.OpenReadStream(ImageUploadHelper.MaxReadSize).CopyToAsync(readMs);
+                var compressed = ImageUploadHelper.CompressToFit(readMs.ToArray(), file.Name);
+                await ProcessUpload(file.Name, compressed);
+            }
+            catch (Exception ex)
+            {
+                Logger.LogError(ex, "Image compression failed");
+                _errorMessage = "Failed to compress the image. Please try a smaller file.";
+                StateHasChanged();
+            }
+            return;
+        }
+
+        using var stream = file.OpenReadStream(ImageUploadHelper.MaxReadSize);
+        var ms = new MemoryStream();
+        await stream.CopyToAsync(ms);
+        await ProcessUpload(file.Name, ms);
+    }
+
+    private async Task ProcessUpload(string fileName, MemoryStream dataStream)
+    {
+        _isUploading = true;
+        _errorMessage = null;
+        StateHasChanged();
+
+        try
+        {
+            dataStream.Position = 0;
+            _uploadedPath = await ImageStorage.SaveUploadedFileAsync(dataStream, fileName);
+            _uploadedFullPath = ResolveFullPath(_uploadedPath);
+            _uploadedBytes = await File.ReadAllBytesAsync(_uploadedFullPath);
+
+            var ext = _uploadedPath.EndsWith(".png", StringComparison.OrdinalIgnoreCase) ? "png" : "jpeg";
+            _uploadedDataUrl = $"data:image/{ext};base64," + Convert.ToBase64String(_uploadedBytes);
+        }
+        catch (Exception ex)
+        {
+            Logger.LogError(ex, "Upload failed");
+            _errorMessage = "Upload failed. Please try again.";
+        }
+        finally
+        {
+            _isUploading = false;
+            StateHasChanged();
+        }
+    }
+
+    private void OpenCustomize(MockupProduct product)
+    {
+        if (!_availableSlugs.Contains(product.Slug)) return;
+
+        _activeProduct = product;
+        _selectedZone = product.Zones[0];
+        _selectedColor = product.Colors[0];
+        _selectedMaterial = product.Materials[0];
+        _logoX = 0.5f;
+        _logoY = 0.5f;
+        _logoScale = 1.0f;
+        _logoRotation = 0f;
+        _logoOpacity = 1.0f;
+        _overlayText = "";
+        _shadowEnabled = false;
+        _outlineEnabled = false;
+        _aiResultDataUrl = null;
+        _aiResultPath = null;
+        _stage = Stage.Customize;
+        StateHasChanged();
+    }
+
+    private void BackToGrid()
+    {
+        _stage = Stage.Upload;
+        _activeProduct = null;
+        _aiResultDataUrl = null;
+        _aiResultPath = null;
+        StateHasChanged();
+    }
+
+    private async Task DownloadMockup()
+    {
+        if (_uploadedBytes == null || _activeProduct == null) return;
+
+        if (!await TryDebitCoins(FeatureAccess.GetCost("MockupStudio"), "Mockup Studio download"))
+            return;
+
+        _isProcessing = true;
+        _processingStatus = $"Rendering {_activeProduct.Name} mockup...";
+        StateHasChanged();
+
+        try
+        {
+            var pngBytes = await MockupSvc.CompositeForDownload(
+                _uploadedBytes, _activeProduct.Slug, _selectedZone, _selectedColor,
+                _logoX, _logoY, _logoScale, _logoRotation, _logoOpacity,
+                string.IsNullOrWhiteSpace(_overlayText) ? null : _overlayText,
+                null, null, _shadowEnabled, _outlineEnabled, null);
+
+            var base64 = Convert.ToBase64String(pngBytes);
+            var fileName = $"{_activeProduct.Slug}_mockup_{DateTime.Now:yyyyMMdd_HHmmss}.png";
+            await JS.InvokeVoidAsync("downloadFileFromBytes", fileName, "image/png", base64);
+        }
+        catch (Exception ex)
+        {
+            Logger.LogError(ex, "Mockup download failed");
+            _errorMessage = "Download failed: " + ex.Message;
+        }
+        finally
+        {
+            _isProcessing = false;
+            _processingStatus = "";
+            StateHasChanged();
+        }
+    }
+
+    private async Task DownloadAllMockups()
+    {
+        if (_uploadedBytes == null) return;
+
+        if (!await TryDebitCoins(5, "Mockup Studio download"))
+            return;
+
+        _isProcessing = true;
+        _processingStatus = "Rendering all mockups...";
+        StateHasChanged();
+
+        try
+        {
+            var base64List = new List<string>();
+            var nameList = new List<string>();
+
+            foreach (var product in MockupService.AllProducts.Where(p => _availableSlugs.Contains(p.Slug)))
+            {
+                _processingStatus = $"Rendering {product.Name}...";
+                StateHasChanged();
+                await Task.Delay(1);
+
+                var pngBytes = await MockupSvc.CompositeForDownload(
+                    _uploadedBytes, product.Slug, product.Zones[0], product.Colors[0],
+                    0.5f, 0.5f, 1.0f, 0f, 1.0f, null, null, null, false, false, null);
+
+                base64List.Add(Convert.ToBase64String(pngBytes));
+                nameList.Add(product.Slug);
+            }
+
+            await JS.InvokeVoidAsync("mockupStudio.downloadAllAsZip",
+                base64List.ToArray(), nameList.ToArray());
+        }
+        catch (Exception ex)
+        {
+            Logger.LogError(ex, "ZIP download failed");
+            _errorMessage = "ZIP download failed: " + ex.Message;
+        }
+        finally
+        {
+            _isProcessing = false;
+            _processingStatus = "";
+            StateHasChanged();
+        }
+    }
+
+    private async Task AiEnhanceMockup()
+    {
+        if (_uploadedFullPath == null || _activeProduct == null) return;
+
+        if (!await TryDebitCoins(3, "Mockup Studio AI enhance"))
+            return;
+
+        _isProcessing = true;
+        _processingStatus = $"Generating AI-enhanced {_activeProduct.Name} mockup...";
+        _aiResultDataUrl = null;
+        StateHasChanged();
+
+        try
+        {
+            var result = await MockupSvc.GenerateAiMockup(
+                _uploadedFullPath, _activeProduct.Name, _selectedColor,
+                _selectedMaterial, _selectedZone, _userId.ToString());
+
+            if (result.Success && !string.IsNullOrEmpty(result.LocalImagePath))
+            {
+                var resultPath = ResolveFullPath(result.LocalImagePath);
+                var resultBytes = await File.ReadAllBytesAsync(resultPath);
+                _aiResultDataUrl = "data:image/png;base64," + Convert.ToBase64String(resultBytes);
+                _aiResultPath = resultPath;
+            }
+            else
+            {
+                _errorMessage = "AI enhancement failed: " + (result.ErrorMessage ?? "Unknown error");
+            }
+        }
+        catch (Exception ex)
+        {
+            Logger.LogError(ex, "AI enhancement failed");
+            _errorMessage = "AI enhancement failed: " + ex.Message;
+        }
+        finally
+        {
+            _isProcessing = false;
+            _processingStatus = "";
+            StateHasChanged();
+        }
+    }
+
+    private async Task DownloadAiResult()
+    {
+        if (string.IsNullOrEmpty(_aiResultDataUrl)) return;
+        var base64 = _aiResultDataUrl[(_aiResultDataUrl.IndexOf(",", StringComparison.Ordinal) + 1)..];
+        var dpiBase64 = await Task.Run(() => EmbedDpi300(base64));
+        var fileName = $"{_activeProduct?.Slug ?? "mockup"}_ai_{DateTime.Now:yyyyMMdd_HHmmss}.png";
+        await JS.InvokeVoidAsync("downloadFileFromBytes", fileName, "image/png", dpiBase64);
+    }
+
+    [JSInvokable]
+    public void OnLogoPositionChanged(float normX, float normY)
+    {
+        _logoX = Math.Clamp(normX, 0f, 1f);
+        _logoY = Math.Clamp(normY, 0f, 1f);
+        InvokeAsync(StateHasChanged);
+    }
+
+    protected override async Task OnAfterRenderAsync(bool firstRender)
+    {
+        if (_stage == Stage.Customize && _activeProduct != null)
+        {
+            try
+            {
+                var dotnetRef = DotNetObjectReference.Create(this);
+                await JS.InvokeVoidAsync("mockupStudio.initLogoDrag", "ms-preview-container", dotnetRef);
+            }
+            catch { }
+        }
+    }
+
+    private async Task RemoveUpload()
+    {
+        if (!string.IsNullOrEmpty(_uploadedPath))
+            await ImageStorage.DeleteImageAsync(_uploadedPath);
+
+        _uploadedPath = null;
+        _uploadedDataUrl = null;
+        _uploadedBytes = null;
+        _uploadedFullPath = null;
+        _errorMessage = null;
+        _stage = Stage.Upload;
+        _activeProduct = null;
+        _aiResultDataUrl = null;
+    }
+
+    private async Task<bool> TryDebitCoins(int cost, string description)
+    {
+        if (_isSuperAdmin) return true;
+
+        if (!await CoinService.DebitCoinsAsync(_userId, cost, CoinTransactionType.GenerationSpend, description))
+        {
+            _errorMessage = "Insufficient coins. Please top up to continue.";
+            StateHasChanged();
+            return false;
+        }
+        return true;
+    }
+
+    private string ResolveFullPath(string webRelativePath) =>
+        System.IO.Path.Combine(Env.WebRootPath, webRelativePath.Replace("/", System.IO.Path.DirectorySeparatorChar.ToString()));
+
+    private static string EmbedDpi300(string base64Png, int dpi = 300)
+    {
+        var bytes = Convert.FromBase64String(base64Png);
+        using var img = Image.Load<Rgba32>(bytes);
+        img.Metadata.HorizontalResolution = dpi;
+        img.Metadata.VerticalResolution = dpi;
+        img.Metadata.ResolutionUnits = SixLabors.ImageSharp.Metadata.PixelResolutionUnit.PixelsPerInch;
+        using var ms = new MemoryStream();
+        img.SaveAsPng(ms, new SixLabors.ImageSharp.Formats.Png.PngEncoder());
+        return Convert.ToBase64String(ms.ToArray());
+    }
+
+    private static string FormatZoneName(string zone) => zone switch
+    {
+        "front" => "Front",
+        "back" => "Back",
+        "side" => "Side",
+        "left-chest" => "Left Chest",
+        "pocket" => "Pocket",
+        _ => zone[0..1].ToUpper() + zone[1..]
+    };
+}
