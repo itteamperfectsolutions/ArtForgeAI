@@ -50,8 +50,8 @@
                             <label class="upload-area upload-area-compact @(_isUploading ? "disabled" : "")">
                                 <span class="upload-icon">&#128083;</span>
                                 <span>Upload a logo or image</span>
-                                <span style="font-size:0.7rem;color:var(--text-muted);margin-left:0.5rem;">PNG, SVG, JPG — transparent background recommended</span>
-                                <InputFile OnChange="HandleFileUpload" accept=".jpg,.jpeg,.png,.webp,.svg" style="display:none" disabled="@(_isProcessing || _isUploading)" />
+                                <span style="font-size:0.7rem;color:var(--text-muted);margin-left:0.5rem;">PNG, JPG, WebP — transparent background recommended</span>
+                                <InputFile OnChange="HandleFileUpload" accept=".jpg,.jpeg,.png,.webp" style="display:none" disabled="@(_isProcessing || _isUploading)" />
                             </label>
                         }
                         @if (_isUploading)
@@ -380,7 +380,7 @@ else if (_stage == Stage.Customize)
         }
 
         using var stream = file.OpenReadStream(ImageUploadHelper.MaxReadSize);
-        var ms = new MemoryStream();
+        using var ms = new MemoryStream();
         await stream.CopyToAsync(ms);
         await ProcessUpload(file.Name, ms);
     }
@@ -447,12 +447,14 @@ else if (_stage == Stage.Customize)
 
     private async Task DownloadMockup()
     {
+        _isProcessing = true;
+        StateHasChanged();
+
         if (_uploadedBytes == null || _activeProduct == null) return;
 
         if (!await TryDebitCoins(FeatureAccess.GetCost("MockupStudio"), "Mockup Studio download"))
             return;
 
-        _isProcessing = true;
         _processingStatus = $"Rendering {_activeProduct.Name} mockup...";
         StateHasChanged();
 
@@ -483,12 +485,14 @@ else if (_stage == Stage.Customize)
 
     private async Task DownloadAllMockups()
     {
+        _isProcessing = true;
+        StateHasChanged();
+
         if (_uploadedBytes == null) return;
 
         if (!await TryDebitCoins(5, "Mockup Studio download"))
             return;
 
-        _isProcessing = true;
         _processingStatus = "Rendering all mockups...";
         StateHasChanged();
 
@@ -529,12 +533,14 @@ else if (_stage == Stage.Customize)
 
     private async Task AiEnhanceMockup()
     {
+        _isProcessing = true;
+        StateHasChanged();
+
         if (_uploadedFullPath == null || _activeProduct == null) return;
 
         if (!await TryDebitCoins(3, "Mockup Studio AI enhance"))
             return;
 
-        _isProcessing = true;
         _processingStatus = $"Generating AI-enhanced {_activeProduct.Name} mockup...";
         _aiResultDataUrl = null;
         StateHasChanged();
@@ -597,7 +603,7 @@ else if (_stage == Stage.Customize)
                 await JS.InvokeVoidAsync("mockupStudio.initLogoDrag", "ms-preview-container", _dotnetRef);
                 _dragInitializedForSlug = _activeProduct.Slug;
             }
-            catch { }
+            catch (Exception ex) { Logger.LogWarning(ex, "initLogoDrag JS interop failed"); }
         }
     }
 
