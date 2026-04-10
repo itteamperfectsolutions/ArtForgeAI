@@ -141,11 +141,11 @@ else if (_stage == Stage.Customize)
     <div class="ms-customize-layout">
         <div class="ms-preview-panel" id="ms-preview-container">
             <img src="mockup-templates/@(_activeProduct!.Slug).svg" alt="@_activeProduct.Name"
-                 style="width:80%;height:80%;position:absolute;" />
+                 style="width:80%;height:80%;position:absolute;left:50%;top:50%;transform:translate(-50%,-50%);" />
             @if (!string.IsNullOrEmpty(_uploadedDataUrl))
             {
                 <img src="@_uploadedDataUrl" class="ms-logo-draggable" alt="Logo"
-                     style="left:@(_logoX * 100)%;top:@(_logoY * 100)%;transform:translate(-50%,-50%) scale(@_logoScale) rotate(@(_logoRotation)deg);opacity:@_logoOpacity;" />
+                     style="@GetLogoStyle()" />
             }
         </div>
 
@@ -648,6 +648,17 @@ else if (_stage == Stage.Customize)
         using var ms = new MemoryStream();
         img.SaveAsPng(ms, new SixLabors.ImageSharp.Formats.Png.PngEncoder());
         return Convert.ToBase64String(ms.ToArray());
+    }
+
+    private string GetLogoStyle()
+    {
+        var ci = System.Globalization.CultureInfo.InvariantCulture;
+        var left = (_logoX * 100).ToString("F1", ci);
+        var top = (_logoY * 100).ToString("F1", ci);
+        var scale = _logoScale.ToString("F2", ci);
+        var rotation = _logoRotation.ToString("F0", ci);
+        var opacity = _logoOpacity.ToString("F2", ci);
+        return $"left:{left}%;top:{top}%;transform:translate(-50%,-50%) scale({scale}) rotate({rotation}deg);opacity:{opacity};";
     }
 
     private static string FormatZoneName(string zone) => zone switch

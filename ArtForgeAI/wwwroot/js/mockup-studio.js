@@ -7,43 +7,63 @@ window.mockupStudio = (function () {
         const logo = container.querySelector('.ms-logo-draggable');
         if (!logo) return;
 
-        let isDragging = false;
-        let startX, startY, origLeft, origTop;
+        // Remove old listeners if re-initialized
+        if (logo._msCleanup) logo._msCleanup();
 
-        logo.addEventListener('pointerdown', (e) => {
+        let isDragging = false;
+        let startX, startY, origCenterX, origCenterY;
+
+        function onDown(e) {
             isDragging = true;
             startX = e.clientX;
             startY = e.clientY;
-            origLeft = logo.offsetLeft;
-            origTop = logo.offsetTop;
+            // Use getBoundingClientRect for accurate visual position (accounts for transforms)
+            const logoRect = logo.getBoundingClientRect();
+            const containerRect = container.getBoundingClientRect();
+            origCenterX = logoRect.left + logoRect.width / 2 - containerRect.left;
+            origCenterY = logoRect.top + logoRect.height / 2 - containerRect.top;
             logo.setPointerCapture(e.pointerId);
             e.preventDefault();
-        });
+        }
 
-        logo.addEventListener('pointermove', (e) => {
+        function onMove(e) {
             if (!isDragging) return;
             const dx = e.clientX - startX;
             const dy = e.clientY - startY;
-            const newLeft = origLeft + dx;
-            const newTop = origTop + dy;
-            logo.style.left = newLeft + 'px';
-            logo.style.top = newTop + 'px';
-        });
+            const containerRect = container.getBoundingClientRect();
+            // Calculate new center as percentage of container
+            const pctX = ((origCenterX + dx) / containerRect.width) * 100;
+            const pctY = ((origCenterY + dy) / containerRect.height) * 100;
+            logo.style.left = pctX + '%';
+            logo.style.top = pctY + '%';
+        }
 
-        logo.addEventListener('pointerup', (e) => {
+        function onUp(e) {
             if (!isDragging) return;
             isDragging = false;
-
-            const rect = container.getBoundingClientRect();
-            const normX = (logo.offsetLeft + logo.offsetWidth / 2) / rect.width;
-            const normY = (logo.offsetTop + logo.offsetHeight / 2) / rect.height;
-
+            // Use getBoundingClientRect for accurate normalized position
+            const logoRect = logo.getBoundingClientRect();
+            const containerRect = container.getBoundingClientRect();
+            const normX = (logoRect.left + logoRect.width / 2 - containerRect.left) / containerRect.width;
+            const normY = (logoRect.top + logoRect.height / 2 - containerRect.top) / containerRect.height;
             dotnetRef.invokeMethodAsync('OnLogoPositionChanged', normX, normY);
-        });
+        }
 
-        logo.addEventListener('pointercancel', (e) => {
+        function onCancel() {
             isDragging = false;
-        });
+        }
+
+        logo.addEventListener('pointerdown', onDown);
+        logo.addEventListener('pointermove', onMove);
+        logo.addEventListener('pointerup', onUp);
+        logo.addEventListener('pointercancel', onCancel);
+
+        logo._msCleanup = () => {
+            logo.removeEventListener('pointerdown', onDown);
+            logo.removeEventListener('pointermove', onMove);
+            logo.removeEventListener('pointerup', onUp);
+            logo.removeEventListener('pointercancel', onCancel);
+        };
     }
 
     async function downloadAllAsZip(base64Images, names) {
