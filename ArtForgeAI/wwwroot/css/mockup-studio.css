@@ -162,6 +162,23 @@
     overflow: hidden;
 }
 
+/* SVG product container — fits within preview without cropping */
+.ms-svg-container {
+    position: absolute;
+    inset: 5%;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    pointer-events: none;
+}
+
+.ms-svg-container svg {
+    max-width: 100%;
+    max-height: 100%;
+    width: auto;
+    height: auto;
+}
+
 /* Draggable logo inside the preview */
 .ms-logo-draggable {
     position: absolute;

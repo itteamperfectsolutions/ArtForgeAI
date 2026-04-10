@@ -140,7 +140,7 @@ else if (_stage == Stage.Customize)
 
     <div class="ms-customize-layout">
         <div class="ms-preview-panel" id="ms-preview-container">
-            <div style="width:80%;height:80%;position:absolute;left:50%;top:50%;transform:translate(-50%,-50%);">
+            <div class="ms-svg-container">
                 @((MarkupString)GetColoredSvg())
             </div>
             @if (!string.IsNullOrEmpty(_uploadedDataUrl))
