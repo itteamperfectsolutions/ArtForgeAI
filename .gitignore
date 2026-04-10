@@ -42,3 +42,6 @@ nul
 /ArtForgeAI/wwwroot/downloads
 /ArtForgeAI/wwwroot/presets
 /ArtForgeAI/wwwroot/collage-templates
+
+## IDE/Tools
+.superpowers/
