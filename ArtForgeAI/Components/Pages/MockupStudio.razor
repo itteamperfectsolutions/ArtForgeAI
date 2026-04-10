@@ -174,17 +174,11 @@ else if (_stage == Stage.Customize)
                     <input type="range" min="0.1" max="2.0" step="0.05" @bind="_logoScale" @bind:event="oninput" />
                     <span class="ms-slider-value">@($"{_logoScale:F1}x")</span>
                 </div>
-            </div>
-
-            <div class="ms-control-group">
                 <span class="ms-control-label">Rotation</span>
                 <div class="ms-slider-row">
                     <input type="range" min="0" max="360" step="1" @bind="_logoRotation" @bind:event="oninput" />
                     <span class="ms-slider-value">@($"{_logoRotation:F0}")&deg;</span>
                 </div>
-            </div>
-
-            <div class="ms-control-group">
                 <span class="ms-control-label">Opacity</span>
                 <div class="ms-slider-row">
                     <input type="range" min="0.1" max="1.0" step="0.05" @bind="_logoOpacity" @bind:event="oninput" />
@@ -203,12 +197,9 @@ else if (_stage == Stage.Customize)
                              title="@c"></div>
                     }
                 </div>
-            </div>
-
-            @if (_activeProduct.Materials.Length > 1)
-            {
-                <div class="ms-control-group">
-                    <span class="ms-control-label">Material / Finish</span>
+                @if (_activeProduct.Materials.Length > 1)
+                {
+                    <span class="ms-control-label" style="margin-top:0.15rem;">Material / Finish</span>
                     <div class="ms-material-selector">
                         @foreach (var mat in _activeProduct.Materials)
                         {
@@ -217,23 +208,19 @@ else if (_stage == Stage.Customize)
                                     @onclick="() => _selectedMaterial = m">@m</button>
                         }
                     </div>
-                </div>
-            }
+                }
+            </div>
 
             <div class="ms-control-group">
                 <span class="ms-control-label">Text Overlay (optional)</span>
                 <input class="ms-text-input" type="text" placeholder="Add a tagline..." @bind="_overlayText" />
-            </div>
-
-            <div class="ms-control-group">
-                <span class="ms-control-label">Effects</span>
-                <div class="ms-toggle-row">
-                    <span class="ms-toggle-label">Drop Shadow</span>
-                    <input type="checkbox" @bind="_shadowEnabled" />
-                </div>
-                <div class="ms-toggle-row">
-                    <span class="ms-toggle-label">Outline</span>
-                    <input type="checkbox" @bind="_outlineEnabled" />
+                <div style="display:flex;gap:1rem;align-items:center;margin-top:0.1rem;">
+                    <label style="display:flex;align-items:center;gap:0.3rem;font-size:0.75rem;color:var(--text-secondary);cursor:pointer;">
+                        <input type="checkbox" @bind="_shadowEnabled" style="accent-color:var(--primary);width:14px;height:14px;" /> Shadow
+                    </label>
+                    <label style="display:flex;align-items:center;gap:0.3rem;font-size:0.75rem;color:var(--text-secondary);cursor:pointer;">
+                        <input type="checkbox" @bind="_outlineEnabled" style="accent-color:var(--primary);width:14px;height:14px;" /> Outline
+                    </label>
                 </div>
             </div>
 
