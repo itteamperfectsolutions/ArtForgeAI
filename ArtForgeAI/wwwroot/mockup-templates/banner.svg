@@ -1,0 +1,17 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 400 400" data-product="banner">
+  <!-- Support pole top -->
+  <rect x="30" y="80" width="8" height="240" rx="3" fill="#d0d0d0" stroke="#bbb" stroke-width="1"/>
+  <rect x="362" y="80" width="8" height="240" rx="3" fill="#d0d0d0" stroke="#bbb" stroke-width="1"/>
+  <!-- Top bar -->
+  <rect x="28" y="80" width="344" height="10" rx="3" fill="#d0d0d0" stroke="#bbb" stroke-width="1"/>
+  <!-- Banner fabric -->
+  <rect x="38" y="90" width="324" height="220" fill="#f0f0f0" stroke="#ccc" stroke-width="2"/>
+  <!-- Bottom bar -->
+  <rect x="28" y="310" width="344" height="10" rx="3" fill="#d0d0d0" stroke="#bbb" stroke-width="1"/>
+  <!-- Grommets -->
+  <circle cx="50" cy="95" r="3" fill="#bbb"/>
+  <circle cx="350" cy="95" r="3" fill="#bbb"/>
+  <circle cx="50" cy="305" r="3" fill="#bbb"/>
+  <circle cx="350" cy="305" r="3" fill="#bbb"/>
+  <rect class="print-zone" data-zone="front" x="60" y="110" width="280" height="180" fill="none" stroke="none"/>
+</svg>

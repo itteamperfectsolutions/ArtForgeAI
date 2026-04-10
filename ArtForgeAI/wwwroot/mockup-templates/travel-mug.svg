@@ -1,0 +1,12 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 400 400" data-product="travel-mug">
+  <!-- Lid -->
+  <path d="M140,60 L140,50 C140,40 155,32 200,32 C245,32 260,40 260,50 L260,60" fill="#e0e0e0" stroke="#ccc" stroke-width="2"/>
+  <ellipse cx="200" cy="60" rx="60" ry="10" fill="#e8e8e8" stroke="#ccc" stroke-width="2"/>
+  <!-- Lid rim -->
+  <rect x="135" y="60" width="130" height="20" rx="3" fill="#e0e0e0" stroke="#ccc" stroke-width="1.5"/>
+  <!-- Body -->
+  <path d="M135,80 L145,350 C145,360 165,368 200,368 C235,368 255,360 255,350 L265,80" fill="#f0f0f0" stroke="#ccc" stroke-width="2"/>
+  <!-- Grip band -->
+  <path d="M140,200 L142,240 L258,240 L260,200 Z" fill="#e8e8e8" stroke="#ccc" stroke-width="1"/>
+  <rect class="print-zone" data-zone="front" x="155" y="100" width="90" height="90" fill="none" stroke="none"/>
+</svg>

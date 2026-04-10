@@ -1,0 +1,15 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 400 400" data-product="water-bottle">
+  <!-- Cap -->
+  <rect x="170" y="20" width="60" height="30" rx="5" fill="#e0e0e0" stroke="#ccc" stroke-width="2"/>
+  <!-- Neck -->
+  <path d="M170,50 L170,80 C160,90 155,100 155,110" fill="none" stroke="#ccc" stroke-width="2"/>
+  <path d="M230,50 L230,80 C240,90 245,100 245,110" fill="none" stroke="#ccc" stroke-width="2"/>
+  <rect x="170" y="50" width="60" height="30" rx="2" fill="#e8e8e8" stroke="#ccc" stroke-width="1.5"/>
+  <!-- Body -->
+  <path d="M155,110 C150,115 145,125 145,140 L145,340 C145,360 165,370 200,370 C235,370 255,360 255,340 L255,140 C255,125 250,115 245,110" fill="#f0f0f0" stroke="#ccc" stroke-width="2"/>
+  <!-- Grip lines -->
+  <line x1="150" y1="280" x2="250" y2="280" stroke="#e0e0e0" stroke-width="1"/>
+  <line x1="150" y1="290" x2="250" y2="290" stroke="#e0e0e0" stroke-width="1"/>
+  <line x1="150" y1="300" x2="250" y2="300" stroke="#e0e0e0" stroke-width="1"/>
+  <rect class="print-zone" data-zone="front" x="155" y="130" width="90" height="130" fill="none" stroke="none"/>
+</svg>

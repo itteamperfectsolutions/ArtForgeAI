@@ -1,0 +1,13 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 400 400" data-product="phone-case">
+  <!-- Phone case outline -->
+  <rect x="120" y="30" width="160" height="340" rx="22" fill="#f0f0f0" stroke="#ccc" stroke-width="2"/>
+  <!-- Screen area -->
+  <rect x="132" y="60" width="136" height="280" rx="4" fill="#e8e8e8" stroke="#ddd" stroke-width="1"/>
+  <!-- Camera cutout -->
+  <rect x="155" y="40" width="50" height="10" rx="5" fill="#e0e0e0" stroke="#ddd" stroke-width="0.5"/>
+  <!-- Side buttons -->
+  <rect x="118" y="120" width="4" height="30" rx="2" fill="#ddd" stroke="#ccc" stroke-width="0.5"/>
+  <rect x="118" y="170" width="4" height="50" rx="2" fill="#ddd" stroke="#ccc" stroke-width="0.5"/>
+  <rect x="278" y="150" width="4" height="40" rx="2" fill="#ddd" stroke="#ccc" stroke-width="0.5"/>
+  <rect class="print-zone" data-zone="front" x="135" y="100" width="130" height="200" fill="none" stroke="none"/>
+</svg>

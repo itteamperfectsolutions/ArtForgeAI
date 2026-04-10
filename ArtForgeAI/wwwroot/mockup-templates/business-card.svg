@@ -1,0 +1,15 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 400 400" data-product="business-card">
+  <!-- Card (standard 3.5:2 ratio) -->
+  <rect x="55" y="120" width="290" height="166" rx="6" fill="#f0f0f0" stroke="#ccc" stroke-width="2"/>
+  <!-- Subtle corner marks -->
+  <line x1="70" y1="135" x2="85" y2="135" stroke="#ddd" stroke-width="0.5"/>
+  <line x1="70" y1="135" x2="70" y2="150" stroke="#ddd" stroke-width="0.5"/>
+  <line x1="330" y1="135" x2="315" y2="135" stroke="#ddd" stroke-width="0.5"/>
+  <line x1="330" y1="135" x2="330" y2="150" stroke="#ddd" stroke-width="0.5"/>
+  <line x1="70" y1="271" x2="85" y2="271" stroke="#ddd" stroke-width="0.5"/>
+  <line x1="70" y1="271" x2="70" y2="256" stroke="#ddd" stroke-width="0.5"/>
+  <line x1="330" y1="271" x2="315" y2="271" stroke="#ddd" stroke-width="0.5"/>
+  <line x1="330" y1="271" x2="330" y2="256" stroke="#ddd" stroke-width="0.5"/>
+  <rect class="print-zone" data-zone="front" x="75" y="140" width="250" height="126" fill="none" stroke="none"/>
+  <rect class="print-zone" data-zone="back" x="75" y="140" width="250" height="126" fill="none" stroke="none" style="display:none"/>
+</svg>

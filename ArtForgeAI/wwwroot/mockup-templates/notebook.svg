@@ -1,0 +1,14 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 400 400" data-product="notebook">
+  <!-- Cover -->
+  <rect x="90" y="40" width="230" height="320" rx="8" fill="#f0f0f0" stroke="#ccc" stroke-width="2"/>
+  <!-- Spine -->
+  <rect x="85" y="40" width="12" height="320" rx="2" fill="#e0e0e0" stroke="#ccc" stroke-width="1.5"/>
+  <!-- Pages peek -->
+  <line x1="97" y1="45" x2="97" y2="355" stroke="#e8e8e8" stroke-width="1"/>
+  <line x1="100" y1="45" x2="100" y2="355" stroke="#eee" stroke-width="0.5"/>
+  <!-- Elastic band -->
+  <line x1="280" y1="40" x2="280" y2="360" stroke="#d0d0d0" stroke-width="2"/>
+  <!-- Bookmark ribbon -->
+  <path d="M240,40 L240,375 L248,365 L256,375 L256,40" fill="#ddd" stroke="none"/>
+  <rect class="print-zone" data-zone="front" x="120" y="80" width="170" height="230" fill="none" stroke="none"/>
+</svg>

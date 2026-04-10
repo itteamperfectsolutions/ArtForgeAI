@@ -1,0 +1,11 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 400 400" data-product="tote-bag">
+  <!-- Handles -->
+  <path d="M130,100 C130,50 150,35 165,35 C180,35 185,50 185,70 L185,100" fill="none" stroke="#ccc" stroke-width="6" stroke-linecap="round"/>
+  <path d="M215,100 C215,50 220,35 235,35 C250,35 270,50 270,70 L270,100" fill="none" stroke="#ccc" stroke-width="6" stroke-linecap="round"/>
+  <!-- Bag body -->
+  <path d="M80,100 L80,360 L320,360 L320,100 Z" fill="#f0f0f0" stroke="#ccc" stroke-width="2"/>
+  <!-- Top fold -->
+  <line x1="80" y1="115" x2="320" y2="115" stroke="#ddd" stroke-width="1"/>
+  <rect class="print-zone" data-zone="front" x="120" y="140" width="160" height="180" fill="none" stroke="none"/>
+  <rect class="print-zone" data-zone="back" x="120" y="140" width="160" height="180" fill="none" stroke="none" style="display:none"/>
+</svg>

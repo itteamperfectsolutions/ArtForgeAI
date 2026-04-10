@@ -1,0 +1,13 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 400 400" data-product="coaster">
+  <!-- Coaster -->
+  <rect x="75" y="75" width="250" height="250" rx="30" fill="#f0f0f0" stroke="#ccc" stroke-width="2"/>
+  <!-- Inner edge -->
+  <rect x="90" y="90" width="220" height="220" rx="22" fill="none" stroke="#e0e0e0" stroke-width="1"/>
+  <!-- Cork texture hint -->
+  <circle cx="140" cy="140" r="1.5" fill="#e0e0e0"/>
+  <circle cx="200" cy="120" r="1.5" fill="#e0e0e0"/>
+  <circle cx="260" cy="150" r="1.5" fill="#e0e0e0"/>
+  <circle cx="150" cy="250" r="1.5" fill="#e0e0e0"/>
+  <circle cx="250" cy="270" r="1.5" fill="#e0e0e0"/>
+  <rect class="print-zone" data-zone="front" x="110" y="110" width="180" height="180" fill="none" stroke="none"/>
+</svg>

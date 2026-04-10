@@ -1,0 +1,14 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 400 400" data-product="polo">
+  <!-- Body -->
+  <path d="M105,90 L65,130 L95,160 L115,140 L115,355 L285,355 L285,140 L305,160 L335,130 L295,90 L255,70 C245,85 225,95 200,95 C175,95 155,85 145,70 Z" fill="#f0f0f0" stroke="#ccc" stroke-width="2"/>
+  <!-- Collar -->
+  <path d="M145,70 C150,60 165,55 175,65 L200,85 L225,65 C235,55 250,60 255,70" fill="#e8e8e8" stroke="#ccc" stroke-width="1.5"/>
+  <!-- Placket -->
+  <line x1="200" y1="85" x2="200" y2="155" stroke="#ccc" stroke-width="1.5"/>
+  <!-- Buttons -->
+  <circle cx="200" cy="100" r="3" fill="#ddd" stroke="#ccc" stroke-width="1"/>
+  <circle cx="200" cy="120" r="3" fill="#ddd" stroke="#ccc" stroke-width="1"/>
+  <circle cx="200" cy="140" r="3" fill="#ddd" stroke="#ccc" stroke-width="1"/>
+  <rect class="print-zone" data-zone="left-chest" x="210" y="110" width="60" height="60" fill="none" stroke="none"/>
+  <rect class="print-zone" data-zone="back" x="130" y="110" width="140" height="160" fill="none" stroke="none" style="display:none"/>
+</svg>

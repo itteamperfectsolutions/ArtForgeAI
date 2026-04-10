@@ -1,0 +1,15 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 400 400" data-product="hoodie">
+  <!-- Body -->
+  <path d="M95,100 L55,140 L85,170 L105,150 L105,360 L295,360 L295,150 L315,170 L345,140 L305,100 L260,75 C250,90 230,100 200,100 C170,100 150,90 140,75 Z" fill="#f0f0f0" stroke="#ccc" stroke-width="2"/>
+  <!-- Hood -->
+  <path d="M140,75 C130,40 155,15 200,15 C245,15 270,40 260,75" fill="#f0f0f0" stroke="#ccc" stroke-width="2"/>
+  <!-- Hood inner -->
+  <path d="M155,75 C150,50 170,30 200,30 C230,30 250,50 245,75" fill="#e8e8e8" stroke="#ccc" stroke-width="1"/>
+  <!-- Pocket -->
+  <path d="M135,260 L135,300 C135,310 145,315 155,315 L245,315 C255,315 265,310 265,300 L265,260" fill="none" stroke="#ccc" stroke-width="1.5"/>
+  <!-- Center line -->
+  <line x1="200" y1="100" x2="200" y2="360" stroke="#ddd" stroke-width="1" stroke-dasharray="4,4"/>
+  <rect class="print-zone" data-zone="front-chest" x="140" y="130" width="120" height="100" fill="none" stroke="none"/>
+  <rect class="print-zone" data-zone="back" x="125" y="120" width="150" height="170" fill="none" stroke="none" style="display:none"/>
+  <rect class="print-zone" data-zone="left-chest" x="210" y="130" width="60" height="60" fill="none" stroke="none" style="display:none"/>
+</svg>
