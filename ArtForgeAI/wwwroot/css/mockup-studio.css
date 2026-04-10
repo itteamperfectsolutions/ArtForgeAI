@@ -243,10 +243,25 @@
     cursor: grab;
     user-select: none;
     touch-action: none;
+    transition: filter 0.2s ease;
 }
 
 .ms-logo-draggable:active {
     cursor: grabbing;
+}
+
+/* Text overlay positioned below the logo */
+.ms-text-overlay {
+    position: absolute;
+    transform: translateX(-50%);
+    color: #fff;
+    font-size: 0.9rem;
+    font-weight: 700;
+    text-align: center;
+    white-space: nowrap;
+    text-shadow: 0 1px 3px rgba(0, 0, 0, 0.6);
+    pointer-events: none;
+    letter-spacing: 0.03em;
 }
 
 /* Controls panel — vertical column, scrollable within viewport */

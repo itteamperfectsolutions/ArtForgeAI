@@ -152,6 +152,10 @@ else if (_stage == Stage.Customize)
                     <img src="@_uploadedDataUrl" class="ms-logo-draggable" alt="Logo"
                          style="@GetLogoStyle()" />
                 }
+                @if (!string.IsNullOrWhiteSpace(_overlayText))
+                {
+                    <div class="ms-text-overlay" style="@GetTextOverlayStyle()">@_overlayText</div>
+                }
             </div>
             <div class="ms-zoom-bar">
                 <span class="ms-zoom-icon" @onclick="() => AdjustZoom(-0.25f)">&#8722;</span>
@@ -665,7 +669,24 @@ else if (_stage == Stage.Customize)
         var scale = _logoScale.ToString("F2", ci);
         var rotation = _logoRotation.ToString("F0", ci);
         var opacity = _logoOpacity.ToString("F2", ci);
-        return $"left:{left}%;top:{top}%;transform:translate(-50%,-50%) scale({scale}) rotate({rotation}deg);opacity:{opacity};";
+        var filter = "";
+        if (_shadowEnabled && _outlineEnabled)
+            filter = "filter:drop-shadow(2px 3px 4px rgba(0,0,0,0.5)) drop-shadow(0 0 1px #fff) drop-shadow(0 0 1px #fff);";
+        else if (_shadowEnabled)
+            filter = "filter:drop-shadow(2px 3px 4px rgba(0,0,0,0.5));";
+        else if (_outlineEnabled)
+            filter = "filter:drop-shadow(0 0 1px #fff) drop-shadow(0 0 1px #fff);";
+
+        return $"left:{left}%;top:{top}%;transform:translate(-50%,-50%) scale({scale}) rotate({rotation}deg);opacity:{opacity};{filter}";
+    }
+
+    private string GetTextOverlayStyle()
+    {
+        var ci = System.Globalization.CultureInfo.InvariantCulture;
+        var left = (_logoX * 100).ToString("F1", ci);
+        // Position text just below the logo
+        var top = ((_logoY * 100) + (_logoScale * 8)).ToString("F1", ci);
+        return $"left:{left}%;top:{top}%;";
     }
 
     // SVG template cache (slug -> raw SVG content)
