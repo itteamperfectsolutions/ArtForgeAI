@@ -40,6 +40,10 @@ window.mockupStudio = (function () {
 
             dotnetRef.invokeMethodAsync('OnLogoPositionChanged', normX, normY);
         });
+
+        logo.addEventListener('pointercancel', (e) => {
+            isDragging = false;
+        });
     }
 
     async function downloadAllAsZip(base64Images, names) {
