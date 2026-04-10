@@ -111,6 +111,7 @@ builder.Services.AddScoped<PhotoExpandService>();
 builder.Services.AddScoped<TiledGeminiEnhanceService>();
 builder.Services.AddScoped<ITemplateCollageService, TemplateCollageService>();
 builder.Services.AddScoped<ICollageTemplateService, CollageTemplateService>();
+builder.Services.AddScoped<ArtForgeAI.Services.MockupService>();
 
 // ── Clone Protection: Multi-layer anti-piracy system ──
 builder.Services.AddSingleton<LicenseService>();              // Offline RSA-signed license
@@ -3316,6 +3317,15 @@ VALUES
             Emoji       = "\U0001F6F3\uFE0F",  // 🛳️
             Color       = "#E65100",
             SortOrder   = 229
+        },
+        new {
+            Name        = "Photo Art",
+            Description = "Bold WPAP-style pop art portrait with geometric color blocks and vibrant neon palette",
+            Prompt      = @"Transform the subject into a bold WPAP (Wedha's Pop Art Portrait) style artwork. CRITICAL: Preserve the subject's EXACT facial features, identity, face structure, expression, and recognizable likeness — the person must be clearly identifiable. DETECT how many people are in the source image. Use ONLY the people present — do NOT add or remove anyone. STYLE: Render the portrait using sharp angular geometric facets and flat color planes — the face and body are broken into bold triangular and polygonal shapes, each filled with a single vivid flat color. Use dramatic color contrasts between adjacent facets — no gradients within individual shapes. The geometric facets follow the natural contours of the face (cheekbones, jawline, brow ridge, nose bridge) to preserve recognizable structure while creating the pop art abstraction. COLORS: Use a vibrant neon pop art palette — electric cyan, hot magenta/pink, vivid orange, lime green, bright yellow, deep purple, and navy blue. Each geometric facet uses one bold saturated color. Shadows rendered as darker jewel tones (deep purple, navy), highlights as bright warm tones (yellow, lime green). High contrast between light and dark facets. BACKGROUND: Large bold rectangular color blocks arranged in a geometric grid pattern behind the subject — using the same vivid palette (cyan, orange, magenta, lime green). The color blocks are flat and graphic, creating a striking poster-like backdrop. No gradients, no textures — pure flat bold rectangles. COMPOSITION: Tight portrait framing from chest up. The subject's pose, clothing, and accessories from the original photo are preserved but rendered in the same geometric pop art style. CLOTHING: Render clothing in the same angular geometric flat-color style as the face. MOOD: Bold, energetic, contemporary pop art — eye-catching graphic poster aesthetic. High visual impact with maximum color saturation. IF IMAGE IS MAJORLY WHITE OR PLAIN: Add decorative geometric color block elements and bold graphic shapes to fill negative space while maintaining the pop art aesthetic. STRICT RULES: The subject's identity, face structure, and likeness must remain recognizable and preserved through the geometric abstraction. No face swap, no identity change, no beautification. Maintain exact skin tone representation through the color palette. Natural proportions of head, neck, shoulders preserved. No extra fingers, no warped anatomy. No text, no names, no watermarks.",
+            Category    = "PhotoArts",
+            Emoji       = "\U0001F3A8",  // 🎨
+            Color       = "#E91E63",
+            SortOrder   = 230
         },
         // ── Add future styles here as new entries in this array ──
     };
