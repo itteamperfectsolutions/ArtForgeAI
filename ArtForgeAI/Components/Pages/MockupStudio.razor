@@ -140,8 +140,9 @@ else if (_stage == Stage.Customize)
 
     <div class="ms-customize-layout">
         <div class="ms-preview-panel" id="ms-preview-container">
-            <img src="mockup-templates/@(_activeProduct!.Slug).svg" alt="@_activeProduct.Name"
-                 style="width:80%;height:80%;position:absolute;left:50%;top:50%;transform:translate(-50%,-50%);" />
+            <div style="width:80%;height:80%;position:absolute;left:50%;top:50%;transform:translate(-50%,-50%);">
+                @((MarkupString)GetColoredSvg())
+            </div>
             @if (!string.IsNullOrEmpty(_uploadedDataUrl))
             {
                 <img src="@_uploadedDataUrl" class="ms-logo-draggable" alt="Logo"
@@ -659,6 +660,52 @@ else if (_stage == Stage.Customize)
         var rotation = _logoRotation.ToString("F0", ci);
         var opacity = _logoOpacity.ToString("F2", ci);
         return $"left:{left}%;top:{top}%;transform:translate(-50%,-50%) scale({scale}) rotate({rotation}deg);opacity:{opacity};";
+    }
+
+    // SVG template cache (slug -> raw SVG content)
+    private readonly Dictionary<string, string> _svgCache = new();
+
+    private string GetColoredSvg()
+    {
+        if (_activeProduct == null) return "";
+
+        var slug = _activeProduct.Slug;
+        if (!_svgCache.TryGetValue(slug, out var svgContent))
+        {
+            var svgPath = System.IO.Path.Combine(Env.WebRootPath, "mockup-templates", $"{slug}.svg");
+            if (!File.Exists(svgPath)) return "";
+            svgContent = File.ReadAllText(svgPath);
+            _svgCache[slug] = svgContent;
+        }
+
+        // Replace the default product fill color with the selected color
+        return svgContent
+            .Replace("fill=\"#f0f0f0\"", $"fill=\"{_selectedColor}\"")
+            .Replace("fill=\"#e8e8e8\"", $"fill=\"{AdjustColor(_selectedColor, -0.05)}\"")
+            .Replace("fill=\"#e0e0e0\"", $"fill=\"{AdjustColor(_selectedColor, -0.1)}\"");
+    }
+
+    /// <summary>Darken or lighten a hex color by a factor (-1 to 1).</summary>
+    private static string AdjustColor(string hex, double factor)
+    {
+        hex = hex.TrimStart('#');
+        if (hex.Length != 6) return "#" + hex;
+        int r = Convert.ToInt32(hex[..2], 16);
+        int g = Convert.ToInt32(hex[2..4], 16);
+        int b = Convert.ToInt32(hex[4..6], 16);
+        if (factor < 0)
+        {
+            r = (int)(r * (1 + factor));
+            g = (int)(g * (1 + factor));
+            b = (int)(b * (1 + factor));
+        }
+        else
+        {
+            r = r + (int)((255 - r) * factor);
+            g = g + (int)((255 - g) * factor);
+            b = b + (int)((255 - b) * factor);
+        }
+        return $"#{Math.Clamp(r, 0, 255):X2}{Math.Clamp(g, 0, 255):X2}{Math.Clamp(b, 0, 255):X2}";
     }
 
     private static string FormatZoneName(string zone) => zone switch
