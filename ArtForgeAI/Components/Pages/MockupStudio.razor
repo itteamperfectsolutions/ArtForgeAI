@@ -309,6 +309,9 @@ else if (_stage == Stage.Customize)
     private string? _aiResultPath;
     private bool _canAiEnhance;
 
+    private DotNetObjectReference<MockupStudio>? _dotnetRef;
+    private string? _dragInitializedForSlug;
+
     private MockupProduct[] FilteredProducts =>
         _selectedCategory == "All"
             ? MockupService.AllProducts
@@ -342,7 +345,10 @@ else if (_stage == Stage.Customize)
         }
     }
 
-    public void Dispose() { }
+    public void Dispose()
+    {
+        _dotnetRef?.Dispose();
+    }
 
     private async Task HandleFileUpload(InputFileChangeEventArgs e)
     {
@@ -435,6 +441,7 @@ else if (_stage == Stage.Customize)
         _activeProduct = null;
         _aiResultDataUrl = null;
         _aiResultPath = null;
+        _dragInitializedForSlug = null;
         StateHasChanged();
     }
 
@@ -582,12 +589,13 @@ else if (_stage == Stage.Customize)
 
     protected override async Task OnAfterRenderAsync(bool firstRender)
     {
-        if (_stage == Stage.Customize && _activeProduct != null)
+        if (_stage == Stage.Customize && _activeProduct != null && _activeProduct.Slug != _dragInitializedForSlug)
         {
             try
             {
-                var dotnetRef = DotNetObjectReference.Create(this);
-                await JS.InvokeVoidAsync("mockupStudio.initLogoDrag", "ms-preview-container", dotnetRef);
+                _dotnetRef ??= DotNetObjectReference.Create(this);
+                await JS.InvokeVoidAsync("mockupStudio.initLogoDrag", "ms-preview-container", _dotnetRef);
+                _dragInitializedForSlug = _activeProduct.Slug;
             }
             catch { }
         }
