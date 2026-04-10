@@ -179,6 +179,64 @@
     height: auto;
 }
 
+/* Zoomable wrapper — contains both SVG and logo */
+.ms-preview-zoomable {
+    position: absolute;
+    inset: 0;
+    transition: transform 0.15s ease;
+    transform-origin: center center;
+}
+
+/* Zoom bar — fixed at bottom of preview panel */
+.ms-zoom-bar {
+    position: absolute;
+    bottom: 0.5rem;
+    left: 50%;
+    transform: translateX(-50%);
+    display: flex;
+    align-items: center;
+    gap: 0.4rem;
+    background: rgba(0, 0, 0, 0.6);
+    backdrop-filter: blur(6px);
+    border-radius: 999px;
+    padding: 0.25rem 0.6rem;
+    z-index: 10;
+}
+
+.ms-zoom-bar input[type="range"] {
+    width: 80px;
+    height: 3px;
+    accent-color: var(--primary);
+    cursor: pointer;
+}
+
+.ms-zoom-icon {
+    font-size: 0.9rem;
+    font-weight: 700;
+    color: var(--text-secondary);
+    cursor: pointer;
+    width: 18px;
+    height: 18px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    border-radius: 50%;
+    transition: color 0.15s;
+    user-select: none;
+}
+
+.ms-zoom-icon:hover {
+    color: var(--primary);
+}
+
+.ms-zoom-label {
+    font-size: 0.65rem;
+    font-weight: 600;
+    color: var(--text-muted);
+    min-width: 30px;
+    text-align: center;
+}
+
 /* Draggable logo inside the preview */
 .ms-logo-draggable {
     position: absolute;

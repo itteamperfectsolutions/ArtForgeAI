@@ -23,6 +23,11 @@
 <link href="css/mockup-studio.css" rel="stylesheet" />
 <script src="js/mockup-studio.js"></script>
 
+@if (_stage == Stage.Customize)
+{
+    <button class="ms-back-btn" @onclick="BackToGrid">&#8592; Back to all products</button>
+}
+
 <div class="page-header page-header-lg">
     <h2>Mockup Studio</h2>
     <p>Preview your logo or design on 20+ products — mugs, t-shirts, caps, and more</p>
@@ -136,18 +141,24 @@
 else if (_stage == Stage.Customize)
 {
     @* ── STAGE 2: Product Customization ── *@
-    <button class="ms-back-btn" @onclick="BackToGrid">&#8592; Back to all products</button>
-
     <div class="ms-customize-layout">
         <div class="ms-preview-panel" id="ms-preview-container">
-            <div class="ms-svg-container">
-                @((MarkupString)GetColoredSvg())
+            <div class="ms-preview-zoomable" style="transform:scale(@_productZoom.ToString("F2", System.Globalization.CultureInfo.InvariantCulture));">
+                <div class="ms-svg-container">
+                    @((MarkupString)GetColoredSvg())
+                </div>
+                @if (!string.IsNullOrEmpty(_uploadedDataUrl))
+                {
+                    <img src="@_uploadedDataUrl" class="ms-logo-draggable" alt="Logo"
+                         style="@GetLogoStyle()" />
+                }
             </div>
-            @if (!string.IsNullOrEmpty(_uploadedDataUrl))
-            {
-                <img src="@_uploadedDataUrl" class="ms-logo-draggable" alt="Logo"
-                     style="@GetLogoStyle()" />
-            }
+            <div class="ms-zoom-bar">
+                <span class="ms-zoom-icon" @onclick="() => AdjustZoom(-0.25f)">&#8722;</span>
+                <input type="range" min="0.5" max="4.0" step="0.1" @bind="_productZoom" @bind:event="oninput" />
+                <span class="ms-zoom-icon" @onclick="() => AdjustZoom(0.25f)">&#43;</span>
+                <span class="ms-zoom-label">@($"{(int)(_productZoom * 100)}%")</span>
+            </div>
         </div>
 
         <div class="ms-controls-panel">
@@ -290,6 +301,7 @@ else if (_stage == Stage.Customize)
     private float _logoOpacity = 1.0f;
     private string _selectedColor = "#FFFFFF";
     private string _selectedMaterial = "";
+    private float _productZoom = 1.0f;
     private string _overlayText = "";
     private bool _shadowEnabled;
     private bool _outlineEnabled;
@@ -419,6 +431,7 @@ else if (_stage == Stage.Customize)
         _outlineEnabled = false;
         _aiResultDataUrl = null;
         _aiResultPath = null;
+        _productZoom = 1.0f;
         _stage = Stage.Customize;
         StateHasChanged();
     }
@@ -430,7 +443,13 @@ else if (_stage == Stage.Customize)
         _aiResultDataUrl = null;
         _aiResultPath = null;
         _dragInitializedForSlug = null;
+        _productZoom = 1.0f;
         StateHasChanged();
+    }
+
+    private void AdjustZoom(float delta)
+    {
+        _productZoom = Math.Clamp(_productZoom + delta, 0.5f, 4.0f);
     }
 
     private async Task DownloadMockup()
