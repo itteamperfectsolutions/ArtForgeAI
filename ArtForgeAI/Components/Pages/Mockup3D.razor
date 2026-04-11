@@ -1,0 +1,543 @@
+@page "/3d-mockups"
+@rendermode InteractiveServer
+@attribute [Authorize]
+@inject IJSRuntime JS
+@inject IWebHostEnvironment Env
+@inject ILogger<Mockup3D> Logger
+@inject IImageStorageService ImageStorage
+@inject IGenerationHistoryService HistoryService
+@inject ICoinService CoinService
+@inject ISubscriptionService SubscriptionService
+@inject AuthenticationStateProvider AuthState
+@inject Mockup3DService Mockup3DSvc
+@using ArtForgeAI.Services
+@using ArtForgeAI.Models
+@implements IDisposable
+
+<PageTitle>ArtForge AI - 3D Mockups</PageTitle>
+
+<link href="css/mockup3d.css" rel="stylesheet" />
+
+<script src="https://unpkg.com/three@0.162.0/build/three.min.js"></script>
+<script src="https://unpkg.com/three@0.162.0/examples/js/controls/OrbitControls.js"></script>
+<script src="https://unpkg.com/three@0.162.0/examples/js/loaders/GLTFLoader.js"></script>
+<script src="js/mockup3d.js"></script>
+
+<div class="page-header page-header-lg">
+    <h2>3D Mockups</h2>
+    <p>Interactive 3D product mockups — rotate, zoom, and place your logo</p>
+</div>
+
+@if (!string.IsNullOrEmpty(_errorMessage))
+{
+    <div class="m3d-error">@_errorMessage</div>
+}
+
+<div class="m3d-layout">
+    <div class="m3d-viewport">
+        <div id="m3d-canvas-container" style="width:100%;height:100%;"></div>
+
+        @if (_isModelLoading)
+        {
+            <div class="m3d-loading">
+                <div class="loading-spinner"></div>
+                <span>@_loadingStatus</span>
+            </div>
+        }
+
+        @if (!_isModelLoading && !_webglSupported)
+        {
+            <div class="m3d-no-webgl">
+                <span style="font-size:2rem;">&#9888;</span>
+                <span>WebGL is not supported in your browser.</span>
+                <span>Please use a modern browser like Chrome, Firefox, or Edge.</span>
+            </div>
+        }
+
+        @if (_webglSupported && string.IsNullOrEmpty(_logoDataUrl) && !_isModelLoading)
+        {
+            <div class="m3d-upload-prompt">
+                <button class="m3d-upload-btn" @onclick="() => _showLogoModal = true">
+                    &#128083; Upload or Select Logo
+                </button>
+            </div>
+        }
+
+        @if (_isProcessing)
+        {
+            <div class="m3d-loading">
+                <div class="loading-spinner"></div>
+                <span>@_processingStatus</span>
+            </div>
+        }
+    </div>
+
+    <div class="m3d-toolbar">
+        <div class="m3d-product-tabs">
+            @foreach (var product in _products)
+            {
+                var p = product;
+                var locked = !_availableProducts.Contains(p.Slug);
+                <button class="m3d-product-tab @(_activeProduct.Slug == p.Slug ? "active" : "") @(locked ? "locked" : "")"
+                        @onclick="() => SwitchProduct(p)"
+                        disabled="@locked"
+                        title="@(locked ? "Upgrade plan to unlock" : p.Name)">
+                    @p.Name
+                </button>
+            }
+        </div>
+
+        <div class="m3d-sep"></div>
+
+        <div class="m3d-colors">
+            @foreach (var color in _activeProduct.Colors)
+            {
+                var c = color;
+                <div class="m3d-color-swatch @(_selectedColor == c ? "active" : "")"
+                     style="background-color:@c;"
+                     @onclick="() => SetColor(c)"
+                     title="@c"></div>
+            }
+        </div>
+
+        <div class="m3d-sep"></div>
+
+        @if (!string.IsNullOrEmpty(_logoDataUrl))
+        {
+            <div class="m3d-slider-group">
+                <span class="m3d-slider-label">Size</span>
+                <input type="range" class="m3d-slider" min="0.1" max="1.5" step="0.05"
+                       @bind="_logoSize" @bind:event="oninput" @bind:after="OnLogoTransformChanged" />
+            </div>
+
+            <div class="m3d-slider-group">
+                <span class="m3d-slider-label">&#8597;</span>
+                <input type="range" class="m3d-slider" min="-1.0" max="1.0" step="0.05"
+                       @bind="_logoVPos" @bind:event="oninput" @bind:after="OnLogoTransformChanged" />
+            </div>
+
+            <div class="m3d-slider-group">
+                <span class="m3d-slider-label">&#8596;</span>
+                <input type="range" class="m3d-slider" min="-1.0" max="1.0" step="0.05"
+                       @bind="_logoHPos" @bind:event="oninput" @bind:after="OnLogoTransformChanged" />
+            </div>
+
+            <button class="btn-secondary" style="font-size:0.75rem;padding:0.2rem 0.5rem;"
+                    @onclick="() => _showLogoModal = true">
+                &#128260; Change
+            </button>
+
+            <div class="m3d-sep"></div>
+        }
+
+        <div class="m3d-actions">
+            @if (string.IsNullOrEmpty(_logoDataUrl))
+            {
+                <button class="btn-primary-gradient" style="font-size:0.8rem;padding:0.35rem 0.8rem;"
+                        @onclick="() => _showLogoModal = true">
+                    &#128083; Add Logo
+                </button>
+            }
+            <button class="btn-primary-gradient" style="font-size:0.8rem;padding:0.35rem 0.8rem;"
+                    @onclick="Download3DRender" disabled="@(_isProcessing || !_webglSupported)">
+                &#128424; Download &middot; 2
+            </button>
+            <button class="btn-secondary" style="font-size:0.8rem;padding:0.35rem 0.8rem;"
+                    @onclick="AiEnhance" disabled="@(_isProcessing || !_webglSupported)">
+                &#10024; AI Enhance &middot; 5
+            </button>
+        </div>
+    </div>
+</div>
+
+@if (_showComparison && !string.IsNullOrEmpty(_snapshotDataUrl) && !string.IsNullOrEmpty(_aiResultDataUrl))
+{
+    <div class="m3d-comparison">
+        <button class="m3d-comparison-close" @onclick="CloseComparison">&#10005;</button>
+
+        <div class="m3d-comparison-panel">
+            <div class="m3d-comparison-label">3D Render</div>
+            <img src="@_snapshotDataUrl" alt="3D Render" />
+            <div>
+                <button class="btn-primary-gradient" style="font-size:0.8rem;padding:0.3rem 0.8rem;margin-top:0.5rem;"
+                        @onclick="DownloadSnapshot">
+                    &#128424; Download 3D Render &middot; 2
+                </button>
+            </div>
+        </div>
+
+        <div class="m3d-comparison-panel">
+            <div class="m3d-comparison-label">AI Enhanced</div>
+            <img src="@_aiResultDataUrl" alt="AI Enhanced" />
+            <div>
+                <button class="btn-primary-gradient" style="font-size:0.8rem;padding:0.3rem 0.8rem;margin-top:0.5rem;"
+                        @onclick="DownloadAiResult">
+                    &#128424; Download AI Mockup
+                </button>
+            </div>
+        </div>
+    </div>
+}
+
+@if (_showLogoModal)
+{
+    <div class="m3d-modal-overlay" @onclick="() => _showLogoModal = false">
+        <div class="m3d-modal" @onclick:stopPropagation="true">
+            <div class="m3d-modal-header">
+                <h3>Select Logo</h3>
+                <button class="m3d-modal-close" @onclick="() => _showLogoModal = false">&#10005;</button>
+            </div>
+
+            <div class="m3d-modal-tabs">
+                <button class="m3d-modal-tab @(_modalTab == "upload" ? "active" : "")"
+                        @onclick='() => _modalTab = "upload"'>Upload</button>
+                <button class="m3d-modal-tab @(_modalTab == "gallery" ? "active" : "")"
+                        @onclick="OpenGalleryTab">Gallery</button>
+            </div>
+
+            <div class="m3d-modal-body">
+                @if (_modalTab == "upload")
+                {
+                    <label class="upload-area upload-area-compact" style="min-height:120px;">
+                        <span class="upload-icon">&#128083;</span>
+                        <span>Upload a logo or image</span>
+                        <span style="font-size:0.7rem;color:var(--text-muted);">PNG, JPG, WebP — transparent background recommended</span>
+                        <InputFile OnChange="HandleFileUpload" accept=".jpg,.jpeg,.png,.webp" style="display:none" />
+                    </label>
+                }
+                else
+                {
+                    @if (_galleryImages == null)
+                    {
+                        <div style="text-align:center;padding:2rem;">
+                            <div class="loading-spinner"></div>
+                        </div>
+                    }
+                    else if (_galleryImages.Count == 0)
+                    {
+                        <p style="text-align:center;color:var(--text-muted);padding:2rem;">No images in gallery yet.</p>
+                    }
+                    else
+                    {
+                        <div class="m3d-gallery-grid">
+                            @foreach (var img in _galleryImages)
+                            {
+                                var imgPath = img;
+                                <div class="m3d-gallery-item" @onclick="() => SelectGalleryImage(imgPath)">
+                                    <img src="@imgPath" alt="Gallery image" loading="lazy" />
+                                </div>
+                            }
+                        </div>
+                    }
+                }
+            </div>
+        </div>
+    </div>
+}
+
+@code {
+    private record Product3D(string Name, string Slug, string ModelFile, string[] Colors);
+
+    private static readonly Product3D[] _products =
+    [
+        new("Mug", "mug", "3d-models/mug.glb", ["#FFFFFF", "#222222", "#C0C0C0"]),
+        new("T-Shirt", "tshirt", "3d-models/tshirt.glb", ["#FFFFFF", "#222222", "#C0C0C0", "#1B3A5C", "#C0392B"]),
+    ];
+
+    private Product3D _activeProduct = _products[0];
+    private string _selectedColor = "#FFFFFF";
+    private string? _logoDataUrl;
+    private float _logoSize = 0.5f;
+    private float _logoVPos = 0f;
+    private float _logoHPos = 0f;
+
+    private bool _isModelLoading = true;
+    private string _loadingStatus = "Loading 3D model...";
+    private bool _isProcessing;
+    private string _processingStatus = "";
+    private string? _errorMessage;
+    private bool _webglSupported = true;
+
+    private bool _showLogoModal;
+    private string _modalTab = "upload";
+    private List<string>? _galleryImages;
+
+    private bool _showComparison;
+    private string? _snapshotDataUrl;
+    private string? _aiResultDataUrl;
+    private string? _aiResultPath;
+
+    private int _userId;
+    private bool _isSuperAdmin;
+    private string _userPlan = "Free";
+    private HashSet<string> _availableProducts = new() { "mug" };
+
+    private DotNetObjectReference<Mockup3D>? _dotnetRef;
+
+    protected override async Task OnInitializedAsync()
+    {
+        var authState = await AuthState.GetAuthenticationStateAsync();
+        var user = authState.User;
+        if (int.TryParse(user.FindFirst("UserId")?.Value, out var uid))
+            _userId = uid;
+        _isSuperAdmin = user.IsInRole("SuperAdmin");
+        _userPlan = await SubscriptionService.GetCurrentPlanNameAsync(_userId);
+        if (_userPlan != "Free" || _isSuperAdmin)
+            _availableProducts = new HashSet<string> { "mug", "tshirt" };
+    }
+
+    protected override async Task OnAfterRenderAsync(bool firstRender)
+    {
+        if (!firstRender) return;
+        _dotnetRef = DotNetObjectReference.Create(this);
+        var supported = await JS.InvokeAsync<bool>("mockup3d.initScene", "m3d-canvas-container", _dotnetRef);
+        if (!supported)
+        {
+            _webglSupported = false;
+            _isModelLoading = false;
+            StateHasChanged();
+            return;
+        }
+        await JS.InvokeVoidAsync("mockup3d.loadModel", _activeProduct.ModelFile);
+    }
+
+    [JSInvokable]
+    public void OnModelLoaded()
+    {
+        _isModelLoading = false;
+        StateHasChanged();
+    }
+
+    [JSInvokable]
+    public void OnModelError(string message)
+    {
+        _isModelLoading = false;
+        _errorMessage = "Failed to load 3D model: " + message;
+        StateHasChanged();
+    }
+
+    private async Task SwitchProduct(Product3D product)
+    {
+        if (!_availableProducts.Contains(product.Slug)) return;
+        if (_activeProduct.Slug == product.Slug) return;
+        _activeProduct = product;
+        _selectedColor = product.Colors[0];
+        _logoSize = 0.5f;
+        _logoVPos = 0f;
+        _logoHPos = 0f;
+        _isModelLoading = true;
+        _loadingStatus = $"Loading {product.Name}...";
+        _showComparison = false;
+        _snapshotDataUrl = null;
+        _aiResultDataUrl = null;
+        StateHasChanged();
+        await JS.InvokeVoidAsync("mockup3d.loadModel", product.ModelFile);
+    }
+
+    private async Task SetColor(string color)
+    {
+        _selectedColor = color;
+        await JS.InvokeVoidAsync("mockup3d.setColor", color);
+    }
+
+    private async Task HandleFileUpload(InputFileChangeEventArgs e)
+    {
+        _errorMessage = null;
+        var file = e.File;
+        if (file.Size > 10 * 1024 * 1024)
+        {
+            _errorMessage = "File too large. Max 10MB.";
+            return;
+        }
+        using var stream = file.OpenReadStream(10 * 1024 * 1024);
+        using var ms = new MemoryStream();
+        await stream.CopyToAsync(ms);
+        var bytes = ms.ToArray();
+        var ext = Path.GetExtension(file.Name).TrimStart('.').ToLower();
+        if (ext == "jpg") ext = "jpeg";
+        _logoDataUrl = $"data:image/{ext};base64," + Convert.ToBase64String(bytes);
+        _showLogoModal = false;
+        StateHasChanged();
+        await JS.InvokeVoidAsync("mockup3d.setLogo", _logoDataUrl);
+    }
+
+    private async Task SelectGalleryImage(string imagePath)
+    {
+        _logoDataUrl = imagePath;
+        _showLogoModal = false;
+        StateHasChanged();
+        var fullPath = Path.Combine(Env.WebRootPath, imagePath.Replace("/", Path.DirectorySeparatorChar.ToString()).TrimStart(Path.DirectorySeparatorChar));
+        if (File.Exists(fullPath))
+        {
+            var bytes = await File.ReadAllBytesAsync(fullPath);
+            var dataUrl = "data:image/png;base64," + Convert.ToBase64String(bytes);
+            await JS.InvokeVoidAsync("mockup3d.setLogo", dataUrl);
+        }
+    }
+
+    private async Task OpenGalleryTab()
+    {
+        _modalTab = "gallery";
+        if (_galleryImages == null)
+        {
+            try
+            {
+                var history = await HistoryService.GetHistoryAsync(_userId.ToString(), 1, 40);
+                _galleryImages = history
+                    .Where(h => !string.IsNullOrEmpty(h.LocalImagePath))
+                    .Select(h => h.LocalImagePath!)
+                    .ToList();
+            }
+            catch { _galleryImages = new List<string>(); }
+        }
+    }
+
+    private async Task OnLogoTransformChanged()
+    {
+        await JS.InvokeVoidAsync("mockup3d.updateLogoTransform", _logoSize, _logoVPos, _logoHPos);
+    }
+
+    private async Task Download3DRender()
+    {
+        if (_isProcessing) return;
+        _isProcessing = true;
+        _processingStatus = "Capturing 3D render...";
+        _errorMessage = null;
+        StateHasChanged();
+        try
+        {
+            if (!await TryDebitCoins(2, "3D Mockups download"))
+            {
+                _isProcessing = false;
+                StateHasChanged();
+                return;
+            }
+            var base64 = await JS.InvokeAsync<string>("mockup3d.captureSnapshot", 1920, 1080);
+            if (string.IsNullOrEmpty(base64))
+            {
+                _errorMessage = "Failed to capture render.";
+                return;
+            }
+            var fileName = $"3d_{_activeProduct.Slug}_{DateTime.Now:yyyyMMdd_HHmmss}.png";
+            await JS.InvokeVoidAsync("downloadFileFromBytes", fileName, "image/png", base64);
+        }
+        catch (Exception ex)
+        {
+            Logger.LogError(ex, "3D download failed");
+            _errorMessage = "Download failed: " + ex.Message;
+        }
+        finally
+        {
+            _isProcessing = false;
+            _processingStatus = "";
+            StateHasChanged();
+        }
+    }
+
+    private async Task AiEnhance()
+    {
+        if (_isProcessing) return;
+        _isProcessing = true;
+        _processingStatus = $"Generating AI-enhanced {_activeProduct.Name}...";
+        _errorMessage = null;
+        _showComparison = false;
+        StateHasChanged();
+        try
+        {
+            if (!await TryDebitCoins(5, "3D Mockups AI enhance"))
+            {
+                _isProcessing = false;
+                StateHasChanged();
+                return;
+            }
+            var base64 = await JS.InvokeAsync<string>("mockup3d.captureSnapshot", 1536, 1024);
+            if (string.IsNullOrEmpty(base64))
+            {
+                _errorMessage = "Failed to capture render for AI enhancement.";
+                return;
+            }
+            _snapshotDataUrl = "data:image/png;base64," + base64;
+            var colorName = _selectedColor switch
+            {
+                "#FFFFFF" => "white",
+                "#222222" => "black",
+                "#C0C0C0" => "grey",
+                "#1B3A5C" => "navy blue",
+                "#C0392B" => "red",
+                _ => "colored"
+            };
+            var result = await Mockup3DSvc.GenerateAi3DMockup(
+                base64, _activeProduct.Name, colorName, _userId.ToString());
+            if (result.Success && !string.IsNullOrEmpty(result.LocalImagePath))
+            {
+                var fullPath = Path.Combine(Env.WebRootPath,
+                    result.LocalImagePath.Replace("/", Path.DirectorySeparatorChar.ToString()).TrimStart(Path.DirectorySeparatorChar));
+                var resultBytes = await File.ReadAllBytesAsync(fullPath);
+                _aiResultDataUrl = "data:image/png;base64," + Convert.ToBase64String(resultBytes);
+                _aiResultPath = fullPath;
+                _showComparison = true;
+            }
+            else
+            {
+                _errorMessage = "AI enhancement failed: " + (result.ErrorMessage ?? "Unknown error");
+            }
+        }
+        catch (Exception ex)
+        {
+            Logger.LogError(ex, "AI enhance failed");
+            _errorMessage = "AI enhancement failed: " + ex.Message;
+        }
+        finally
+        {
+            _isProcessing = false;
+            _processingStatus = "";
+            StateHasChanged();
+        }
+    }
+
+    private async Task DownloadSnapshot()
+    {
+        if (string.IsNullOrEmpty(_snapshotDataUrl)) return;
+        if (!await TryDebitCoins(2, "3D Mockups render download"))
+        {
+            StateHasChanged();
+            return;
+        }
+        var base64 = _snapshotDataUrl[(_snapshotDataUrl.IndexOf(",", StringComparison.Ordinal) + 1)..];
+        var fileName = $"3d_{_activeProduct.Slug}_render_{DateTime.Now:yyyyMMdd_HHmmss}.png";
+        await JS.InvokeVoidAsync("downloadFileFromBytes", fileName, "image/png", base64);
+    }
+
+    private async Task DownloadAiResult()
+    {
+        if (string.IsNullOrEmpty(_aiResultDataUrl)) return;
+        var base64 = _aiResultDataUrl[(_aiResultDataUrl.IndexOf(",", StringComparison.Ordinal) + 1)..];
+        var fileName = $"3d_{_activeProduct.Slug}_ai_{DateTime.Now:yyyyMMdd_HHmmss}.png";
+        await JS.InvokeVoidAsync("downloadFileFromBytes", fileName, "image/png", base64);
+    }
+
+    private void CloseComparison()
+    {
+        _showComparison = false;
+        _snapshotDataUrl = null;
+        _aiResultDataUrl = null;
+    }
+
+    private async Task<bool> TryDebitCoins(int cost, string description)
+    {
+        if (_isSuperAdmin) return true;
+        if (!await CoinService.DebitCoinsAsync(_userId, cost, CoinTransactionType.GenerationSpend, description))
+        {
+            _errorMessage = "Insufficient coins. Please top up to continue.";
+            StateHasChanged();
+            return false;
+        }
+        return true;
+    }
+
+    public void Dispose()
+    {
+        _ = JS.InvokeVoidAsync("mockup3d.dispose");
+        _dotnetRef?.Dispose();
+    }
+}
