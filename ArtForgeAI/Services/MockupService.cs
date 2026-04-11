@@ -3,21 +3,26 @@ using SixLabors.ImageSharp.PixelFormats;
 using SixLabors.ImageSharp.Processing;
 using SixLabors.ImageSharp.Drawing.Processing;
 using ArtForgeAI.Models;
+using Svg.Skia;
+using SkiaSharp;
 
 namespace ArtForgeAI.Services;
 
 public class MockupService
 {
     private readonly IImageGenerationService _imageGen;
+    private readonly IImageStorageService _imageStorage;
     private readonly IWebHostEnvironment _env;
     private readonly ILogger<MockupService> _logger;
 
     public MockupService(
         IImageGenerationService imageGen,
+        IImageStorageService imageStorage,
         IWebHostEnvironment env,
         ILogger<MockupService> logger)
     {
         _imageGen = imageGen;
+        _imageStorage = imageStorage;
         _env = env;
         _logger = logger;
     }
@@ -95,17 +100,21 @@ public class MockupService
         int outputWidth = 1200,
         int outputHeight = 1200)
     {
-        using var product = new Image<Rgba32>(outputWidth, outputHeight);
-        Color bgColor;
-        if (!Color.TryParseHex(productColor, out bgColor))
-            bgColor = Color.White;
-        product.Mutate(ctx => ctx.Fill(bgColor));
+        // Render the product SVG template as the background
+        using var product = RenderProductSvg(productSlug, productColor, outputWidth, outputHeight);
 
         using var logo = Image.Load<Rgba32>(logoBytes);
-        int logoW = (int)(logo.Width * logoScale);
-        int logoH = (int)(logo.Height * logoScale);
-        logoW = Math.Max(logoW, 1);
-        logoH = Math.Max(logoH, 1);
+
+        // In the browser preview, the logo <img> renders at its natural size inside
+        // a ~500px container, then CSS transform:scale() shrinks it.  The visual ratio
+        // depends on the container width, not the image's pixel dimensions.
+        // To match, we scale the logo proportional to the output canvas width.
+        // Browser container is approximately 500 CSS pixels wide;
+        // logoScale of 1.0 should make the logo fill ~100% of the canvas.
+        const float BrowserContainerPx = 500f;
+        float effectiveScale = logoScale * (outputWidth / BrowserContainerPx);
+        int logoW = Math.Max((int)(logo.Width * effectiveScale), 1);
+        int logoH = Math.Max((int)(logo.Height * effectiveScale), 1);
 
         logo.Mutate(ctx =>
         {
@@ -133,31 +142,164 @@ public class MockupService
         return ms.ToArray();
     }
 
+    /// <summary>
+    /// Renders the SVG product template with the selected color applied,
+    /// centered on a dark background matching the preview panel.
+    /// </summary>
+    private Image<Rgba32> RenderProductSvg(string productSlug, string productColor, int width, int height)
+    {
+        var svgPath = Path.Combine(_env.WebRootPath, "mockup-templates", $"{productSlug}.svg");
+
+        if (!File.Exists(svgPath))
+        {
+            // Fallback: plain colored background if SVG not found
+            var fallback = new Image<Rgba32>(width, height);
+            Color bgColor;
+            if (!Color.TryParseHex(productColor, out bgColor))
+                bgColor = Color.White;
+            fallback.Mutate(ctx => ctx.Fill(bgColor));
+            return fallback;
+        }
+
+        // Read and apply color replacement (same logic as GetColoredSvg in the Razor page)
+        var svgContent = File.ReadAllText(svgPath)
+            .Replace("fill=\"#f0f0f0\"", $"fill=\"{productColor}\"")
+            .Replace("fill=\"#e8e8e8\"", $"fill=\"{AdjustColor(productColor, -0.05)}\"")
+            .Replace("fill=\"#e0e0e0\"", $"fill=\"{AdjustColor(productColor, -0.1)}\"");
+
+        // Render SVG to SKBitmap
+        using var svg = new SKSvg();
+        using var svgStream = new MemoryStream(System.Text.Encoding.UTF8.GetBytes(svgContent));
+        svg.Load(svgStream);
+
+        var picture = svg.Picture;
+        if (picture == null)
+        {
+            var fallback = new Image<Rgba32>(width, height);
+            fallback.Mutate(ctx => ctx.Fill(Color.White));
+            return fallback;
+        }
+
+        // Calculate scaling to fit SVG within the output dimensions
+        // matching CSS inset:5% = 90% of area
+        var svgW = picture.CullRect.Width;
+        var svgH = picture.CullRect.Height;
+        var scale = Math.Min(width * 0.90f / svgW, height * 0.90f / svgH);
+
+        var scaledW = (int)(svgW * scale);
+        var scaledH = (int)(svgH * scale);
+
+        // Render SVG to a bitmap
+        using var bitmap = new SKBitmap(scaledW, scaledH);
+        using var canvas = new SKCanvas(bitmap);
+        canvas.Clear(SKColors.Transparent);
+        canvas.Scale(scale);
+        canvas.DrawPicture(picture);
+        canvas.Flush();
+
+        // Convert SKBitmap to ImageSharp Image
+        using var skImage = SKImage.FromBitmap(bitmap);
+        using var skData = skImage.Encode(SKEncodedImageFormat.Png, 100);
+        using var skStream = skData.AsStream();
+        using var svgRendered = Image.Load<Rgba32>(skStream);
+
+        // Create dark background (matching the preview panel) and center the SVG
+        var result = new Image<Rgba32>(width, height);
+        result.Mutate(ctx =>
+        {
+            ctx.Fill(Color.ParseHex("#1a1a2e"));
+            var offsetX = (width - scaledW) / 2;
+            var offsetY = (height - scaledH) / 2;
+            ctx.DrawImage(svgRendered, new Point(offsetX, offsetY), 1f);
+        });
+
+        return result;
+    }
+
+    private static string AdjustColor(string hex, double factor)
+    {
+        hex = hex.TrimStart('#');
+        if (hex.Length != 6) return "#" + hex;
+        int r = Convert.ToInt32(hex[..2], 16);
+        int g = Convert.ToInt32(hex[2..4], 16);
+        int b = Convert.ToInt32(hex[4..6], 16);
+        if (factor < 0)
+        {
+            r = (int)(r * (1 + factor));
+            g = (int)(g * (1 + factor));
+            b = (int)(b * (1 + factor));
+        }
+        else
+        {
+            r = r + (int)((255 - r) * factor);
+            g = g + (int)((255 - g) * factor);
+            b = b + (int)((255 - b) * factor);
+        }
+        r = Math.Clamp(r, 0, 255);
+        g = Math.Clamp(g, 0, 255);
+        b = Math.Clamp(b, 0, 255);
+        return $"#{r:X2}{g:X2}{b:X2}";
+    }
+
     public async Task<GenerationResult> GenerateAiMockup(
-        string logoImagePath,
+        byte[] logoBytes,
+        string productSlug,
         string productName,
         string productColor,
         string material,
         string zone,
+        float logoX, float logoY,
+        float logoScale,
+        float logoRotation,
+        float logoOpacity,
+        string? overlayText,
+        bool shadowEnabled,
+        bool outlineEnabled,
         string userId)
     {
-        var colorName = GetColorName(productColor);
-        var prompt = $"Create a photorealistic product mockup photograph of a {colorName} {productName} made of {material}. " +
-                     $"The logo/design from the reference image should be professionally printed on the {zone} of the {productName}. " +
-                     $"Studio lighting, clean white background, professional product photography style. High quality, sharp details.";
+        // Render the composite mockup (product + logo) as a reference image for Gemini
+        var compositeBytes = await CompositeForDownload(
+            logoBytes, productSlug, zone, productColor,
+            logoX, logoY, logoScale, logoRotation, logoOpacity,
+            overlayText, null, null, shadowEnabled, outlineEnabled, null);
 
-        var request = new GenerationRequest
+        // Save composite under wwwroot so SafeResolvePath allows access
+        var tempFileName = $"mockup_ref_{Guid.NewGuid():N}.png";
+        var tempRelPath = await _imageStorage.SaveImageFromBytesAsync(
+            BinaryData.FromBytes(compositeBytes), tempFileName);
+
+        try
         {
-            Prompt = prompt,
-            ReferenceImagePaths = [logoImagePath],
-            Provider = ImageProvider.Gemini,
-            EnhancePrompt = false,
-            Width = 1536,
-            Height = 1024,
-            UserId = userId
-        };
+            var colorName = GetColorName(productColor);
+            var prompt = $"Transform this flat mockup into a photorealistic product photograph. " +
+                         $"The product is a {colorName} {productName} made of {material}. " +
+                         $"Keep the exact same logo/design placement and appearance from the reference image. " +
+                         $"Add realistic 3D shape, {material} texture, shadows, reflections, and studio lighting. " +
+                         $"Clean white background, professional product photography style. High quality, sharp details.";
 
-        return await _imageGen.GenerateImageAsync(request);
+            var request = new GenerationRequest
+            {
+                Prompt = prompt,
+                ReferenceImagePaths = [tempRelPath],
+                Provider = ImageProvider.Gemini,
+                EnhancePrompt = false,
+                Width = 1536,
+                Height = 1024,
+                UserId = userId
+            };
+
+            return await _imageGen.GenerateImageAsync(request);
+        }
+        finally
+        {
+            // Clean up the temp composite file
+            try
+            {
+                var fullPath = Path.Combine(_env.WebRootPath, tempRelPath.Replace("/", Path.DirectorySeparatorChar.ToString()));
+                if (File.Exists(fullPath)) File.Delete(fullPath);
+            }
+            catch { /* ignore cleanup failure */ }
+        }
     }
 
     private static string GetColorName(string hex) => hex.ToUpperInvariant() switch

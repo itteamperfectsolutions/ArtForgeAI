@@ -5,6 +5,7 @@
 @inject IAdminAnalyticsService AnalyticsService
 @inject IStylePresetService StylePresetService
 @inject IImageSizeMasterService ImageSizeService
+@inject ICoinService CoinService
 
 <PageTitle>ArtForge AI - Admin Dashboard</PageTitle>
 
@@ -371,6 +372,78 @@ else
                 <div class="stat-label">Total Coins Spent</div>
             </div>
         </div>
+
+        <div class="card" style="margin-top: 1.5rem;">
+            <div class="card-body">
+                <h3 style="margin-bottom: 1rem;">Grant Coins to User</h3>
+
+                @if (!string.IsNullOrEmpty(_coinMessage))
+                {
+                    <div style="padding: 0.6rem 1rem; margin-bottom: 1rem; border-radius: 6px;
+                                background: @(_coinMessageIsError ? "rgba(239,68,68,0.15)" : "rgba(34,197,94,0.15)");
+                                color: @(_coinMessageIsError ? "var(--danger, #ef4444)" : "var(--success, #22c55e)");
+                                font-size: 0.85rem;">
+                        @_coinMessage
+                    </div>
+                }
+
+                <div style="display: flex; gap: 1rem; flex-wrap: wrap; align-items: end;">
+                    <div style="flex: 1; min-width: 200px;">
+                        <label style="display: block; margin-bottom: 0.3rem; font-size: 0.8rem; color: var(--text-secondary);">User</label>
+                        <select @bind="_grantUserId" class="form-input" style="width: 100%;">
+                            <option value="0">-- Select user --</option>
+                            @if (_users is not null)
+                            {
+                                @foreach (var user in _users)
+                                {
+                                    <option value="@user.Id">@user.DisplayName (@user.Email)</option>
+                                }
+                            }
+                        </select>
+                    </div>
+                    <div style="min-width: 120px;">
+                        <label style="display: block; margin-bottom: 0.3rem; font-size: 0.8rem; color: var(--text-secondary);">Amount</label>
+                        <input type="number" @bind="_grantAmount" min="1" max="100000" class="form-input" style="width: 100%;" />
+                    </div>
+                    <div style="min-width: 200px;">
+                        <label style="display: block; margin-bottom: 0.3rem; font-size: 0.8rem; color: var(--text-secondary);">Reason (optional)</label>
+                        <input type="text" @bind="_grantReason" placeholder="e.g. Testing, Compensation" class="form-input" style="width: 100%;" />
+                    </div>
+                    <button class="btn-primary" @onclick="GrantCoinsToUser" disabled="@(_isProcessing || _grantUserId == 0 || _grantAmount <= 0)">
+                        Grant Coins
+                    </button>
+                </div>
+            </div>
+        </div>
+
+        @* ── Per-user balances ── *@
+        <div class="card" style="margin-top: 1.5rem;">
+            <div class="card-body" style="overflow-x: auto;">
+                <h3 style="margin-bottom: 1rem;">User Balances</h3>
+                <table class="admin-table">
+                    <thead>
+                        <tr>
+                            <th>User</th>
+                            <th>Email</th>
+                            <th>Balance</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        @if (_users is not null)
+                        {
+                            @foreach (var user in _users)
+                            {
+                                <tr>
+                                    <td>@user.DisplayName</td>
+                                    <td>@user.Email</td>
+                                    <td style="font-weight: 600;">@user.CoinBalance</td>
+                                </tr>
+                            }
+                        }
+                    </tbody>
+                </table>
+            </div>
+        </div>
     }
 }
 
@@ -396,6 +469,13 @@ else
     private List<RecentPaymentStat>? _recentPayments;
     private Dictionary<string, int>? _subscriptionBreakdown;
 
+    // Grant coins form
+    private int _grantUserId;
+    private int _grantAmount = 100;
+    private string _grantReason = "";
+    private string? _coinMessage;
+    private bool _coinMessageIsError;
+
     protected override async Task OnInitializedAsync()
     {
         await LoadAllDataAsync();
@@ -413,24 +493,29 @@ else
             var usersTask = AuthService.GetAllUsersAsync();
             var stylesTask = StylePresetService.GetAllAsync();
             var sizesTask = ImageSizeService.GetAllAsync();
+            var paymentsTask = AnalyticsService.GetRecentPaymentsAsync();
+            var subBreakdownTask = AnalyticsService.GetSubscriptionBreakdownAsync();
 
-            await Task.WhenAll(statsTask, dailyTask, usersTask, stylesTask, sizesTask);
+            await Task.WhenAll(statsTask, dailyTask, usersTask, stylesTask, sizesTask, paymentsTask, subBreakdownTask);
 
             _stats = statsTask.Result;
             _dailyStats = dailyTask.Result;
             _users = usersTask.Result;
             _stylePresets = stylesTask.Result;
             _imageSizes = sizesTask.Result;
-
-            var paymentsTask = AnalyticsService.GetRecentPaymentsAsync();
-            var subBreakdownTask = AnalyticsService.GetSubscriptionBreakdownAsync();
-            await Task.WhenAll(paymentsTask, subBreakdownTask);
             _recentPayments = paymentsTask.Result;
             _subscriptionBreakdown = subBreakdownTask.Result;
         }
         catch
         {
-            // Silently handle - data will show as empty/zero
+            // If batch failed, load each independently so partial data still works
+            try { _stats = await AnalyticsService.GetDashboardStatsAsync(); } catch { /* ignore */ }
+            try { _dailyStats = await AnalyticsService.GetGenerationStatsAsync(30); } catch { /* ignore */ }
+            try { _users = await AuthService.GetAllUsersAsync(); } catch { /* ignore */ }
+            try { _stylePresets = await StylePresetService.GetAllAsync(); } catch { /* ignore */ }
+            try { _imageSizes = await ImageSizeService.GetAllAsync(); } catch { /* ignore */ }
+            try { _recentPayments = await AnalyticsService.GetRecentPaymentsAsync(); } catch { /* ignore */ }
+            try { _subscriptionBreakdown = await AnalyticsService.GetSubscriptionBreakdownAsync(); } catch { /* ignore */ }
         }
         finally
         {
@@ -521,6 +606,51 @@ else
         catch
         {
             size.IsActive = !size.IsActive; // Revert on failure
+        }
+        finally
+        {
+            _isProcessing = false;
+            StateHasChanged();
+        }
+    }
+
+    private async Task GrantCoinsToUser()
+    {
+        if (_isProcessing || _grantUserId == 0 || _grantAmount <= 0) return;
+        _isProcessing = true;
+        _coinMessage = null;
+        StateHasChanged();
+
+        try
+        {
+            var description = string.IsNullOrWhiteSpace(_grantReason)
+                ? "Admin grant"
+                : _grantReason.Trim();
+
+            var success = await CoinService.CreditCoinsAsync(
+                _grantUserId, _grantAmount,
+                CoinTransactionType.AdminAdjustment, description);
+
+            if (success)
+            {
+                var user = _users?.FirstOrDefault(u => u.Id == _grantUserId);
+                _coinMessage = $"Granted {_grantAmount} coins to {user?.DisplayName ?? "user"}";
+                _coinMessageIsError = false;
+
+                // Refresh user list to update balances
+                _users = await AuthService.GetAllUsersAsync();
+                _stats = await AnalyticsService.GetDashboardStatsAsync();
+            }
+            else
+            {
+                _coinMessage = "Failed to grant coins. Please try again.";
+                _coinMessageIsError = true;
+            }
+        }
+        catch (Exception ex)
+        {
+            _coinMessage = "Error: " + ex.Message;
+            _coinMessageIsError = true;
         }
         finally
         {

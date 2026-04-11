@@ -26,14 +26,15 @@ public static class FeatureAccess
     public const string EmotionTransfer = "EmotionTransfer";
     public const string VideoCreator = "VideoCreator";
     public const string MockupStudio = "MockupStudio";
+    public const string Mockup3D = "Mockup3D";
 
     /// <summary>Plan name to allowed features mapping</summary>
     public static readonly Dictionary<string, string[]> PlanFeatures = new()
     {
-        ["Free"] = [QuickStyle, MockupStudio],
-        ["Starter"] = [QuickStyle, Home, StyleTransfer, StyleRemix, Gallery, MockupStudio],
-        ["Pro"] = [QuickStyle, Home, StyleTransfer, StyleRemix, Gallery, MosaicPoster, PassportPhoto, ImageViewer, Settings, NegativeScan, AutoEnhance, PhotoCollages, Merger, EmbroideryArt, BackgroundRemoval, SignatureDayDesign, FaceAging, EmotionTransfer, VideoCreator, MockupStudio],
-        ["Enterprise"] = [QuickStyle, Home, StyleTransfer, StyleRemix, Gallery, MosaicPoster, PassportPhoto, ImageViewer, Settings, PhotoExpand, GangSheet, ShapeCutSheet, NegativeScan, AutoEnhance, PhotoCollages, Merger, EmbroideryArt, BackgroundRemoval, SignatureDayDesign, FaceAging, EmotionTransfer, VideoCreator, MockupStudio]
+        ["Free"] = [QuickStyle, MockupStudio, Mockup3D],
+        ["Starter"] = [QuickStyle, Home, StyleTransfer, StyleRemix, Gallery, MockupStudio, Mockup3D],
+        ["Pro"] = [QuickStyle, Home, StyleTransfer, StyleRemix, Gallery, MosaicPoster, PassportPhoto, ImageViewer, Settings, NegativeScan, AutoEnhance, PhotoCollages, Merger, EmbroideryArt, BackgroundRemoval, SignatureDayDesign, FaceAging, EmotionTransfer, VideoCreator, MockupStudio, Mockup3D],
+        ["Enterprise"] = [QuickStyle, Home, StyleTransfer, StyleRemix, Gallery, MosaicPoster, PassportPhoto, ImageViewer, Settings, PhotoExpand, GangSheet, ShapeCutSheet, NegativeScan, AutoEnhance, PhotoCollages, Merger, EmbroideryArt, BackgroundRemoval, SignatureDayDesign, FaceAging, EmotionTransfer, VideoCreator, MockupStudio, Mockup3D]
     };
 
     /// <summary>Coin cost per generation for each feature</summary>
@@ -58,14 +59,15 @@ public static class FeatureAccess
         [FaceAging] = 2,
         [EmotionTransfer] = 2,
         [VideoCreator] = 5,
-        [MockupStudio] = 1
+        [MockupStudio] = 1,
+        [Mockup3D] = 2
     };
 
     /// <summary>All feature keys</summary>
     public static readonly string[] AllFeatures =
     [
         QuickStyle, Home, StyleTransfer, StyleRemix, Gallery, MosaicPoster,
-        PassportPhoto, ImageViewer, Settings, PhotoExpand, GangSheet, ShapeCutSheet, NegativeScan, AutoEnhance, PhotoCollages, Merger, EmbroideryArt, BackgroundRemoval, SignatureDayDesign, FaceAging, EmotionTransfer, VideoCreator, MockupStudio
+        PassportPhoto, ImageViewer, Settings, PhotoExpand, GangSheet, ShapeCutSheet, NegativeScan, AutoEnhance, PhotoCollages, Merger, EmbroideryArt, BackgroundRemoval, SignatureDayDesign, FaceAging, EmotionTransfer, VideoCreator, MockupStudio, Mockup3D
     ];
 
     public static int GetCost(string featureKey) =>

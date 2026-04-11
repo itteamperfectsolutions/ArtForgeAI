@@ -147,6 +147,15 @@
     max-height: calc(100vh - 140px);
 }
 
+/* AI-enhanced result — full-width below the 2-column layout */
+.ms-ai-result {
+    margin-top: 1rem;
+    background: var(--bg-secondary);
+    border: 2px solid var(--border-color);
+    border-radius: var(--radius-lg);
+    padding: 1rem;
+}
+
 /* Preview panel — dark canvas */
 .ms-preview-panel {
     background: var(--bg-primary);

@@ -112,6 +112,7 @@ builder.Services.AddScoped<TiledGeminiEnhanceService>();
 builder.Services.AddScoped<ITemplateCollageService, TemplateCollageService>();
 builder.Services.AddScoped<ICollageTemplateService, CollageTemplateService>();
 builder.Services.AddScoped<ArtForgeAI.Services.MockupService>();
+builder.Services.AddScoped<Mockup3DService>();
 
 // ── Clone Protection: Multi-layer anti-piracy system ──
 builder.Services.AddSingleton<LicenseService>();              // Offline RSA-signed license
