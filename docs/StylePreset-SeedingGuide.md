@@ -47,11 +47,32 @@ var incrementalStyles = new[]
         Category    = "Artistic",                   // Artistic, Fun, Professional, Abstract, Regional, etc.
         Emoji       = "\U0001F58B\uFE0F",           // Unicode escape for emoji
         Color       = "#8B4513",                    // Hex accent color
-        SortOrder   = 221                           // Next available number
+        SortOrder   = 297                           // GLOBAL max + 1 — see "SortOrder assignment rule" below
     },
     // ── Add future styles here as new entries in this array ──
 };
 ```
+
+### SortOrder assignment rule (IMPORTANT)
+
+**New SortOrder values must be `MAX(SortOrder) + N` across the entire `StylePresets` table — not per-category.**
+
+Before adding a new entry, find the current global max:
+
+```sql
+SELECT MAX(SortOrder) FROM StylePresets;
+```
+
+Then assign `max + 1`, `max + 2`, ... in the order you add entries. Never reuse a number, and never scope the max by `Category`.
+
+**Why global and not per-category:**
+- The existing table already has ~80 cross-category SortOrder collisions from historical per-category numbering. They're harmless (the UI groups by category first) but make it impossible to tell at a glance which slot is free.
+- Using a single monotonic counter eliminates any risk of re-colliding and makes audits trivial (`SELECT MAX(SortOrder)` is the only number you need).
+- When you port a category between projects (see `StylePreset-ExportGuide.md`), a global counter guarantees the target won't have an overlapping slot inside the same category.
+
+**Example:** current global max is `296`. If you're adding 5 new styles in one batch, assign `297, 298, 299, 300, 301` — regardless of which category each belongs to.
+
+Do not try to "backfill" gaps (e.g. SortOrder 50 if it happens to be free) — always append to the end.
 
 ### Step 3: Build and run
 
@@ -107,19 +128,39 @@ foreach (var s in incrementalStyles)
     // 1. Remove from blocklist so it ALWAYS appears
     DELETE FROM DeletedStyleSeeds WHERE Name = @p0
 
-    // 2. Upsert: insert or update
+    // 2. Upsert: insert or change-aware update
     IF NOT EXISTS (SELECT 1 FROM StylePresets WHERE Name = @p0)
-        INSERT INTO StylePresets (...) VALUES (...)
+        INSERT INTO StylePresets (..., CreatedAt, ModifiedAt)
+        VALUES (..., GETUTCDATE(), GETUTCDATE())
     ELSE
-        UPDATE StylePresets SET ... WHERE Name = @p0
+        UPDATE StylePresets
+        SET ..., ModifiedAt = GETUTCDATE()
+        WHERE Name = @p0
+          AND (Description <> @p1 OR PromptTemplate <> @p2
+               OR Category <> @p3 OR IconEmoji <> @p4
+               OR ISNULL(AccentColor,'') <> ISNULL(@p5,'')
+               OR SortOrder <> @p6)
 }
 ```
 
 This means:
-- **New styles** are inserted on first startup
-- **Prompt edits** in the code are applied on next restart (via UPDATE)
+- **New styles** are inserted on first startup with `CreatedAt = ModifiedAt = GETUTCDATE()`
+- **Prompt edits** in the code bump `ModifiedAt` on next restart — but only if something actually changed. Re-running with no edits is a no-op, so `ModifiedAt` doesn't churn on every boot.
 - **User deletions** of incremental styles are overridden (force-cleared from `DeletedStyleSeeds`)
 - If a user truly wants to remove an incremental style permanently, remove it from the `incrementalStyles` array and delete manually from DB
+
+### Timestamp columns
+
+`StylePresets` has two audit columns:
+
+| Column | Purpose |
+|--------|---------|
+| `CreatedAt DATETIME2` | Set once at insert to `GETUTCDATE()` — never changes. |
+| `ModifiedAt DATETIME2` | Updated whenever `Description`, `PromptTemplate`, `Category`, `IconEmoji`, `AccentColor`, or `SortOrder` change via the incremental seed loop. |
+
+Both columns were added via the `CreatedAt` / `ModifiedAt` migration in `Program.cs` (search for `StylePresets CreatedAt/ModifiedAt column migration`). Existing rows pre-migration get `GETUTCDATE()` at the time the ALTER runs — their `CreatedAt` is not their true original creation date, but the date the column was added. This is expected and acceptable.
+
+`ThumbnailPath` is deliberately **not** in the `ModifiedAt` change check, because thumbnails are generated out-of-band via the Admin UI and we don't want UI-driven thumbnail changes to be overwritten/misattributed by the startup seed loop.
 
 ---
 

@@ -576,7 +576,9 @@ using (var scope = app.Services.CreateScope())
                     IconEmoji NVARCHAR(10) NOT NULL DEFAULT '',
                     AccentColor NVARCHAR(10) NULL,
                     IsActive BIT NOT NULL DEFAULT 1,
-                    SortOrder INT NOT NULL DEFAULT 0
+                    SortOrder INT NOT NULL DEFAULT 0,
+                    CreatedAt DATETIME2 NOT NULL DEFAULT GETUTCDATE(),
+                    ModifiedAt DATETIME2 NOT NULL DEFAULT GETUTCDATE()
                 );
                 SET IDENTITY_INSERT StylePresets ON;
                 INSERT INTO StylePresets (Id, Name, Description, PromptTemplate, Category, IconEmoji, AccentColor, IsActive, SortOrder) VALUES
@@ -624,6 +626,21 @@ using (var scope = app.Services.CreateScope())
     catch (Exception ex)
     {
         app.Logger.LogWarning(ex, "StylePresets ThumbnailPath column migration failed (non-fatal)");
+    }
+
+    // Add CreatedAt / ModifiedAt columns to StylePresets if missing
+    try
+    {
+        await db.Database.ExecuteSqlRawAsync(@"
+            IF NOT EXISTS (SELECT * FROM sys.columns WHERE object_id = OBJECT_ID('StylePresets') AND name = 'CreatedAt')
+                ALTER TABLE StylePresets ADD CreatedAt DATETIME2 NOT NULL DEFAULT GETUTCDATE();");
+        await db.Database.ExecuteSqlRawAsync(@"
+            IF NOT EXISTS (SELECT * FROM sys.columns WHERE object_id = OBJECT_ID('StylePresets') AND name = 'ModifiedAt')
+                ALTER TABLE StylePresets ADD ModifiedAt DATETIME2 NOT NULL DEFAULT GETUTCDATE();");
+    }
+    catch (Exception ex)
+    {
+        app.Logger.LogWarning(ex, "StylePresets CreatedAt/ModifiedAt column migration failed (non-fatal)");
     }
 
     // Create StyleGroups table if missing
@@ -3328,12 +3345,12 @@ VALUES
             Color       = "#E91E63",
             SortOrder   = 230
         },
-        // ── 63 Group styles (seeded from SeedStyles folder) ──
+        // ── Signature Studio styles (seeded from SeedStyles folder) ──
         new {
             Name        = "Sketch Memory Portrait",
             Description = "Photoreal subject sitting in front of a large soft pencil sketch of their own face on a grey wall",
             Prompt      = @"IDENTITY LOCK (CRITICAL): Preserve the EXACT face, identity, skin tone, features, eyes, nose, lips, and expression of every person in the source image. No face swap, no reshaping, no beautification, no skin smoothing. Faces must remain 100% photorealistic and identity-preserved. DETECT how many people are in the source image and use ONLY those people — do NOT add or remove anyone. SCENE: Compose the subject(s) as a photorealistic figure sitting casually on a wooden floor in the lower-right of the frame — relaxed pose, slight smile, looking off to the side. Behind them, on a soft grey textured wall, paint a LARGE soft pencil sketch close-up of the SAME subject's face in monochrome graphite — loose artistic strokes, sketchy edges, the sketch fading at the borders. The sketch is a dreamy memory-hovering portrait of the same person. CLOTHING: Preserve original clothing colors; if replacing, use simple modern casual wear. LIGHTING: Soft diffused studio light. MOOD: Emotional, nostalgic, memory-dream. STRICT RULES: The photoreal face and the sketch face must both match the original identity exactly. No anatomical errors, no extra fingers. No text, no watermarks.",
-            Category    = "63 Group",
+            Category    = "Signature Studio",
             Emoji       = "\U0001F58B\uFE0F",
             Color       = "#8D8D8D",
             SortOrder   = 231
@@ -3342,7 +3359,7 @@ VALUES
             Name        = "Monochrome Dream Sketch",
             Description = "Child or subject in photoreal black top against large monochrome pencil sketch backdrop",
             Prompt      = @"IDENTITY LOCK (CRITICAL): Preserve the EXACT face, identity, skin tone, and features of every person from the source image. No face swap, no reshaping, no beautification, no skin smoothing. Faces must remain 100% photorealistic. DETECT how many people are in the source image and use ONLY those people. SCENE: Place the subject(s) seated cross-legged on the floor in a modern casual outfit (black hoodie or top, grey pants, sneakers) in crisp photoreal rendering. Behind them, across a soft grey wall, render a LARGE monochrome graphite pencil portrait of the same subject's face in profile or three-quarter view — dramatic sketch strokes, shading, loose edges fading to the wall. The sketch is the same person as a dreamy memory backdrop. LIGHTING: Soft editorial light from upper-left. MOOD: Contemplative, artistic, emotional. STRICT RULES: Both faces (photoreal + sketch) must match the original identity exactly. No anatomical errors, no text, no watermarks.",
-            Category    = "63 Group",
+            Category    = "Signature Studio",
             Emoji       = "\u270F\uFE0F",
             Color       = "#616161",
             SortOrder   = 232
@@ -3351,7 +3368,7 @@ VALUES
             Name        = "Blueprint Mosaic Portrait",
             Description = "Intricate geometric tile-mosaic portrait with technical blueprint background in primary colors",
             Prompt      = @"IDENTITY LOCK (CRITICAL): Preserve the EXACT facial identity, features, and skin tone of the subject. The face must remain recognizable through the stylization. No face swap, no reshaping, no beautification. DETECT how many people are in the source image and use ONLY those people. STYLE: Transform the portrait into a mosaic of tiny square and rectangular tiles/pixels — the face and bust are broken into a grid of small geometric blocks filled with muted earth tones (beige, grey, soft browns) while bright primary-color blocks (vivid yellow, red, blue) fan out from the subject as dramatic color streaks through the hair and background. BACKGROUND: Technical blueprint aesthetic — a grid of fine white lines, circular architectural schematics, numbers and engineering annotations drawn on a cream/off-white paper. The blueprint elements overlap the subject's silhouette softly. LIGHTING: Clean even illumination. MOOD: Architectural, editorial, mid-century poster. STRICT RULES: The subject's identity, face structure, and likeness remain recognizable. No anatomical errors. No text on the face, no watermarks.",
-            Category    = "63 Group",
+            Category    = "Signature Studio",
             Emoji       = "\U0001F4D0",
             Color       = "#FFC107",
             SortOrder   = 233
@@ -3360,7 +3377,7 @@ VALUES
             Name        = "Neon Cycle Cartoon",
             Description = "Chibi caricature of the subject riding a glowing neon bicycle through a cyberpunk city night",
             Prompt      = @"IDENTITY LOCK (CRITICAL): Preserve the subject's recognizable face, expression, hairstyle, and facial hair in the caricature. The stylized face must clearly resemble the real person. DETECT how many people are in the source image and use ONLY those people. STYLE: Render the subject(s) as a chibi cartoon caricature — slightly oversized head, cute proportions, clean bold outline, flat cel-shaded coloring. The subject rides a sleek futuristic bicycle with glowing electric-blue neon highlights on the wheels, frame, and handlebars. CLOTHING: Black hoodie, dark joggers, casual sneakers. BACKGROUND: A moody cyberpunk city street at night with towering skyscrapers, colorful neon signs (pink, cyan, purple), light trails from passing cars, soft bokeh lights, and a wet reflective road. LIGHTING: Cool neon rim-light on the subject, warm spots from distant signs. MOOD: Cool, cinematic, urban-cyberpunk. STRICT RULES: Subject's facial likeness preserved clearly through the cartoon style. No anatomical errors. No text, no logos, no watermarks.",
-            Category    = "63 Group",
+            Category    = "Signature Studio",
             Emoji       = "\U0001F6B4",
             Color       = "#00BCD4",
             SortOrder   = 234
@@ -3369,7 +3386,7 @@ VALUES
             Name        = "Tropical Beach Hut Model",
             Description = "Fashion-magazine pose leaning on a bamboo beach hut post with palm trees and wicker chairs",
             Prompt      = @"IDENTITY LOCK (CRITICAL): Preserve the EXACT face, identity, skin tone, and features of the subject(s). Face must remain 100% photorealistic. DETECT how many people are in the source image and use ONLY those people. SCENE: Place the subject leaning casually against the wooden post of a thatched bamboo beach hut. CLOTHING: Crisp white linen shirt with sleeves rolled to the elbows, olive-green tailored trousers, beige loafers, sunglasses optional. BACKGROUND: Lush tropical resort ambience — thatched roof overhead, bamboo wicker chairs with soft blue cushions, palm fronds and tropical greenery, golden afternoon light filtering through the palms. LIGHTING: Warm natural sunset glow, soft shadows. POSE: Fashion-editorial stance with one leg crossed over the other, confident look. MOOD: Luxurious vacation, laid-back elegance. STRICT RULES: Face 100% identity-preserved, natural skin tone, proportional body. No anatomical errors, no text or watermarks.",
-            Category    = "63 Group",
+            Category    = "Signature Studio",
             Emoji       = "\U0001F334",
             Color       = "#2E7D32",
             SortOrder   = 235
@@ -3378,7 +3395,7 @@ VALUES
             Name        = "Mountain Outline Double Exposure",
             Description = "Real face with white line-art shirt outlined over a misty blue mountain landscape",
             Prompt      = @"IDENTITY LOCK (CRITICAL): Preserve the EXACT face, identity, skin tone, and features of the subject. The head and face remain fully photorealistic. No face swap, no reshaping, no beautification. DETECT the subject(s) and use ONLY those people. SCENE: The subject's head and upper shoulders are rendered as a fully photorealistic portrait, gazing upward with a serene expression. Below the neck, the body dissolves into a pure WHITE LINE-ART OUTLINE of a button-down shirt — only delicate white strokes depicting collar, buttons, cuffs, and folds with NO fill. BACKGROUND: A misty blue Himalayan mountain range with layered fading peaks, soft clouds, cool atmospheric haze. The mountain scenery is visible THROUGH the line-art shirt. LIGHTING: Cool overcast daylight, soft gradient blue sky. MOOD: Minimal, dreamy, aspirational. STRICT RULES: Face 100% identity-preserved and photorealistic. No anatomical errors, no text, no watermarks.",
-            Category    = "63 Group",
+            Category    = "Signature Studio",
             Emoji       = "\u26F0\uFE0F",
             Color       = "#546E7A",
             SortOrder   = 236
@@ -3387,7 +3404,7 @@ VALUES
             Name        = "Stained Glass Mosaic",
             Description = "Stained-glass tile mosaic portrait with colorful geometric tiles in jewel tones",
             Prompt      = @"IDENTITY LOCK (CRITICAL): Preserve the subject's recognizable face structure, expression, and features through the stylization. DETECT the subject(s) and use ONLY those people. STYLE: Render the portrait as an intricate stained-glass tile mosaic — the face, hair, and upper body broken into many small square and rectangular tiles of various sizes filled with rich jewel tones (emerald green, royal purple, golden yellow, cobalt blue, rust orange, soft cream). Each tile has a subtle dark outline like leaded glass. The skin areas are rendered in warm cream and beige tiles that together clearly form the face. BACKGROUND: Expands the mosaic pattern into decorative concentric geometric shapes, diamond and circular medallions, in the same jewel palette. LIGHTING: Even luminous glow, as if backlit glass. MOOD: Sacred, cathedral art, ornate. STRICT RULES: Subject's identity and face structure remain clearly recognizable. No anatomical errors, no text, no watermarks.",
-            Category    = "63 Group",
+            Category    = "Signature Studio",
             Emoji       = "\U0001F537",
             Color       = "#6A1B9A",
             SortOrder   = 237
@@ -3396,7 +3413,7 @@ VALUES
             Name        = "Rainbow Line Art Pop",
             Description = "Detailed line-art pop portrait with vibrant rainbow color streaks across the face",
             Prompt      = @"IDENTITY LOCK (CRITICAL): Preserve the subject's recognizable face, expression, and features through the stylization. DETECT the subject(s) and use ONLY those people. STYLE: Render as a detailed black ink line-art portrait — fine cross-hatching and stippling define the face, hair, beard and clothing in black-and-white pen-and-ink style. Overlaid on the face are bold streaks of vibrant rainbow color (red, orange, yellow, green, blue, purple) like wet paint flowing diagonally across the cheeks, nose, and eyes — the colors sit on TOP of the line-art without obscuring the features. BACKGROUND: Warm beige-orange gradient with subtle geometric shapes and abstract color blocks on the sides. LIGHTING: Flat graphic illustration light. MOOD: Bold expressive pop-art. STRICT RULES: Subject's face remains recognizable beneath the color streaks. No anatomical errors, no text, no watermarks.",
-            Category    = "63 Group",
+            Category    = "Signature Studio",
             Emoji       = "\U0001F308",
             Color       = "#FF5722",
             SortOrder   = 238
@@ -3405,7 +3422,7 @@ VALUES
             Name        = "Ornamental Pattern Portrait",
             Description = "Intricate decorative pattern artwork with earthy tones and rich ornamental detail",
             Prompt      = @"IDENTITY LOCK (CRITICAL): Preserve the subject's recognizable face structure, eyes, expression, and features through the stylization. DETECT the subject(s) and use ONLY those people. STYLE: Transform the portrait into an elaborate ornamental illustration — the skin, hair, beard, glasses, and clothing are densely packed with intricate decorative patterns (paisley, filigree, floral vines, dots, swirls) rendered in earthy tones (mustard yellow, forest green, deep red, cream, brown, purple). Every surface is filled with rich detailed pattern-work like an illuminated manuscript. BACKGROUND: A tiled pattern wallpaper continuing the same ornamental motifs in subtler tones. LIGHTING: Flat even illustrative light. MOOD: Folk-art, ornate, meditative. STRICT RULES: The subject's identity and face shape remain clearly recognizable. No anatomical errors, no text, no watermarks.",
-            Category    = "63 Group",
+            Category    = "Signature Studio",
             Emoji       = "\U0001F33F",
             Color       = "#827717",
             SortOrder   = 239
@@ -3414,7 +3431,7 @@ VALUES
             Name        = "Low-Poly Geometric BW",
             Description = "Monochrome low-poly triangular facet portrait in dramatic black and white",
             Prompt      = @"IDENTITY LOCK (CRITICAL): Preserve the subject's recognizable face structure, jawline, eyes, and expression through the geometric stylization. DETECT the subject(s) and use ONLY those people. STYLE: Render as a low-poly geometric portrait — the face, hair, and upper body broken into many small triangular facets in pure monochrome black and white tones (blacks, dark greys, mid greys, light greys, whites). Each triangle is a flat shade that together forms the portrait. No color — strictly grayscale. The clothing (jacket, shirt) also rendered in the same triangular facet style. BACKGROUND: A diamond/triangular geometric pattern wall in matching grayscale tones. LIGHTING: Dramatic studio side light implied through tonal contrast between triangles. MOOD: Modern art-poster, sophisticated, editorial. STRICT RULES: Subject's identity remains recognizable. No anatomical errors, no text, no watermarks.",
-            Category    = "63 Group",
+            Category    = "Signature Studio",
             Emoji       = "\U0001F53A",
             Color       = "#424242",
             SortOrder   = 240
@@ -3423,7 +3440,7 @@ VALUES
             Name        = "IPL Wall Mural Selfie",
             Description = "Selfie in front of a towering cricket-hero mural painted on a city building wall",
             Prompt      = @"IDENTITY LOCK (CRITICAL): Preserve the EXACT face, identity, skin tone, and features of the subject taking the selfie. Face remains 100% photorealistic. DETECT the subject(s) — the PEOPLE in the source stay the SAME number. SCENE: Place the subject in the lower-left foreground of the frame taking a selfie with their outstretched arm, smiling confidently, wearing a simple dark jacket over a white t-shirt, thin-frame glasses. BACKGROUND: A GIANT mural painted on a multi-story urban building wall behind them depicting a generic cricket player in a yellow jersey (no real-life celebrity face — use a generic athletic male figure) with team colors and sponsor logos stylized. Three small painter silhouettes on scaffolding work on the mural. City rooftops, paint buckets, and colorful urban street elements frame the scene. LIGHTING: Warm golden-hour sunlight on both the subject and mural. MOOD: Fan-tribute, vibrant, street-art cinematic. STRICT RULES: Subject's face 100% identity-preserved. Do NOT depict any real celebrity in the mural — use a generic cricket figure. No real-brand logos, no text, no watermarks.",
-            Category    = "63 Group",
+            Category    = "Signature Studio",
             Emoji       = "\U0001F3CF",
             Color       = "#FFC107",
             SortOrder   = 241
@@ -3432,7 +3449,7 @@ VALUES
             Name        = "Inception Double Exposure",
             Description = "Large photorealistic head in the background with a smaller full-body version walking in the foreground",
             Prompt      = @"IDENTITY LOCK (CRITICAL): Preserve the EXACT face, identity, skin tone, and features of the subject in BOTH the large head and the small full body. Both faces must match the original identity perfectly. DETECT the subject(s) and use ONLY those people. COMPOSITION: In the background, render a LARGE photorealistic close-up of the subject's head and shoulders filling the upper half of the frame — serene upward gaze, muted grey shirt, soft grey smoke wisps and warm sun flare behind them. In the foreground, render a SMALLER full-body version of the SAME subject confidently walking forward wearing a casual white shirt over a graphic tee, dark jeans, boots, sunglasses. The small figure appears to walk OUT of the large face silhouette below the chin area. LIGHTING: Warm backlight with lens flare, cool neutrals elsewhere. MOOD: Cinematic self-portrait, aspirational. STRICT RULES: Both renderings 100% identity-preserved and photorealistic. No anatomical errors, no text, no watermarks.",
-            Category    = "63 Group",
+            Category    = "Signature Studio",
             Emoji       = "\U0001F506",
             Color       = "#FF9800",
             SortOrder   = 242
@@ -3441,7 +3458,7 @@ VALUES
             Name        = "Family Overhead Huddle",
             Description = "Top-down black and white family photo with everyone lying close together on a white bed",
             Prompt      = @"IDENTITY LOCK (CRITICAL): Preserve the EXACT face, identity, skin tone, and features of every person in the source image. No face swap, no reshaping, no beautification. DETECT how many people are in the source image — use ONLY those people in the exact same count. COMPOSITION: A top-down overhead shot of the detected group lying together on a clean white bed or white blanket, heads close to the center, faces looking UP at the camera with joyful smiles. Arrange them symmetrically around the center — adults on top, children on the bottom, heads gently touching. If only one person, show them lying alone in the center. CLOTHING: Simple neutral tops — white, cream, or soft pastel. COLOR TREATMENT: Soft black and white with a subtle warm tone. LIGHTING: Bright soft overhead natural light. MOOD: Warm, joyful family closeness. STRICT RULES: Faces 100% identity-preserved. No anatomical errors, no text, no watermarks.",
-            Category    = "63 Group",
+            Category    = "Signature Studio",
             Emoji       = "\U0001F46A",
             Color       = "#9E9E9E",
             SortOrder   = 243
@@ -3450,7 +3467,7 @@ VALUES
             Name        = "Tilted Family Stack BW",
             Description = "Tilted diagonal black and white family portrait with heads stacked cheek-to-cheek",
             Prompt      = @"IDENTITY LOCK (CRITICAL): Preserve the EXACT face, identity, and features of every person. No face swap, no reshaping, no beautification. DETECT the number of people — keep the exact count. COMPOSITION: A dramatic tilted/rotated group portrait where all detected people stack their heads cheek-to-cheek in a diagonal line running from the upper-right corner down to the lower-left. Each person's head rests gently on the shoulder or head of the person below. Everyone smiles warmly looking toward the camera. CLOTHING: Solid black tops that blend into the background. BACKGROUND: Pure deep black studio background. LIGHTING: Soft high-key studio light illuminating the faces with clean separation from the dark background. COLOR TREATMENT: Pure black and white monochrome, rich blacks, luminous highlights. MOOD: Intimate, joyful, editorial. STRICT RULES: Faces 100% identity-preserved and photoreal. No anatomical errors, no text, no watermarks.",
-            Category    = "63 Group",
+            Category    = "Signature Studio",
             Emoji       = "\U0001F464",
             Color       = "#212121",
             SortOrder   = 244
@@ -3459,7 +3476,7 @@ VALUES
             Name        = "Joyful Family Cascade",
             Description = "Vertical stacked black and white family portrait with laughing faces from tallest to shortest",
             Prompt      = @"IDENTITY LOCK (CRITICAL): Preserve the EXACT face, identity, and features of every person. No face swap, no reshaping, no beautification. DETECT how many people are in the source image. COMPOSITION: Arrange the detected people in a vertical cascade from top to bottom — tallest/eldest at the top, each subsequent person progressively lower and slightly forward, heads resting tenderly on the person above. Everyone is genuinely laughing with joyful smiles, looking toward the camera. CLOTHING: Solid black tops blending into the background. BACKGROUND: Pure deep black studio background. LIGHTING: Soft high-key studio light, clean highlights on the faces, gentle shadow separation. COLOR TREATMENT: Rich black and white monochrome — deep blacks, bright whites, natural skin tone gradation. MOOD: Warm, joyful, intimate, editorial magazine. STRICT RULES: Faces 100% identity-preserved and photoreal. No anatomical errors, no text, no watermarks.",
-            Category    = "63 Group",
+            Category    = "Signature Studio",
             Emoji       = "\U0001F60A",
             Color       = "#212121",
             SortOrder   = 245
@@ -3468,16 +3485,16 @@ VALUES
             Name        = "Pyramid Family Pose",
             Description = "Pyramid family portrait with adults resting hands on the heads of those below in black and white",
             Prompt      = @"IDENTITY LOCK (CRITICAL): Preserve the EXACT face, identity, and features of every person. No face swap, no reshaping, no beautification. DETECT the number of people. COMPOSITION: Arrange detected people in a pyramid/triangular stack — the tallest at the top, the next person directly below resting their head gently while the top person's hands cradle the sides of their head, continuing down the pyramid with each level placing their hands on the head of the person below. Everyone looks softly at the camera with subtle smiles. If only one person, render a single elegant pose with hands framing the face. CLOTHING: Plain solid black tops and t-shirts. BACKGROUND: Pure deep black studio background. LIGHTING: Soft high-key studio light, clean highlights on the faces. COLOR TREATMENT: Monochrome black and white, rich contrast. MOOD: Tender, artistic, cinematic family portrait. STRICT RULES: Faces 100% identity-preserved. No anatomical errors, no extra hands, no text, no watermarks.",
-            Category    = "63 Group",
+            Category    = "Signature Studio",
             Emoji       = "\U0001F6D0",
             Color       = "#212121",
             SortOrder   = 246
         },
         new {
             Name        = "63 Group Profile Cascade",
-            Description = "Signature 63 Group style with family members in staggered side-profile cascade on black background",
+            Description = "Signature Studio style with family members in staggered side-profile cascade on black background",
             Prompt      = @"IDENTITY LOCK (CRITICAL): Preserve the EXACT face, identity, features, and skin tone of every person. No face swap, no reshaping, no beautification. DETECT how many people are in the source image — use ONLY those people. COMPOSITION: Arrange everyone in a staggered cascading diagonal line flowing from upper-right to lower-left. Each person shown in a clean SIDE PROFILE, all facing the SAME direction (to the right). The tallest/frontmost at top-right, each next person progressively lower and slightly forward/left so every face is clearly visible in profile without overlap. Shoulders and upper chest visible. If only ONE person, render an elegant single side-profile portrait centered with generous negative space. CLOTHING: Simple solid BLACK tops that blend into the background. BACKGROUND: Pure pitch-black studio background, no texture, no gradient. LIGHTING: Dramatic Rembrandt side-light from the right — bright soft key light illuminating the facial profile and cheekbone, back of the head fading into shadow. COLOR TREATMENT: Pure rich black and white monochrome. MOOD: Elegant, cinematic, timeless fine-art family portrait. STRICT RULES: Faces 100% identity-preserved and photoreal. No anatomical errors, no text, no watermarks.",
-            Category    = "63 Group",
+            Category    = "Signature Studio",
             Emoji       = "\U0001F46A",
             Color       = "#000000",
             SortOrder   = 247
@@ -3486,7 +3503,7 @@ VALUES
             Name        = "Family Cradle Portrait",
             Description = "Black and white pyramid family portrait with tender hand-cradling poses",
             Prompt      = @"IDENTITY LOCK (CRITICAL): Preserve the EXACT face, identity, and features of every person. No face swap, no reshaping, no beautification. DETECT the number of people. COMPOSITION: A vertically arranged pyramid portrait where the tallest adult rests their hands atop the head of the next person, who in turn rests their hands over children below whose faces are gently cradled in their own palms (hands cupping the cheeks). Every person looks softly at the camera with warm subtle smiles. CLOTHING: Solid black or white fitted tops. BACKGROUND: Pure deep black studio background. LIGHTING: Soft high-key studio light, luminous skin, clean shadow separation. COLOR TREATMENT: Black and white monochrome with rich contrast. MOOD: Tender, protective, intimate family unity. STRICT RULES: Faces 100% identity-preserved and photoreal. No anatomical errors, no extra hands or fingers, no text, no watermarks.",
-            Category    = "63 Group",
+            Category    = "Signature Studio",
             Emoji       = "\U0001F91D",
             Color       = "#212121",
             SortOrder   = 248
@@ -3495,7 +3512,7 @@ VALUES
             Name        = "Family Halo Silhouette",
             Description = "Silhouetted family portrait with backlit halo glow surrounding the subjects on dark background",
             Prompt      = @"IDENTITY LOCK (CRITICAL): Preserve the recognizable silhouette, hair shape, and facial profile of every person. Even in silhouette, the face profiles must match the original identities. DETECT the number of people. COMPOSITION: Render the subjects in near-silhouette against a dark background with a bright circular halo of warm white light glowing behind them. Show the detected people close together in a tender pose — adults with foreheads touching, smaller family members cradled between them if children are detected. Faces mostly shadowed but subtle facial detail visible through rim light. BACKGROUND: Deep black with a soft glowing white spotlight halo behind the group. LIGHTING: Strong backlight creating crisp silhouette edges and luminous rim-light on hair and shoulders. COLOR TREATMENT: Monochrome black with warm white highlights. MOOD: Sacred, poetic, protective love. STRICT RULES: Facial profiles must still resemble the original identities. No anatomical errors, no text, no watermarks.",
-            Category    = "63 Group",
+            Category    = "Signature Studio",
             Emoji       = "\U0001F469\u200D\U0001F466",
             Color       = "#000000",
             SortOrder   = 249
@@ -3504,7 +3521,7 @@ VALUES
             Name        = "Beanie Caricature Coffee",
             Description = "Big-head cartoon caricature of the subject holding an iced coffee with beanie hat",
             Prompt      = @"IDENTITY LOCK (CRITICAL): Preserve the subject's recognizable face, expression, hairstyle, and facial hair in the caricature. The stylized face must clearly resemble the real person. DETECT the subject(s). STYLE: Render as a glossy 3D cartoon caricature with an oversized head (~60% of the body size), cute exaggerated features, smooth polished shading, soft cel-style rendering. The subject wears a dark knit beanie, an olive-green t-shirt, blue jeans, with sunglasses clipped onto the shirt collar, a beaded bracelet and a thin chain necklace. They hold a tall glass of iced coffee with a straw in one hand and sit casually. BACKGROUND: Neutral grey studio gradient. LIGHTING: Soft studio light, clean highlights. MOOD: Fun, friendly, modern illustration sticker. STRICT RULES: Subject's facial likeness preserved clearly. No anatomical errors, no text, no watermarks.",
-            Category    = "63 Group",
+            Category    = "Signature Studio",
             Emoji       = "\U0001F9CA",
             Color       = "#6D4C41",
             SortOrder   = 250
@@ -3513,7 +3530,7 @@ VALUES
             Name        = "Smoke Genie Memory",
             Description = "Surreal smoke apparition of a loved one rising from an oil lamp flame with the subject",
             Prompt      = @"IDENTITY LOCK (CRITICAL): Preserve the EXACT face, identity, and features of every person — both the photoreal subject and the smoke apparition figure. No face swap, no reshaping, no beautification. Faces must remain photorealistic. DETECT how many people are in the source image and use ONLY those people — assign one as the seated photoreal figure and any others as the smoky apparitions. SCENE: A traditional clay oil lamp with a glowing flame rests on a wooden table in a dim warmly-lit room. From the flame, a soft wispy white smoke rises and forms the ethereal figure of a loved one (the second detected subject) embracing or sitting on the shoulders of the main photoreal figure who sits calmly at the table. The smoke figure retains recognizable facial features but is translucent and made of curling smoke. BACKGROUND: Dim warm interior, soft bokeh, wooden furniture. LIGHTING: Warm flame glow on both figures, dark ambient room. MOOD: Emotional, spiritual, nostalgic memory. STRICT RULES: Both faces identity-preserved and recognizable. No anatomical errors, no text, no watermarks.",
-            Category    = "63 Group",
+            Category    = "Signature Studio",
             Emoji       = "\U0001FA94",
             Color       = "#E65100",
             SortOrder   = 251
@@ -3522,7 +3539,7 @@ VALUES
             Name        = "Bougainvillea Yellow Shirt",
             Description = "Romantic fashion portrait in yellow shirt and white pants surrounded by pink bougainvillea blossoms",
             Prompt      = @"IDENTITY LOCK (CRITICAL): Preserve the EXACT face, identity, skin tone, and features of the subject. Face remains 100% photorealistic. DETECT the subject(s). SCENE: The subject stands confidently in a three-quarter pose smiling gently. CLOTHING: A crisp pale-yellow button-down shirt with sleeves rolled to the forearms, white or cream trousers, a silver wristwatch. BACKGROUND: A lush cascading wall of vibrant pink bougainvillea flowers and green leaves fills the entire background — dense blooms surrounding the subject. LIGHTING: Soft diffused daylight highlighting the face naturally. MOOD: Romantic, fashion-editorial, springtime portrait. STRICT RULES: Face 100% identity-preserved, natural skin tone, proportional body. No anatomical errors, no text, no watermarks.",
-            Category    = "63 Group",
+            Category    = "Signature Studio",
             Emoji       = "\U0001F338",
             Color       = "#F48FB1",
             SortOrder   = 252
@@ -3531,7 +3548,7 @@ VALUES
             Name        = "Tiny on Fingertip",
             Description = "Miniature photorealistic subject sitting on fingertips of a giant hand in macro scale",
             Prompt      = @"IDENTITY LOCK (CRITICAL): Preserve the EXACT face, identity, and features of the miniature subject. Face remains 100% photorealistic even at small scale. DETECT the subject(s). SCENE: A macro close-up of a giant human hand (palm up, fingers slightly curled) filling the lower half of the frame in sharp focus. The subject is rendered as a miniature photoreal figure (about 15cm tall) sitting casually on the fingertips with one elbow resting on a raised finger. CLOTHING: Dark grey sweater, grey jeans, light sneakers. Natural relaxed pose with a gentle smile. BACKGROUND: Soft out-of-focus grey studio backdrop. LIGHTING: Soft directional studio light with natural shadows. MOOD: Whimsical, photorealistic scale illusion. STRICT RULES: Face 100% identity-preserved despite small scale. Natural proportions, no anatomical errors, no text, no watermarks.",
-            Category    = "63 Group",
+            Category    = "Signature Studio",
             Emoji       = "\u270B",
             Color       = "#8D6E63",
             SortOrder   = 253
@@ -3540,7 +3557,7 @@ VALUES
             Name        = "Hoodie Inception Print",
             Description = "Portrait in a hoodie where the hoodie front prints a smaller version of the same subject walking on a road",
             Prompt      = @"IDENTITY LOCK (CRITICAL): Preserve the EXACT face, identity, and features of the subject in BOTH the large portrait and the smaller printed figure on the hoodie. DETECT the subject(s). SCENE: A photorealistic portrait from the waist up of the subject wearing a dark charcoal hoodie, a red knit beanie, with stubble and a calm direct gaze at the camera. On the front of the hoodie, a printed image depicts a SMALLER version of the SAME subject walking forward on an open road leading toward a distant city skyline under a moody cloudy sky. The printed scene blends seamlessly into the hoodie fabric. BACKGROUND: Muted grey atmospheric backdrop. LIGHTING: Soft directional light. MOOD: Conceptual, cinematic, introspective. STRICT RULES: Both subject renderings 100% identity-preserved. No anatomical errors, no text, no watermarks.",
-            Category    = "63 Group",
+            Category    = "Signature Studio",
             Emoji       = "\U0001F9E5",
             Color       = "#455A64",
             SortOrder   = 254
@@ -3549,7 +3566,7 @@ VALUES
             Name        = "Blue Pilot Uniform",
             Description = "Confident portrait in a blue air force pilot jumpsuit with tactical gloves and sunglasses in a desert",
             Prompt      = @"IDENTITY LOCK (CRITICAL): Preserve the EXACT face, identity, skin tone, and features of the subject. Face remains 100% photorealistic. DETECT the subject(s). SCENE: The subject strides confidently toward the camera in a rocky desert environment. CLOTHING: A royal-blue air force style pilot jumpsuit with epaulets, chest rank insignia and ribbon patches, a pilot wings badge on the chest, black tactical fingerless gloves, and dark aviator sunglasses. Short well-groomed hair and a trimmed beard. BACKGROUND: Beige rocky desert terrain with soft depth-of-field blur, warm diffuse daylight. LIGHTING: Natural desert sunlight, soft frontal illumination. MOOD: Heroic, confident, action-film portrait. STRICT RULES: Face 100% identity-preserved. No real-world insignia, no text, no watermarks, no anatomical errors.",
-            Category    = "63 Group",
+            Category    = "Signature Studio",
             Emoji       = "\u2708\uFE0F",
             Color       = "#1565C0",
             SortOrder   = 255
@@ -3558,7 +3575,7 @@ VALUES
             Name        = "Misty Forest Trail",
             Description = "Casual walk through a misty tropical forest trail with mustard shirt and dark jeans",
             Prompt      = @"IDENTITY LOCK (CRITICAL): Preserve the EXACT face, identity, skin tone, and features of the subject. Face remains 100% photorealistic. DETECT the subject(s). SCENE: The subject walks casually through the wooden gate of a misty jungle trail, half-turning to look back at the camera with a subtle smile. CLOTHING: A mustard yellow or ochre button-down shirt over a dark t-shirt, dark jeans, casual blue sneakers. BACKGROUND: Lush misty forest path with tall green trees, dense foliage, wet ground reflecting soft light, thick atmospheric fog in the distance. LIGHTING: Cool moody overcast daylight, soft diffuse light. MOOD: Introspective, travel-blogger, rainy adventure. STRICT RULES: Face 100% identity-preserved. No anatomical errors, no text, no watermarks.",
-            Category    = "63 Group",
+            Category    = "Signature Studio",
             Emoji       = "\U0001F332",
             Color       = "#4E342E",
             SortOrder   = 256
@@ -3567,7 +3584,7 @@ VALUES
             Name        = "AI Trends Cartoon Duo",
             Description = "Sticker-style cartoon of the subject with classic cartoon animal companions and glowing AI ring",
             Prompt      = @"IDENTITY LOCK (CRITICAL): Preserve the subject's recognizable face, expression, hairstyle, and facial hair in the cartoon rendering. DETECT the subject(s). STYLE: A bold flat-color sticker-style cartoon illustration of the subject standing full-body in the center. CLOTHING: A grey-and-black raglan long-sleeve tee with a large white 'AI' letters on the chest, black joggers, tan work boots, and a black baseball cap. On their shoulder sits a small generic brown cartoon mouse and at their feet stands a small generic grey cartoon cat companion (both original non-copyrighted characters). A glowing white energy ring orbits the subject. Small floating bubbles around. TEXT: A bold curved banner reading 'AI TRENDS' at the top in clean white caps. BACKGROUND: Flat soft grey studio color. LIGHTING: Flat graphic illustration light. MOOD: Playful, sticker, trending tech-cartoon. STRICT RULES: Subject's facial likeness preserved through cartoon style. Use only ORIGINAL non-copyrighted generic cartoon animals — do NOT replicate any trademarked characters. No other text, no watermarks, no anatomical errors.",
-            Category    = "63 Group",
+            Category    = "Signature Studio",
             Emoji       = "\U0001F916",
             Color       = "#616161",
             SortOrder   = 257
@@ -3576,7 +3593,7 @@ VALUES
             Name        = "Vintage Pocket Watch Portrait",
             Description = "Subject's portrait engraved inside a vintage gold pocket watch held before a blurred airplane hangar",
             Prompt      = @"IDENTITY LOCK (CRITICAL): Preserve the EXACT face, identity, and features of the subject in the watch-face portrait. DETECT the subject(s). SCENE: A woman's manicured fingers hold a vintage round gold pocket watch with its hinged lid open in the right side of the frame. Inside the watch dial, a detailed sketched or engraved portrait of the subject appears — three-quarter view, holding a vintage camera, wearing an olive green jacket over a cream turtleneck. Watch hour markings visible around the edge. BACKGROUND: A softly blurred vintage airplane hangar with a classic prop plane, warm sunset light, cockpit controls in the lower foreground. LIGHTING: Warm golden hour. MOOD: Nostalgic, vintage, adventurous. STRICT RULES: Portrait inside the watch 100% identity-preserved. No anatomical errors, no text, no watermarks.",
-            Category    = "63 Group",
+            Category    = "Signature Studio",
             Emoji       = "\U0001F570\uFE0F",
             Color       = "#8D6E63",
             SortOrder   = 258
@@ -3585,7 +3602,7 @@ VALUES
             Name        = "Tiny Keyboard Walker",
             Description = "Miniature subject walking across the ENTER key of a glowing RGB mechanical keyboard",
             Prompt      = @"IDENTITY LOCK (CRITICAL): Preserve the EXACT face, identity, and features of the miniature subject even at small scale. DETECT the subject(s). SCENE: Extreme macro close-up of a black mechanical keyboard with glowing purple and blue RGB backlighting under each key. The subject is rendered as a miniature photoreal figure (~8cm tall) walking confidently across the large ENTER key toward the camera. CLOTHING: Light blue denim shirt over a white tee, beige chinos, brown shoes. BACKGROUND: Blurred keyboard keys recede in bokeh, SHIFT and CTRL keys visible on the sides. LIGHTING: Cool RGB underglow from the keys, soft rim-light on the figure. MOOD: Whimsical, gamer aesthetic, scale illusion. STRICT RULES: Face 100% identity-preserved despite miniature scale. Natural proportions, no anatomical errors, no text, no watermarks.",
-            Category    = "63 Group",
+            Category    = "Signature Studio",
             Emoji       = "\u2328\uFE0F",
             Color       = "#7B1FA2",
             SortOrder   = 259
@@ -3594,7 +3611,7 @@ VALUES
             Name        = "Guitar String Rest",
             Description = "Miniature subject sitting on the strings of an acoustic guitar in warm wooden tones",
             Prompt      = @"IDENTITY LOCK (CRITICAL): Preserve the EXACT face, identity, and features of the miniature subject. DETECT the subject(s). SCENE: Extreme macro close-up of a warm wooden acoustic guitar body with its sound hole and strings in sharp detail. The subject is a miniature photoreal figure (~10cm tall) sitting casually on one of the strings with one leg dangling, elbow resting on a nearby string, wearing a black t-shirt, dark jeans, black sneakers, with a genuine smile at the camera. BACKGROUND: Warm wood grain of the guitar, blurred fret area in bokeh, dim moody studio. LIGHTING: Warm tungsten spotlights from above. MOOD: Musical, whimsical, intimate. STRICT RULES: Face 100% identity-preserved. Natural proportions, no anatomical errors, no text, no watermarks.",
-            Category    = "63 Group",
+            Category    = "Signature Studio",
             Emoji       = "\U0001F3B8",
             Color       = "#6D4C41",
             SortOrder   = 260
@@ -3603,7 +3620,7 @@ VALUES
             Name        = "Tiny Coffee Mug Lean",
             Description = "Miniature subject leaning casually against a giant ceramic coffee mug on a rustic wooden table",
             Prompt      = @"IDENTITY LOCK (CRITICAL): Preserve the EXACT face, identity, and features of the miniature subject. DETECT the subject(s). SCENE: Macro close-up of a large rustic cream ceramic coffee mug with steam rising gently from the top, resting on a weathered wooden table. The subject is a miniature photoreal figure (~15cm tall) leaning casually against the side of the mug with arms crossed, wearing a white t-shirt, blue jeans, brown casual shoes. BACKGROUND: Soft warm bokeh with golden window light. LIGHTING: Warm backlit morning light, soft shadows. MOOD: Cozy, whimsical, morning-coffee scale illusion. STRICT RULES: Face 100% identity-preserved. Natural proportions, no anatomical errors, no text, no watermarks.",
-            Category    = "63 Group",
+            Category    = "Signature Studio",
             Emoji       = "\u2615",
             Color       = "#A1887F",
             SortOrder   = 261
@@ -3612,7 +3629,7 @@ VALUES
             Name        = "Vintage Vinyl Portrait",
             Description = "Miniature photograph of the subject placed on a vintage brass vinyl record player being touched",
             Prompt      = @"IDENTITY LOCK (CRITICAL): Preserve the EXACT face, identity, and features of the subject in the miniature photograph. DETECT the subject(s). SCENE: A woman's manicured fingers reach down from the top of the frame to adjust the tonearm of a vintage brass-and-wood vinyl record player. Beside the spinning record stands a small rectangular photograph of the subject posed in a shiny satin shirt with a confident smile, as if the photo is a miniature standee. BACKGROUND: Blurred bookshelf and warm living room ambience. LIGHTING: Warm tungsten lamps, soft bokeh. MOOD: Nostalgic, vintage, intimate. STRICT RULES: Photograph of the subject 100% identity-preserved. No anatomical errors, no text, no watermarks.",
-            Category    = "63 Group",
+            Category    = "Signature Studio",
             Emoji       = "\U0001F4BF",
             Color       = "#795548",
             SortOrder   = 262
@@ -3621,7 +3638,7 @@ VALUES
             Name        = "Toy Car Painter",
             Description = "Portrait painted on the door of a silver scale-model classic sports car with a brush overhead",
             Prompt      = @"IDENTITY LOCK (CRITICAL): Preserve the EXACT face, identity, and features of the subject painted on the car door. DETECT the subject(s). SCENE: A sleek silver scale model classic sports car (generic non-branded vintage sports coupe) sits on a wooden workbench. A manicured feminine hand holds a fine detail paintbrush from above, actively painting a small portrait of the subject on the driver-side door panel — the portrait shows the subject in a warm jacket smiling gently. BACKGROUND: Blurred workshop with colorful bokeh, overhead work lamp, small paint pots and tweezers on the table. LIGHTING: Warm spotlight on the car. MOOD: Craft hobby, delicate, intimate. STRICT RULES: Subject's face 100% identity-preserved. No real-brand logos on the car, no text, no watermarks, no anatomical errors.",
-            Category    = "63 Group",
+            Category    = "Signature Studio",
             Emoji       = "\U0001F697",
             Color       = "#9E9E9E",
             SortOrder   = 263
@@ -3630,7 +3647,7 @@ VALUES
             Name        = "Gold Frame Perfume Bottle",
             Description = "Subject's portrait inside a golden photo frame on a frosted-glass perfume bottle being sprayed",
             Prompt      = @"IDENTITY LOCK (CRITICAL): Preserve the EXACT face, identity, and features of the subject inside the framed portrait. DETECT the subject(s). SCENE: Elegant manicured fingers hold a rectangular frosted-glass perfume bottle with a gold cap being sprayed (visible soft mist from the nozzle). On the front of the bottle, a gold ornate photo frame contains a crisp portrait of the subject in formal attire (dark blazer, white shirt) with a gentle smile. BACKGROUND: Deep emerald green silk fabric with warm bokeh lights on the left. LIGHTING: Warm spotlight on the bottle. MOOD: Luxurious, elegant, cosmetic ad. STRICT RULES: Framed portrait 100% identity-preserved. No real-brand logos, no text, no watermarks, no anatomical errors.",
-            Category    = "63 Group",
+            Category    = "Signature Studio",
             Emoji       = "\U0001F484",
             Color       = "#FFD54F",
             SortOrder   = 264
@@ -3639,7 +3656,7 @@ VALUES
             Name        = "Cafe Cup Portrait",
             Description = "Portrait printed on a tall takeaway coffee cup being held in a warm cafe",
             Prompt      = @"IDENTITY LOCK (CRITICAL): Preserve the EXACT face, identity, and features of the subject on the cup print. DETECT the subject(s). SCENE: A hand holds a tall white paper takeaway coffee cup with a kraft-paper sleeve. On the sleeve, a circular green medallion displays a photoreal portrait of the subject (head and shoulders, white shirt, confident smile). Gentle steam rises from the lid. BACKGROUND: Blurred warm cafe interior with wooden counters, espresso machine, green plants, chalkboard menu. LIGHTING: Warm morning window light, soft bokeh. MOOD: Cozy cafe, personal branding, warm morning. STRICT RULES: Portrait on the cup 100% identity-preserved. Generic cafe styling — no real-brand logos, no text on the cup beyond the portrait medallion, no watermarks, no anatomical errors.",
-            Category    = "63 Group",
+            Category    = "Signature Studio",
             Emoji       = "\U0001F375",
             Color       = "#2E7D32",
             SortOrder   = 265
@@ -3648,34 +3665,34 @@ VALUES
             Name        = "Pocket Compass Portrait",
             Description = "Subject portrait inside an antique brass pocket compass resting on an old world map",
             Prompt      = @"IDENTITY LOCK (CRITICAL): Preserve the EXACT face, identity, and features of the subject in the compass portrait. DETECT the subject(s). SCENE: A hand holds an antique brass round pocket compass with its lid flipped open. Inside the compass dial, a warm sepia-toned portrait of the subject appears — smiling casually in a plaid shirt. The compass rests over a vintage aged world map with faint cartographic details. BACKGROUND: Warm candlelit desk with blurred antique items. LIGHTING: Warm tungsten glow. MOOD: Adventurous, nostalgic, explorer. STRICT RULES: Compass portrait 100% identity-preserved. No text, no watermarks, no anatomical errors.",
-            Category    = "63 Group",
+            Category    = "Signature Studio",
             Emoji       = "\U0001F9ED",
             Color       = "#A1887F",
-            SortOrder   = 266
+            SortOrder   = 294
         },
         new {
             Name        = "Sneaker City Portrait",
             Description = "Portrait on a high-top sneaker held in a giant hand in a neon cityscape",
             Prompt      = @"IDENTITY LOCK (CRITICAL): Preserve the EXACT face, identity, and features of the subject in the sneaker portrait. DETECT the subject(s). SCENE: A giant hand holds a pristine white high-top canvas sneaker in the foreground (generic non-branded high-top style). On the side panel of the sneaker, a small photoreal portrait of the subject appears standing in a black outfit with confident pose. BACKGROUND: A bustling nighttime neon city with colorful bokeh lights, soft starry sky, cinematic streetwear vibe. LIGHTING: Cool neon rim light with warm accents. MOOD: Streetwear, aspirational, poster-worthy. STRICT RULES: Portrait 100% identity-preserved. Generic sneaker styling — no real-brand logos, no text, no watermarks, no anatomical errors.",
-            Category    = "63 Group",
+            Category    = "Signature Studio",
             Emoji       = "\U0001F45F",
             Color       = "#F5F5F5",
-            SortOrder   = 267
+            SortOrder   = 295
         },
         new {
             Name        = "Earbuds Case Portrait",
             Description = "Subject portrait printed on a sleek black wireless earbuds case in a sci-fi neon setting",
             Prompt      = @"IDENTITY LOCK (CRITICAL): Preserve the EXACT face, identity, and features of the subject printed on the earbuds case. DETECT the subject(s). SCENE: Fingers hold up a sleek matte-black square wireless earbuds charging case. On the front, a crisp portrait of the subject appears wearing a black-and-white sports jacket with a confident expression. BACKGROUND: A futuristic sci-fi interior with blue and purple neon strip lighting, blurred server racks and tech panels. LIGHTING: Cool blue-purple neon glow. MOOD: Tech product-shot, futuristic, cinematic. STRICT RULES: Portrait 100% identity-preserved. Generic non-branded earbuds case, no text, no watermarks, no anatomical errors.",
-            Category    = "63 Group",
+            Category    = "Signature Studio",
             Emoji       = "\U0001F3A7",
             Color       = "#1A237E",
-            SortOrder   = 268
+            SortOrder   = 296
         },
         new {
             Name        = "Leather Luggage Tag",
             Description = "Portrait engraved on a miniature leather luggage tag hanging from a vintage brown suitcase",
             Prompt      = @"IDENTITY LOCK (CRITICAL): Preserve the EXACT face, identity, and features of the subject engraved on the luggage tag. DETECT the subject(s). SCENE: Fingers hold up a small brown vintage leather suitcase with brass corners and buckles. From the handle hangs a rectangular leather luggage tag showing an engraved sepia line-drawing portrait of the subject in a jacket. BACKGROUND: A blurred warm vintage train carriage interior with plush seats and brass fittings. LIGHTING: Warm golden carriage light. MOOD: Travel nostalgia, vintage journey. STRICT RULES: Portrait 100% identity-preserved. No text on the tag except the portrait, no watermarks, no anatomical errors.",
-            Category    = "63 Group",
+            Category    = "Signature Studio",
             Emoji       = "\U0001F9F3",
             Color       = "#795548",
             SortOrder   = 269
@@ -3684,7 +3701,7 @@ VALUES
             Name        = "Fire Can Portrait",
             Description = "Portrait on a chilled cola-style soda can with dramatic flames behind the subject",
             Prompt      = @"IDENTITY LOCK (CRITICAL): Preserve the EXACT face, identity, and features of the subject on the can wrap. DETECT the subject(s). SCENE: Fingers hold a frosted silver soda can (generic non-branded cola-style can) covered in condensation droplets. On the label, a photoreal scene shows the subject in a black t-shirt holding a small soda bottle to their lips, backed by dramatic orange flames. BACKGROUND: Deep black studio with warm amber flame glow. LIGHTING: Warm backlight from the flames, cool rim on the can. MOOD: Bold, refreshing, dramatic drink poster. STRICT RULES: Portrait 100% identity-preserved. Generic can — no real-brand logos, no text, no watermarks, no anatomical errors.",
-            Category    = "63 Group",
+            Category    = "Signature Studio",
             Emoji       = "\U0001F964",
             Color       = "#D32F2F",
             SortOrder   = 270
@@ -3693,7 +3710,7 @@ VALUES
             Name        = "Watercolor Splash Portrait",
             Description = "Artistic watercolor-drip portrait with soft splashes and muted blue-brown tones on white paper",
             Prompt      = @"IDENTITY LOCK (CRITICAL): Preserve the subject's recognizable face, eyes, nose, lips, and expression through the watercolor rendering. DETECT the subject(s). STYLE: Render the subject as a soft watercolor painting on textured white paper — the face painted with natural realistic skin tones and careful detail on eyes and hair, while the shoulders, clothing (olive camo jacket, grey tee), and the edges of the hair break into loose expressive watercolor drips, splashes, and brushstrokes in muted earth and blue tones. Drips fall from the chin and shoulders onto the paper. BACKGROUND: Clean off-white textured watercolor paper with subtle color splatters. LIGHTING: Flat natural paper-illustration light. MOOD: Artistic, soulful, gallery portrait. STRICT RULES: Face remains recognizably the subject. No anatomical errors, no text, no watermarks.",
-            Category    = "63 Group",
+            Category    = "Signature Studio",
             Emoji       = "\U0001F58C\uFE0F",
             Color       = "#546E7A",
             SortOrder   = 271
@@ -3702,7 +3719,7 @@ VALUES
             Name        = "Sydney Opera Blazer",
             Description = "Navy blazer portrait with Sydney Opera House sails shining across the harbor",
             Prompt      = @"IDENTITY LOCK (CRITICAL): Preserve the EXACT face, identity, skin tone, and features of the subject. Face remains 100% photorealistic. DETECT the subject(s). SCENE: The subject stands confidently smiling with hands in pockets on a stone waterfront promenade. CLOTHING: A tailored navy-blue blazer over a crisp white shirt, brown leather belt, light trousers. BACKGROUND: The iconic Sydney Opera House with its white sail roofs across a sparkling blue harbor on a clear sunny day. LIGHTING: Bright midday sunlight, clear skies. MOOD: Travel, aspirational, classy vacation portrait. STRICT RULES: Face 100% identity-preserved. No anatomical errors, no text, no watermarks.",
-            Category    = "63 Group",
+            Category    = "Signature Studio",
             Emoji       = "\U0001F54D",
             Color       = "#1565C0",
             SortOrder   = 272
@@ -3711,7 +3728,7 @@ VALUES
             Name        = "Iceland Glacier Orange",
             Description = "Smiling traveler portrait in bright orange puffer jacket before a blue icy glacier",
             Prompt      = @"IDENTITY LOCK (CRITICAL): Preserve the EXACT face, identity, skin tone, and features of the subject. DETECT the subject(s). SCENE: The subject stands smiling in front of a massive blue-and-white glacier, with visible breath-steam in the cold air. CLOTHING: A vivid orange quilted puffer jacket with hood, dark gloves optional. BACKGROUND: A dramatic Icelandic glacier with jagged blue ice, dark volcanic rock, moody overcast sky with heavy clouds. LIGHTING: Cool cloudy daylight, soft blue tones contrasting with the warm jacket. MOOD: Adventurous, travel, epic landscape. STRICT RULES: Face 100% identity-preserved. No anatomical errors, no text, no watermarks.",
-            Category    = "63 Group",
+            Category    = "Signature Studio",
             Emoji       = "\U0001F9CA",
             Color       = "#FF6F00",
             SortOrder   = 273
@@ -3720,7 +3737,7 @@ VALUES
             Name        = "Autumn Trench Park",
             Description = "Warm autumn portrait in beige trench coat and burgundy scarf under falling leaves in a city park",
             Prompt      = @"IDENTITY LOCK (CRITICAL): Preserve the EXACT face, identity, and features of the subject. DETECT the subject(s). SCENE: The subject walks casually through an autumn city park smiling warmly at the camera. CLOTHING: A classic beige double-breasted trench coat, a deep burgundy knit scarf wrapped around the neck, dark jeans. BACKGROUND: A wide tree-lined park path with golden, orange, and red autumn leaves falling through the air, a historic stone bridge in the distance, a few blurred people strolling. LIGHTING: Warm autumn afternoon sun, soft bokeh. MOOD: Cozy, romantic, autumn fashion editorial. STRICT RULES: Face 100% identity-preserved. No anatomical errors, no text, no watermarks.",
-            Category    = "63 Group",
+            Category    = "Signature Studio",
             Emoji       = "\U0001F342",
             Color       = "#8D6E63",
             SortOrder   = 274
@@ -3729,7 +3746,7 @@ VALUES
             Name        = "Red Carpet Paparazzi",
             Description = "Glamorous red carpet tuxedo moment with paparazzi flashes and a film festival backdrop",
             Prompt      = @"IDENTITY LOCK (CRITICAL): Preserve the EXACT face, identity, and features of the subject. DETECT the subject(s). SCENE: The subject walks a red carpet waving at the cameras with a charismatic smile. CLOTHING: A perfectly tailored black tuxedo with satin lapels, crisp white dress shirt, classic black bow tie, holding sunglasses in one hand. BACKGROUND: A festival step-and-repeat backdrop covered in generic circular logos (no real brands), blurred rows of paparazzi with cameras flashing bright white bursts. Red carpet below. LIGHTING: Bright multidirectional flash-light with sharp highlights and clean shadows. MOOD: Glamorous, celebrity, film-premiere. STRICT RULES: Face 100% identity-preserved. Generic backdrop logos only, no real brand names, no text, no watermarks, no anatomical errors.",
-            Category    = "63 Group",
+            Category    = "Signature Studio",
             Emoji       = "\U0001F3AC",
             Color       = "#B71C1C",
             SortOrder   = 275
@@ -3738,7 +3755,7 @@ VALUES
             Name        = "Vintage Diner Truck",
             Description = "Rugged portrait leaning on a classic teal pickup truck at a 1950s American diner at sunset",
             Prompt      = @"IDENTITY LOCK (CRITICAL): Preserve the EXACT face, identity, and features of the subject. DETECT the subject(s). SCENE: The subject leans casually against the fender of a classic teal-and-white 1950s pickup truck with a confident smile. CLOTHING: A black leather jacket over a white t-shirt, dark jeans, black boots. BACKGROUND: A vintage American diner with neon signs, red-and-white checkered accents, retro cars parked nearby, warm golden sunset light. LIGHTING: Warm golden hour. MOOD: Retro Americana, cool, nostalgic. STRICT RULES: Face 100% identity-preserved. Generic diner signage — no real brand names, no text, no watermarks, no anatomical errors.",
-            Category    = "63 Group",
+            Category    = "Signature Studio",
             Emoji       = "\U0001F69B",
             Color       = "#26A69A",
             SortOrder   = 276
@@ -3747,7 +3764,7 @@ VALUES
             Name        = "Paper Sculpture Portrait",
             Description = "Striking paper-craft sculpture portrait with white paper hair sculpture on red background",
             Prompt      = @"IDENTITY LOCK (CRITICAL): Preserve the subject's recognizable face, features, and expression through the paper-craft rendering. DETECT the subject(s). STYLE: Transform the portrait into a mixed-media artwork where the face and beard are painted in flat bold red (matte red skin) with aviator sunglasses, while the HAIR is rendered as sculpted layers of curved white paper strips fanning upward like a paper sculpture. The beard is also made of textured white paper strips. BACKGROUND: A bold flat red background with subtle shadow at the bottom. The subject wears a plain dark high-collar jacket. LIGHTING: Flat studio light with crisp paper-craft shadows. MOOD: Bold editorial, art-gallery poster. STRICT RULES: Face shape, expression, and features remain recognizable. No anatomical errors, no text, no watermarks.",
-            Category    = "63 Group",
+            Category    = "Signature Studio",
             Emoji       = "\U0001F4F0",
             Color       = "#C62828",
             SortOrder   = 277
@@ -3756,7 +3773,7 @@ VALUES
             Name        = "Walking Silhouette Exposure",
             Description = "Giant monochrome side profile of the subject with a smaller full-body version walking out of the neck",
             Prompt      = @"IDENTITY LOCK (CRITICAL): Preserve the EXACT face, identity, and features of the subject in BOTH the large side-profile and the small full body. DETECT the subject(s). COMPOSITION: In the background, a LARGE monochrome grayscale side-profile of the subject fills the frame — detailed hair, beard, ear, sunglasses. In the foreground, a SMALLER full-body photoreal version of the SAME subject walks forward from the neck area of the big profile, wearing a green bomber jacket with an emblem tee, dark jeans, white sneakers, sunglasses, confident stride. BACKGROUND: Soft grey gradient. LIGHTING: Cool neutral studio light. MOOD: Self-portrait double-exposure, editorial. STRICT RULES: Both renderings 100% identity-preserved. No anatomical errors, no text or names, no watermarks.",
-            Category    = "63 Group",
+            Category    = "Signature Studio",
             Emoji       = "\U0001F6B6",
             Color       = "#616161",
             SortOrder   = 278
@@ -3765,7 +3782,7 @@ VALUES
             Name        = "Textured Oil Painting",
             Description = "Vibrant impasto oil painting portrait with visible brushstrokes and warm skin tones",
             Prompt      = @"IDENTITY LOCK (CRITICAL): Preserve the subject's recognizable face, eyes, nose, lips, and expression through the painterly rendering. DETECT the subject(s). STYLE: Render as a rich impasto oil painting with visible thick brushstrokes across the face, hair, beard, and clothing. Warm realistic skin tones with painterly highlights of peach, cream, and soft purple shadows. The brushwork is loose but the features remain clearly recognizable. CLOTHING: Dark jacket over a white tee with a gold chain. BACKGROUND: A textured off-white canvas-like painted backdrop with soft brushstrokes. LIGHTING: Warm directional light creating painterly highlights. MOOD: Gallery fine-art, emotive, classical. STRICT RULES: Face remains recognizably the subject. No anatomical errors, no text, no watermarks.",
-            Category    = "63 Group",
+            Category    = "Signature Studio",
             Emoji       = "\U0001F3A8",
             Color       = "#BF360C",
             SortOrder   = 279
@@ -3774,7 +3791,7 @@ VALUES
             Name        = "Pixar 3D Avatar",
             Description = "Charming 3D animated movie-style avatar with big expressive eyes and soft stylized features",
             Prompt      = @"IDENTITY LOCK (CRITICAL): Preserve the subject's recognizable face shape, hairstyle, glasses, and expression in the 3D cartoon rendering. The stylized face must clearly look like the same person. DETECT the subject(s). STYLE: Render as a warm 3D animated-movie-style character — soft rounded features, slightly larger expressive eyes, smooth subsurface-scattering skin, stylized eyebrows and hair with individual strands, subtle friendly smile. CLOTHING: Grey zip-up hoodie over a dark tee. Thin-frame modern glasses if the subject wears them. BACKGROUND: Warm magenta-to-orange gradient studio backdrop. LIGHTING: Soft three-point studio light with gentle rim. MOOD: Friendly, charming, movie-poster. STRICT RULES: Subject's recognizable likeness preserved. No anatomical errors, no text, no watermarks.",
-            Category    = "63 Group",
+            Category    = "Signature Studio",
             Emoji       = "\U0001F916",
             Color       = "#EF6C00",
             SortOrder   = 280
@@ -3783,7 +3800,7 @@ VALUES
             Name        = "Blue Profile Portrait",
             Description = "Dramatic blue-on-blue side profile portrait with blue sunglasses and denim jacket",
             Prompt      = @"IDENTITY LOCK (CRITICAL): Preserve the EXACT face, identity, and features of the subject in side profile. DETECT the subject(s). SCENE: A clean side profile portrait of the subject looking slightly upward with a serene expression. CLOTHING: A royal blue denim jacket over a black turtleneck. Blue-tinted rectangular sunglasses resting on the nose. BACKGROUND: A smooth blue gradient studio wall in matching tones, with a few loose blue paint-stroke accents framing the subject. LIGHTING: Soft directional light from the left. MOOD: Editorial fashion, mood-portrait, monochromatic blue. STRICT RULES: Face 100% identity-preserved. No anatomical errors, no text, no watermarks.",
-            Category    = "63 Group",
+            Category    = "Signature Studio",
             Emoji       = "\U0001F535",
             Color       = "#1E88E5",
             SortOrder   = 281
@@ -3792,7 +3809,7 @@ VALUES
             Name        = "Black Panther Companion",
             Description = "Cinematic portrait of the subject sitting on a stool next to a majestic black panther in wild scrubland",
             Prompt      = @"IDENTITY LOCK (CRITICAL): Preserve the EXACT face, identity, skin tone, and features of the subject. Face remains 100% photorealistic. DETECT the subject(s). SCENE: The subject sits relaxed on a small metal stool in an open scrubland landscape, wearing a black jacket and black pants, black boots, dark sunglasses. Directly beside them stands a majestic adult black panther calmly gazing toward the camera. The panther's fur is glossy black with subtle rosette texture. BACKGROUND: Open dry grassland with distant mountains, soft overcast sky. LIGHTING: Cool natural daylight, cinematic color grade. MOOD: Powerful, mystical, wildlife portrait. STRICT RULES: Face 100% identity-preserved. Realistic panther anatomy, no anatomical errors on human or animal, no text, no watermarks.",
-            Category    = "63 Group",
+            Category    = "Signature Studio",
             Emoji       = "\U0001F406",
             Color       = "#212121",
             SortOrder   = 282
@@ -3801,7 +3818,7 @@ VALUES
             Name        = "Snow Lambo Tactical",
             Description = "Tactical action portrait seated in the open door of a matte black supercar on a snowy forest road",
             Prompt      = @"IDENTITY LOCK (CRITICAL): Preserve the EXACT face, identity, and features of the subject. DETECT the subject(s). SCENE: The subject sits in the open scissor-door of a matte-black generic luxury supercar (non-branded sleek sports car) parked on a snowy forest road. CLOTHING: A heavy black parka with a fur-lined hood, dark tactical pants, black gloves, holding a prop-style tactical rifle (non-functional, stylized). Trimmed beard, calm confident expression. BACKGROUND: Snow-covered pine forest, cool overcast winter light, light snowfall. LIGHTING: Cool cinematic daylight with soft red taillight glow from the car. MOOD: Action-film, hyper-cinematic, 8k masterpiece. STRICT RULES: Face 100% identity-preserved. Generic car with no real-brand logos. No anatomical errors, no text, no watermarks. Prop weapon is decorative only.",
-            Category    = "63 Group",
+            Category    = "Signature Studio",
             Emoji       = "\U0001F3CE\uFE0F",
             Color       = "#263238",
             SortOrder   = 283
@@ -3810,7 +3827,7 @@ VALUES
             Name        = "Orange Lens Cinematic",
             Description = "Moody cinematic close-up with vibrant orange-tinted round sunglasses against a deep teal backdrop",
             Prompt      = @"IDENTITY LOCK (CRITICAL): Preserve the EXACT face, identity, and features of the subject. DETECT the subject(s). SCENE: A cinematic three-quarter close-up of the subject looking slightly upward with a thoughtful expression. CLOTHING: A black high-collar turtleneck. Round clear-frame sunglasses with vibrant orange lenses reflecting a warm glow. BACKGROUND: A deep teal-blue moody gradient studio backdrop. LIGHTING: Warm orange accent light from the lenses contrasting with cool teal ambient. MOOD: Cinematic movie-poster, contemplative, stylish. STRICT RULES: Face 100% identity-preserved. No anatomical errors, no text, no watermarks.",
-            Category    = "63 Group",
+            Category    = "Signature Studio",
             Emoji       = "\U0001F576\uFE0F",
             Color       = "#00695C",
             SortOrder   = 284
@@ -3819,7 +3836,7 @@ VALUES
             Name        = "Magazine Cover Rack",
             Description = "Subject featured on multiple fictional magazine covers displayed on a bookstore rack",
             Prompt      = @"IDENTITY LOCK (CRITICAL): Preserve the EXACT face, identity, and features of the subject on EVERY magazine cover. DETECT the subject(s). SCENE: A bookstore magazine rack displays six fictional magazine covers, each featuring the SAME subject styled for a different theme: a motorcycle themed cover with the subject on a bike, an aviation cover with the subject in a cockpit, a business cover in a suit, a science / geography cover, a rock-music cover with an acoustic guitar, and a tech / AI future cover. The magazine mastheads use invented names (no real brand names). BACKGROUND: Blurred bookstore shelves with soft bokeh. LIGHTING: Even store fluorescent light. MOOD: Playful, aspirational multiverse. STRICT RULES: Subject's face 100% identity-preserved on every cover. Use only fictional magazine titles — no real brand names. No anatomical errors, no watermarks. Minimal headline text on covers, generic non-offensive wording.",
-            Category    = "63 Group",
+            Category    = "Signature Studio",
             Emoji       = "\U0001F4F0",
             Color       = "#FF7043",
             SortOrder   = 285
@@ -3828,7 +3845,7 @@ VALUES
             Name        = "Gummy Face Candy",
             Description = "Subject's face playfully transformed onto colorful translucent gummy candies in a pile",
             Prompt      = @"IDENTITY LOCK (CRITICAL): Preserve the subject's recognizable facial features (eyes, nose, mouth shape, expression) on each gummy face even while rendered as translucent candy. DETECT the subject(s) — each detected person becomes one or two gummy faces among many. STYLE: A close-up of a pile of colorful translucent jelly gummy candies (yellow, orange, red, green) with smiling facial features molded into them. A few of the gummies clearly show the detected subject's face while the others are generic smiling gummy faces. BACKGROUND: Tight macro framing — gummies fill the entire frame. LIGHTING: Bright soft studio light highlighting the candy translucency. MOOD: Playful, sweet, fun candy ad. STRICT RULES: Subject's face remains recognizable in gummy form. No anatomical errors, no text, no watermarks, no real brand logos.",
-            Category    = "63 Group",
+            Category    = "Signature Studio",
             Emoji       = "\U0001F36C",
             Color       = "#FFB300",
             SortOrder   = 286
@@ -3837,7 +3854,7 @@ VALUES
             Name        = "Ocean Storm Exposure",
             Description = "Dramatic double-exposure portrait of the subject's side profile blended into a stormy ocean crashing against rocks",
             Prompt      = @"IDENTITY LOCK (CRITICAL): Preserve the EXACT face, identity, and features of the subject. Face remains photorealistic. DETECT the subject(s). SCENE: A cinematic side-profile of the subject fills the left half of the frame — detailed hair, beard, eye, lips. On the right half of the face (the cheek and jaw area), the skin dissolves into a dramatic stormy ocean scene: giant crashing waves, dark rocks, lightning bolts in a stormy night sky. The transition from face to ocean is a seamless double-exposure blend. BACKGROUND: Dark stormy sky with cool moody blue and grey tones. LIGHTING: Cool moody storm light. MOOD: Cinematic, powerful, emotional epic. STRICT RULES: Face 100% identity-preserved. No anatomical errors, no text, no watermarks.",
-            Category    = "63 Group",
+            Category    = "Signature Studio",
             Emoji       = "\U0001F30A",
             Color       = "#37474F",
             SortOrder   = 287
@@ -3846,7 +3863,7 @@ VALUES
             Name        = "Human Cyborg Schematic",
             Description = "Half photoreal face and half intricate robotic cyborg with anatomical blueprint annotations",
             Prompt      = @"IDENTITY LOCK (CRITICAL): Preserve the EXACT face, identity, and features of the subject on the human side of the split. DETECT the subject(s). SCENE: A symmetrical split portrait where the LEFT half of the face and body is rendered fully photorealistic (skin, stubble, natural hair, neck showing glowing orange circuit lines under the skin) and the RIGHT half reveals an intricate red-and-silver cyborg mechanical structure with exposed gears, cables, circuits, and a glowing green robotic eye. BACKGROUND: A cream-colored schematic paper with anatomical technical drawings of the human body, mechanical diagrams, gear blueprints, and engineering annotations around the subject. LIGHTING: Even diffused schematic lighting with warm glow on the circuits. MOOD: Sci-fi, anatomical, transhuman editorial. STRICT RULES: Human half 100% identity-preserved. No anatomical errors, no text on the face, no watermarks.",
-            Category    = "63 Group",
+            Category    = "Signature Studio",
             Emoji       = "\U0001F9BE",
             Color       = "#B71C1C",
             SortOrder   = 288
@@ -3855,7 +3872,7 @@ VALUES
             Name        = "Superhero Combat Pose",
             Description = "Generic superhero-style kneeling combat pose with star-emblem uniform and shield in a battle-torn city",
             Prompt      = @"IDENTITY LOCK (CRITICAL): Preserve the EXACT face, identity, and features of the subject. Face remains 100% photorealistic. DETECT the subject(s). SCENE: The subject kneels on one knee in a heroic combat stance on a cracked concrete street, one fist pressed to the ground, the other arm holding a round red-white-and-blue shield with a white star in the center. CLOTHING: A blue-and-red tactical superhero style suit with a white star emblem on the chest, brown leather utility belt, brown boots and gloves — generic non-branded design inspired by classic comic aesthetics. BACKGROUND: A blurred battle-torn cityscape with burning debris, glowing embers, smoke, and distant destroyed buildings. LIGHTING: Warm fiery glow on the subject, cool smoky ambient. MOOD: Heroic, epic, comic-book cinematic. STRICT RULES: Face 100% identity-preserved. Generic superhero design — do NOT replicate any trademarked character. No real brand names, no text, no watermarks, no anatomical errors.",
-            Category    = "63 Group",
+            Category    = "Signature Studio",
             Emoji       = "\U0001F9B8",
             Color       = "#1565C0",
             SortOrder   = 289
@@ -3864,7 +3881,7 @@ VALUES
             Name        = "Fire Suit Boss",
             Description = "Powerful portrait in a sharp black suit against a dramatic red flame and smoke backdrop",
             Prompt      = @"IDENTITY LOCK (CRITICAL): Preserve the EXACT face, identity, and features of the subject. DETECT the subject(s). SCENE: The subject stands in a confident three-quarter pose with one hand in their pocket, looking assertively at the camera. CLOTHING: A sharply tailored black suit over a crisp white dress shirt with the top button open, matching black pocket square, dark sunglasses. BACKGROUND: A dramatic wall of orange and red flames with swirling black smoke against a dark background. LIGHTING: Warm fire glow from behind with cool rim on the subject's left. MOOD: Intense, powerful, boss-energy movie poster. STRICT RULES: Face 100% identity-preserved. No anatomical errors, no text, no watermarks.",
-            Category    = "63 Group",
+            Category    = "Signature Studio",
             Emoji       = "\U0001F525",
             Color       = "#D84315",
             SortOrder   = 290
@@ -3873,7 +3890,7 @@ VALUES
             Name        = "European Street Gentleman",
             Description = "Dapper grey suit portrait beside a classic blue sports car on a cobblestone European alley",
             Prompt      = @"IDENTITY LOCK (CRITICAL): Preserve the EXACT face, identity, and features of the subject. DETECT the subject(s). SCENE: The subject walks confidently toward the camera with hands in pockets on a narrow cobblestone European alley. CLOTHING: A tailored grey double-breasted pinstripe suit, white dress shirt, burgundy tie with a matching pocket square, a luxury watch, dark sunglasses. Trimmed beard. BACKGROUND: A classic vintage blue sports car parked beside the subject, old European stone buildings with warm street lamps on both sides, wet cobblestone reflecting the warm lights. LIGHTING: Warm golden-hour European street light. MOOD: Dapper, sophisticated, continental gentleman. STRICT RULES: Face 100% identity-preserved. Generic car with no real brand logos. No anatomical errors, no text, no watermarks.",
-            Category    = "63 Group",
+            Category    = "Signature Studio",
             Emoji       = "\U0001F935",
             Color       = "#455A64",
             SortOrder   = 291
@@ -3882,7 +3899,7 @@ VALUES
             Name        = "Temple Hanuman Devotion",
             Description = "Devotee sitting cross-legged beside Lord Hanuman at a sunlit temple holding a small deity figurine",
             Prompt      = @"IDENTITY LOCK (CRITICAL): Preserve the EXACT face, identity, skin tone, and features of the devotee subject. Face remains 100% photorealistic. DETECT the subject(s) and use ONLY those people as the devotee(s). SCENE: The subject sits cross-legged on the temple floor in traditional devotional attire — saffron/yellow shawl over a white kurta, a rudraksha mala, a tilak on the forehead, holding a small statue of Rama and Sita in their open palms with reverence. Beside them, Lord Hanuman sits in meditation — large powerful form, golden crown, golden armlets and jewelry, mace (gada) resting on the side, soft divine glow around him. BACKGROUND: An ancient stone Hindu temple interior with carved pillars and warm golden sunlight streaming in. LIGHTING: Warm divine golden backlight. MOOD: Sacred, devotional, reverent. STRICT RULES: Devotee's face 100% identity-preserved. Respectful traditional depiction of Hanuman. No text, no watermarks, no anatomical errors.",
-            Category    = "63 Group",
+            Category    = "Signature Studio",
             Emoji       = "\U0001F64F",
             Color       = "#F57C00",
             SortOrder   = 292
@@ -3891,7 +3908,7 @@ VALUES
             Name        = "Rim Light Profile",
             Description = "Dramatic side profile portrait with teal rim-lighting and reflective aviator sunglasses",
             Prompt      = @"IDENTITY LOCK (CRITICAL): Preserve the EXACT face, identity, and features of the subject in side profile. DETECT the subject(s). SCENE: A cinematic side-profile portrait of the subject looking slightly downward with a serious expression. Well-styled hair swept back, trimmed beard. CLOTHING: A dark blazer over a dark shirt. Reflective aviator sunglasses with colorful patterned frames. BACKGROUND: A deep black studio with a subtle cool teal-cyan rim glow outlining the hair and shoulder. LIGHTING: Strong teal rim light from behind, soft warm fill on the face. MOOD: Editorial, cinematic, moody cover-shot. STRICT RULES: Face 100% identity-preserved. No anatomical errors, no text, no watermarks.",
-            Category    = "63 Group",
+            Category    = "Signature Studio",
             Emoji       = "\U0001F576\uFE0F",
             Color       = "#00838F",
             SortOrder   = 293
@@ -3907,22 +3924,30 @@ VALUES
             await db.Database.ExecuteSqlRawAsync(
                 "DELETE FROM DeletedStyleSeeds WHERE Name = @p0", s.Name);
 
-            // Insert if not already present; update if it exists (prompt may have changed)
+            // Insert if not already present; update if it exists (prompt may have changed).
+            // ModifiedAt is bumped only when content actually differs, so restart doesn't churn timestamps.
             await db.Database.ExecuteSqlRawAsync($@"
                 IF NOT EXISTS (SELECT 1 FROM StylePresets WHERE Name = @p0)
                     INSERT INTO StylePresets
-                        (Name, Description, PromptTemplate, Category, IconEmoji, AccentColor, IsActive, SortOrder)
+                        (Name, Description, PromptTemplate, Category, IconEmoji, AccentColor, IsActive, SortOrder, CreatedAt, ModifiedAt)
                     VALUES
-                        (@p0, @p1, @p2, @p3, @p4, @p5, 1, @p6)
+                        (@p0, @p1, @p2, @p3, @p4, @p5, 1, @p6, GETUTCDATE(), GETUTCDATE())
                 ELSE
                     UPDATE StylePresets SET
-                        Description   = @p1,
+                        Description    = @p1,
                         PromptTemplate = @p2,
-                        Category      = @p3,
-                        IconEmoji     = @p4,
-                        AccentColor   = @p5,
-                        SortOrder     = @p6
-                    WHERE Name = @p0",
+                        Category       = @p3,
+                        IconEmoji      = @p4,
+                        AccentColor    = @p5,
+                        SortOrder      = @p6,
+                        ModifiedAt     = GETUTCDATE()
+                    WHERE Name = @p0
+                      AND (Description <> @p1
+                           OR PromptTemplate <> @p2
+                           OR Category <> @p3
+                           OR IconEmoji <> @p4
+                           OR ISNULL(AccentColor, '') <> ISNULL(@p5, '')
+                           OR SortOrder <> @p6)",
                 s.Name, s.Description, s.Prompt, s.Category, s.Emoji, s.Color, s.SortOrder);
         }
         catch (Exception ex)

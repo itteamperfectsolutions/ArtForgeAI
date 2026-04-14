@@ -45,3 +45,6 @@ nul
 
 ## IDE/Tools
 .superpowers/
+
+## Generated export bundles (preset SQL + thumbnail zips)
+/deploy/
