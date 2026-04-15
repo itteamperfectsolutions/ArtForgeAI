@@ -9,7 +9,6 @@
 @inject ICoinService CoinService
 @inject ISubscriptionService SubscriptionService
 @inject AuthenticationStateProvider AuthState
-@inject Mockup3DService Mockup3DSvc
 @using ArtForgeAI.Services
 @using ArtForgeAI.Models
 @implements IDisposable
@@ -17,11 +16,6 @@
 <PageTitle>ArtForge AI - 3D Mockups</PageTitle>
 
 <link href="css/mockup3d.css" rel="stylesheet" />
-
-<script src="https://unpkg.com/three@0.162.0/build/three.min.js"></script>
-<script src="https://unpkg.com/three@0.162.0/examples/js/controls/OrbitControls.js"></script>
-<script src="https://unpkg.com/three@0.162.0/examples/js/loaders/GLTFLoader.js"></script>
-<script src="js/mockup3d.js"></script>
 
 <div class="page-header page-header-lg">
     <h2>3D Mockups</h2>
@@ -54,11 +48,11 @@
             </div>
         }
 
-        @if (_webglSupported && string.IsNullOrEmpty(_logoDataUrl) && !_isModelLoading)
+        @if (_webglSupported && string.IsNullOrEmpty(_frontDesignUrl) && string.IsNullOrEmpty(_backDesignUrl) && string.IsNullOrEmpty(_wrapDesignUrl) && !_isModelLoading)
         {
             <div class="m3d-upload-prompt">
-                <button class="m3d-upload-btn" @onclick="() => _showLogoModal = true">
-                    &#128083; Upload or Select Logo
+                <button class="m3d-upload-btn" @onclick='() => OpenDesignModal("wrap")'>
+                    &#128083; Add Full Wrap Design
                 </button>
             </div>
         }
@@ -89,6 +83,29 @@
 
         <div class="m3d-sep"></div>
 
+        @if (_activeProduct.Slug == "mug")
+        {
+            <div class="m3d-slot-group">
+                <span class="m3d-slot-label">Shape</span>
+                <button class="m3d-product-tab @(_mugStyle == "straight" ? "active" : "")"
+                        @onclick='() => SetMugStyle("straight")'>Straight</button>
+                <button class="m3d-product-tab @(_mugStyle == "tapered" ? "active" : "")"
+                        @onclick='() => SetMugStyle("tapered")'>Tapered</button>
+            </div>
+            <div class="m3d-sep"></div>
+        }
+        @if (_activeProduct.Slug == "tshirt")
+        {
+            <div class="m3d-slot-group">
+                <span class="m3d-slot-label">Neck</span>
+                <button class="m3d-product-tab @(_tshirtStyle == "crew" ? "active" : "")"
+                        @onclick='() => SetTshirtStyle("crew")'>With Neck</button>
+                <button class="m3d-product-tab @(_tshirtStyle == "scoop" ? "active" : "")"
+                        @onclick='() => SetTshirtStyle("scoop")'>Without Neck</button>
+            </div>
+            <div class="m3d-sep"></div>
+        }
+
         <div class="m3d-colors">
             @foreach (var color in _activeProduct.Colors)
             {
@@ -102,77 +119,101 @@
 
         <div class="m3d-sep"></div>
 
-        @if (!string.IsNullOrEmpty(_logoDataUrl))
-        {
-            <div class="m3d-slider-group">
-                <span class="m3d-slider-label">Size</span>
-                <input type="range" class="m3d-slider" min="0.1" max="1.5" step="0.05"
-                       @bind="_logoSize" @bind:event="oninput" @bind:after="OnLogoTransformChanged" />
-            </div>
+        <div class="m3d-slot-group">
+            <span class="m3d-slot-label">Wrap</span>
+            @if (!string.IsNullOrEmpty(_wrapDesignUrl))
+            {
+                <input type="range" class="m3d-slider" title="Vertical" min="-1.0" max="1.0" step="0.05"
+                       @bind="_wrapV" @bind:event="oninput" @bind:after='() => OnDesignTransformChanged("wrap")' />
+                <button class="btn-secondary" style="font-size:0.7rem;padding:0.2rem 0.4rem;"
+                        @onclick='() => OpenDesignModal("wrap")'>&#128260;</button>
+                <button class="btn-secondary" style="font-size:0.7rem;padding:0.2rem 0.4rem;"
+                        @onclick='() => ClearDesign("wrap")'>&#10005;</button>
+            }
+            else
+            {
+                <button class="btn-secondary" style="font-size:0.75rem;padding:0.25rem 0.6rem;"
+                        @onclick='() => OpenDesignModal("wrap")'>&#43; Full Wrap</button>
+            }
+        </div>
 
-            <div class="m3d-slider-group">
-                <span class="m3d-slider-label">&#8597;</span>
-                <input type="range" class="m3d-slider" min="-1.0" max="1.0" step="0.05"
-                       @bind="_logoVPos" @bind:event="oninput" @bind:after="OnLogoTransformChanged" />
-            </div>
+        <div class="m3d-sep"></div>
 
-            <div class="m3d-slider-group">
-                <span class="m3d-slider-label">&#8596;</span>
-                <input type="range" class="m3d-slider" min="-1.0" max="1.0" step="0.05"
-                       @bind="_logoHPos" @bind:event="oninput" @bind:after="OnLogoTransformChanged" />
-            </div>
+        <div class="m3d-slot-group">
+            <span class="m3d-slot-label">Front</span>
+            @if (!string.IsNullOrEmpty(_frontDesignUrl))
+            {
+                <input type="range" class="m3d-slider" title="Size" min="0.2" max="1.5" step="0.05"
+                       @bind="_frontSize" @bind:event="oninput" @bind:after='() => OnDesignTransformChanged("front")' />
+                <input type="range" class="m3d-slider" title="Vertical" min="-1.0" max="1.0" step="0.05"
+                       @bind="_frontV" @bind:event="oninput" @bind:after='() => OnDesignTransformChanged("front")' />
+                <button class="btn-secondary" style="font-size:0.7rem;padding:0.2rem 0.4rem;"
+                        @onclick='() => OpenDesignModal("front")'>&#128260;</button>
+                <button class="btn-secondary" style="font-size:0.7rem;padding:0.2rem 0.4rem;"
+                        @onclick='() => ClearDesign("front")'>&#10005;</button>
+            }
+            else
+            {
+                <button class="btn-secondary" style="font-size:0.75rem;padding:0.25rem 0.6rem;"
+                        @onclick='() => OpenDesignModal("front")'>&#43; Front</button>
+            }
+        </div>
 
-            <button class="btn-secondary" style="font-size:0.75rem;padding:0.2rem 0.5rem;"
-                    @onclick="() => _showLogoModal = true">
-                &#128260; Change
-            </button>
+        <div class="m3d-sep"></div>
 
-            <div class="m3d-sep"></div>
-        }
+        <div class="m3d-slot-group">
+            <span class="m3d-slot-label">Back</span>
+            @if (!string.IsNullOrEmpty(_backDesignUrl))
+            {
+                <input type="range" class="m3d-slider" title="Size" min="0.2" max="1.5" step="0.05"
+                       @bind="_backSize" @bind:event="oninput" @bind:after='() => OnDesignTransformChanged("back")' />
+                <input type="range" class="m3d-slider" title="Vertical" min="-1.0" max="1.0" step="0.05"
+                       @bind="_backV" @bind:event="oninput" @bind:after='() => OnDesignTransformChanged("back")' />
+                <button class="btn-secondary" style="font-size:0.7rem;padding:0.2rem 0.4rem;"
+                        @onclick='() => OpenDesignModal("back")'>&#128260;</button>
+                <button class="btn-secondary" style="font-size:0.7rem;padding:0.2rem 0.4rem;"
+                        @onclick='() => ClearDesign("back")'>&#10005;</button>
+            }
+            else
+            {
+                <button class="btn-secondary" style="font-size:0.75rem;padding:0.25rem 0.6rem;"
+                        @onclick='() => OpenDesignModal("back")'>&#43; Back</button>
+            }
+        </div>
+
+        <div class="m3d-sep"></div>
 
         <div class="m3d-actions">
-            @if (string.IsNullOrEmpty(_logoDataUrl))
-            {
-                <button class="btn-primary-gradient" style="font-size:0.8rem;padding:0.35rem 0.8rem;"
-                        @onclick="() => _showLogoModal = true">
-                    &#128083; Add Logo
-                </button>
-            }
             <button class="btn-primary-gradient" style="font-size:0.8rem;padding:0.35rem 0.8rem;"
                     @onclick="Download3DRender" disabled="@(_isProcessing || !_webglSupported)">
-                &#128424; Download &middot; 2
+                &#128424; PNG &middot; 2
             </button>
-            <button class="btn-secondary" style="font-size:0.8rem;padding:0.35rem 0.8rem;"
-                    @onclick="AiEnhance" disabled="@(_isProcessing || !_webglSupported)">
-                &#10024; AI Enhance &middot; 5
+            <button class="btn-primary-gradient" style="font-size:0.8rem;padding:0.35rem 0.8rem;"
+                    @onclick="ShareOnWhatsApp" disabled="@(_isProcessing || !_webglSupported)">
+                &#127909; Video &middot; 4
             </button>
         </div>
     </div>
 </div>
 
-@if (_showComparison && !string.IsNullOrEmpty(_snapshotDataUrl) && !string.IsNullOrEmpty(_aiResultDataUrl))
+@if (_showShareReady)
 {
-    <div class="m3d-comparison">
-        <button class="m3d-comparison-close" @onclick="CloseComparison">&#10005;</button>
-
-        <div class="m3d-comparison-panel">
-            <div class="m3d-comparison-label">3D Render</div>
-            <img src="@_snapshotDataUrl" alt="3D Render" />
-            <div>
-                <button class="btn-primary-gradient" style="font-size:0.8rem;padding:0.3rem 0.8rem;margin-top:0.5rem;"
-                        @onclick="DownloadSnapshot">
-                    &#128424; Download 3D Render &middot; 2
-                </button>
+    <div class="m3d-modal-overlay" @onclick="CancelShare">
+        <div class="m3d-modal" @onclick:stopPropagation="true" style="max-width:380px;">
+            <div class="m3d-modal-header">
+                <h3>Video Ready</h3>
+                <button class="m3d-modal-close" @onclick="CancelShare">&#10005;</button>
             </div>
-        </div>
-
-        <div class="m3d-comparison-panel">
-            <div class="m3d-comparison-label">AI Enhanced</div>
-            <img src="@_aiResultDataUrl" alt="AI Enhanced" />
-            <div>
-                <button class="btn-primary-gradient" style="font-size:0.8rem;padding:0.3rem 0.8rem;margin-top:0.5rem;"
-                        @onclick="DownloadAiResult">
-                    &#128424; Download AI Mockup
+            <div class="m3d-modal-body" style="text-align:center;padding:1.25rem;">
+                <div style="font-size:2.5rem;">&#127909;</div>
+                <p style="margin:0.75rem 0 1rem;">Your 3D rotation video is ready. Tap below to share on WhatsApp (opens your system share sheet).</p>
+                <button class="btn-primary-gradient" style="width:100%;padding:0.65rem;background:linear-gradient(135deg,#25d366,#128c7e);font-size:0.95rem;margin-bottom:0.5rem;"
+                        @onclick="SendCachedToWhatsApp">
+                    &#128241; Share to WhatsApp
+                </button>
+                <button class="btn-secondary" style="width:100%;padding:0.55rem;font-size:0.85rem;"
+                        @onclick="DownloadCachedVideo">
+                    &#128190; Download instead
                 </button>
             </div>
         </div>
@@ -184,7 +225,7 @@
     <div class="m3d-modal-overlay" @onclick="() => _showLogoModal = false">
         <div class="m3d-modal" @onclick:stopPropagation="true">
             <div class="m3d-modal-header">
-                <h3>Select Logo</h3>
+                <h3>Select @(_editingSlot == "back" ? "Back" : "Front") Design</h3>
                 <button class="m3d-modal-close" @onclick="() => _showLogoModal = false">&#10005;</button>
             </div>
 
@@ -198,12 +239,12 @@
             <div class="m3d-modal-body">
                 @if (_modalTab == "upload")
                 {
-                    <label class="upload-area upload-area-compact" style="min-height:120px;">
+                    <button class="upload-area upload-area-compact" style="min-height:120px;width:100%;cursor:pointer;background:transparent;border:2px dashed var(--border-color);"
+                            @onclick="TriggerClientUpload">
                         <span class="upload-icon">&#128083;</span>
                         <span>Upload a logo or image</span>
-                        <span style="font-size:0.7rem;color:var(--text-muted);">PNG, JPG, WebP — transparent background recommended</span>
-                        <InputFile OnChange="HandleFileUpload" accept=".jpg,.jpeg,.png,.webp" style="display:none" />
-                    </label>
+                        <span style="font-size:0.7rem;color:var(--text-muted);">PNG, JPG, WebP — files over 10 MB will be compressed automatically</span>
+                    </button>
                 }
                 else
                 {
@@ -237,19 +278,37 @@
 
 @code {
     private record Product3D(string Name, string Slug, string ModelFile, string[] Colors);
+    private class VideoResult
+    {
+        public string Data { get; set; } = "";
+        public string Ext { get; set; } = "";
+        public string Mime { get; set; } = "";
+    }
 
     private static readonly Product3D[] _products =
     [
         new("Mug", "mug", "3d-models/mug.glb", ["#FFFFFF", "#222222", "#C0C0C0"]),
         new("T-Shirt", "tshirt", "3d-models/tshirt.glb", ["#FFFFFF", "#222222", "#C0C0C0", "#1B3A5C", "#C0392B"]),
+        new("Hoodie", "hoodie", "3d-models/hoodie.glb", ["#FFFFFF", "#222222", "#808080", "#1B3A5C", "#4B2E2E"]),
     ];
 
     private Product3D _activeProduct = _products[0];
     private string _selectedColor = "#FFFFFF";
-    private string? _logoDataUrl;
-    private float _logoSize = 0.5f;
-    private float _logoVPos = 0f;
-    private float _logoHPos = 0f;
+
+    private string? _frontDesignUrl;
+    private float _frontSize = 0.7f;
+    private float _frontV = 0f;
+
+    private string? _backDesignUrl;
+    private float _backSize = 0.7f;
+    private float _backV = 0f;
+
+    private string? _wrapDesignUrl;
+    private float _wrapV = 0f;
+
+    private string _editingSlot = "front";
+    private string _mugStyle = "straight";
+    private string _tshirtStyle = "crew";
 
     private bool _isModelLoading = true;
     private string _loadingStatus = "Loading 3D model...";
@@ -262,15 +321,14 @@
     private string _modalTab = "upload";
     private List<string>? _galleryImages;
 
-    private bool _showComparison;
-    private string? _snapshotDataUrl;
-    private string? _aiResultDataUrl;
-    private string? _aiResultPath;
+    private bool _showShareReady;
+    private string? _pendingVideoFileName;
+    private string? _pendingVideoMime;
 
     private int _userId;
     private bool _isSuperAdmin;
     private string _userPlan = "Free";
-    private HashSet<string> _availableProducts = new() { "mug" };
+    private HashSet<string> _availableProducts = new() { "mug", "tshirt", "hoodie" };
 
     private DotNetObjectReference<Mockup3D>? _dotnetRef;
 
@@ -283,7 +341,7 @@
         _isSuperAdmin = user.IsInRole("SuperAdmin");
         _userPlan = await SubscriptionService.GetCurrentPlanNameAsync(_userId);
         if (_userPlan != "Free" || _isSuperAdmin)
-            _availableProducts = new HashSet<string> { "mug", "tshirt" };
+            _availableProducts = new HashSet<string> { "mug", "tshirt", "hoodie" };
     }
 
     protected override async Task OnAfterRenderAsync(bool firstRender)
@@ -322,14 +380,12 @@
         if (_activeProduct.Slug == product.Slug) return;
         _activeProduct = product;
         _selectedColor = product.Colors[0];
-        _logoSize = 0.5f;
-        _logoVPos = 0f;
-        _logoHPos = 0f;
+        _frontSize = 0.7f;
+        _frontV = 0f;
+        _backSize = 0.7f;
+        _backV = 0f;
         _isModelLoading = true;
         _loadingStatus = $"Loading {product.Name}...";
-        _showComparison = false;
-        _snapshotDataUrl = null;
-        _aiResultDataUrl = null;
         StateHasChanged();
         await JS.InvokeVoidAsync("mockup3d.loadModel", product.ModelFile);
     }
@@ -340,30 +396,81 @@
         await JS.InvokeVoidAsync("mockup3d.setColor", color);
     }
 
-    private async Task HandleFileUpload(InputFileChangeEventArgs e)
+    private void OpenDesignModal(string slot)
+    {
+        _editingSlot = slot;
+        _showLogoModal = true;
+    }
+
+    private async Task SetMugStyle(string style)
+    {
+        if (_mugStyle == style) return;
+        _mugStyle = style;
+        _isModelLoading = true;
+        _loadingStatus = "Rebuilding mug...";
+        StateHasChanged();
+        await JS.InvokeVoidAsync("mockup3d.setMugStyle", style);
+    }
+
+    private async Task SetTshirtStyle(string style)
+    {
+        if (_tshirtStyle == style) return;
+        _tshirtStyle = style;
+        _isModelLoading = true;
+        _loadingStatus = "Rebuilding t-shirt...";
+        StateHasChanged();
+        await JS.InvokeVoidAsync("mockup3d.setTshirtStyle", style);
+    }
+
+    private async Task ClearDesign(string slot)
+    {
+        if (slot == "front") _frontDesignUrl = null;
+        else if (slot == "back") _backDesignUrl = null;
+        else if (slot == "wrap") _wrapDesignUrl = null;
+        StateHasChanged();
+        await JS.InvokeVoidAsync("mockup3d.clearDesign", slot);
+    }
+
+    private void SetSlotUrl(string url)
+    {
+        if (_editingSlot == "back") _backDesignUrl = url;
+        else if (_editingSlot == "wrap") _wrapDesignUrl = url;
+        else _frontDesignUrl = url;
+    }
+
+    private async Task TriggerClientUpload()
     {
         _errorMessage = null;
-        var file = e.File;
-        if (file.Size > 10 * 1024 * 1024)
-        {
-            _errorMessage = "File too large. Max 10MB.";
-            return;
-        }
-        using var stream = file.OpenReadStream(10 * 1024 * 1024);
-        using var ms = new MemoryStream();
-        await stream.CopyToAsync(ms);
-        var bytes = ms.ToArray();
-        var ext = Path.GetExtension(file.Name).TrimStart('.').ToLower();
-        if (ext == "jpg") ext = "jpeg";
-        _logoDataUrl = $"data:image/{ext};base64," + Convert.ToBase64String(bytes);
+        if (_dotnetRef is null) _dotnetRef = DotNetObjectReference.Create(this);
+        await JS.InvokeVoidAsync("mockup3d.pickAndCompressImage", _editingSlot, _dotnetRef, 10 * 1024 * 1024);
+    }
+
+    [JSInvokable]
+    public async Task OnClientImagePicked(string slot, string dataUrl, bool compressed, long origSize, long outSize)
+    {
+        if (string.IsNullOrEmpty(dataUrl)) return;
+        _editingSlot = slot;
+        SetSlotUrl(dataUrl);
         _showLogoModal = false;
+        if (compressed)
+        {
+            _errorMessage = $"Image was {origSize / (1024 * 1024)} MB — compressed to {outSize / 1024} KB for upload.";
+        }
         StateHasChanged();
-        await JS.InvokeVoidAsync("mockup3d.setLogo", _logoDataUrl);
+        await JS.InvokeVoidAsync("mockup3d.setDesign", slot, dataUrl);
+    }
+
+    [JSInvokable]
+    public void OnClientImageError(string message)
+    {
+        _errorMessage = message;
+        StateHasChanged();
     }
 
     private async Task SelectGalleryImage(string imagePath)
     {
-        _logoDataUrl = imagePath;
+        SetSlotUrl(imagePath);
+        var slot = _editingSlot;
         _showLogoModal = false;
         StateHasChanged();
         var fullPath = Path.Combine(Env.WebRootPath, imagePath.Replace("/", Path.DirectorySeparatorChar.ToString()).TrimStart(Path.DirectorySeparatorChar));
@@ -371,7 +478,7 @@
         {
             var bytes = await File.ReadAllBytesAsync(fullPath);
             var dataUrl = "data:image/png;base64," + Convert.ToBase64String(bytes);
-            await JS.InvokeVoidAsync("mockup3d.setLogo", dataUrl);
+            await JS.InvokeVoidAsync("mockup3d.setDesign", slot, dataUrl);
         }
     }
 
@@ -392,9 +499,13 @@
         }
     }
 
-    private async Task OnLogoTransformChanged()
+    private async Task OnDesignTransformChanged(string slot)
     {
-        await JS.InvokeVoidAsync("mockup3d.updateLogoTransform", _logoSize, _logoVPos, _logoHPos);
+        float size, v;
+        if (slot == "wrap") { size = 1.0f; v = _wrapV; }
+        else if (slot == "back") { size = _backSize; v = _backV; }
+        else { size = _frontSize; v = _frontV; }
+        await JS.InvokeVoidAsync("mockup3d.updateDesignTransform", slot, size, v);
     }
 
     private async Task Download3DRender()
@@ -434,58 +545,48 @@
         }
     }
 
-    private async Task AiEnhance()
+    private async Task DownloadRotationVideo()
     {
         if (_isProcessing) return;
         _isProcessing = true;
-        _processingStatus = $"Generating AI-enhanced {_activeProduct.Name}...";
+        _processingStatus = "Recording rotation (~8s)...";
         _errorMessage = null;
-        _showComparison = false;
         StateHasChanged();
         try
         {
-            if (!await TryDebitCoins(5, "3D Mockups AI enhance"))
+            if (!await TryDebitCoins(4, "3D Mockups rotation video"))
             {
                 _isProcessing = false;
                 StateHasChanged();
                 return;
             }
-            var base64 = await JS.InvokeAsync<string>("mockup3d.captureSnapshot", 1536, 1024);
-            if (string.IsNullOrEmpty(base64))
+            var result = await JS.InvokeAsync<VideoResult>("mockup3d.captureRotationVideo", 8, 30);
+            if (result is null || string.IsNullOrEmpty(result.Data))
             {
-                _errorMessage = "Failed to capture render for AI enhancement.";
+                _errorMessage = "Video recording failed. Your browser may not support MediaRecorder.";
                 return;
             }
-            _snapshotDataUrl = "data:image/png;base64," + base64;
-            var colorName = _selectedColor switch
+            if (result.Ext != "mp4")
             {
-                "#FFFFFF" => "white",
-                "#222222" => "black",
-                "#C0C0C0" => "grey",
-                "#1B3A5C" => "navy blue",
-                "#C0392B" => "red",
-                _ => "colored"
-            };
-            var result = await Mockup3DSvc.GenerateAi3DMockup(
-                base64, _activeProduct.Name, colorName, _userId.ToString());
-            if (result.Success && !string.IsNullOrEmpty(result.LocalImagePath))
-            {
-                var fullPath = Path.Combine(Env.WebRootPath,
-                    result.LocalImagePath.Replace("/", Path.DirectorySeparatorChar.ToString()).TrimStart(Path.DirectorySeparatorChar));
-                var resultBytes = await File.ReadAllBytesAsync(fullPath);
-                _aiResultDataUrl = "data:image/png;base64," + Convert.ToBase64String(resultBytes);
-                _aiResultPath = fullPath;
-                _showComparison = true;
+                _processingStatus = "Converting to MP4 for WhatsApp...";
+                StateHasChanged();
+                var mp4Data = await JS.InvokeAsync<string?>("mockup3d.transcodeToMp4", result.Data);
+                if (!string.IsNullOrEmpty(mp4Data))
+                {
+                    result = new VideoResult { Data = mp4Data, Ext = "mp4", Mime = "video/mp4" };
+                }
+                else
+                {
+                    _errorMessage = "Server transcoding failed. Saved as .webm instead — may not preview in WhatsApp.";
+                }
             }
-            else
-            {
-                _errorMessage = "AI enhancement failed: " + (result.ErrorMessage ?? "Unknown error");
-            }
+            var fileName = $"3d_{_activeProduct.Slug}_rotation_{DateTime.Now:yyyyMMdd_HHmmss}.{result.Ext}";
+            await JS.InvokeVoidAsync("downloadFileFromBytes", fileName, result.Mime, result.Data);
         }
         catch (Exception ex)
         {
-            Logger.LogError(ex, "AI enhance failed");
-            _errorMessage = "AI enhancement failed: " + ex.Message;
+            Logger.LogError(ex, "3D rotation video failed");
+            _errorMessage = "Video download failed: " + ex.Message;
         }
         finally
         {
@@ -495,32 +596,99 @@
         }
     }
 
-    private async Task DownloadSnapshot()
+    private async Task ShareOnWhatsApp()
     {
-        if (string.IsNullOrEmpty(_snapshotDataUrl)) return;
-        if (!await TryDebitCoins(2, "3D Mockups render download"))
+        if (_isProcessing) return;
+        _isProcessing = true;
+        _processingStatus = "Recording rotation (~8s)...";
+        _errorMessage = null;
+        _showShareReady = false;
+        StateHasChanged();
+        try
         {
-            StateHasChanged();
-            return;
+            if (!await TryDebitCoins(4, "3D Mockups WhatsApp share"))
+            {
+                _isProcessing = false;
+                StateHasChanged();
+                return;
+            }
+            var result = await JS.InvokeAsync<VideoResult>("mockup3d.captureRotationVideo", 8, 30);
+            if (result is null || string.IsNullOrEmpty(result.Data))
+            {
+                _errorMessage = "Video recording failed.";
+                return;
+            }
+            if (result.Ext != "mp4")
+            {
+                _processingStatus = "Converting to MP4...";
+                StateHasChanged();
+                var mp4Data = await JS.InvokeAsync<string?>("mockup3d.transcodeToMp4", result.Data);
+                if (!string.IsNullOrEmpty(mp4Data))
+                    result = new VideoResult { Data = mp4Data, Ext = "mp4", Mime = "video/mp4" };
+            }
+            var fileName = $"3d_{_activeProduct.Slug}_{DateTime.Now:yyyyMMdd_HHmmss}.{result.Ext}";
+            var cached = await JS.InvokeAsync<bool>("mockup3d.cacheShareFile", result.Data, result.Mime, fileName, "3D Mockup");
+            if (!cached)
+            {
+                _errorMessage = "Failed to prepare video for sharing.";
+                return;
+            }
+            _pendingVideoFileName = fileName;
+            _pendingVideoMime = result.Mime;
+            _showShareReady = true;
         }
-        var base64 = _snapshotDataUrl[(_snapshotDataUrl.IndexOf(",", StringComparison.Ordinal) + 1)..];
-        var fileName = $"3d_{_activeProduct.Slug}_render_{DateTime.Now:yyyyMMdd_HHmmss}.png";
-        await JS.InvokeVoidAsync("downloadFileFromBytes", fileName, "image/png", base64);
+        catch (Exception ex)
+        {
+            Logger.LogError(ex, "3D share failed");
+            _errorMessage = "Share failed: " + ex.Message;
+        }
+        finally
+        {
+            _isProcessing = false;
+            _processingStatus = "";
+            StateHasChanged();
+        }
     }
 
-    private async Task DownloadAiResult()
+    private async Task SendCachedToWhatsApp()
     {
-        if (string.IsNullOrEmpty(_aiResultDataUrl)) return;
-        var base64 = _aiResultDataUrl[(_aiResultDataUrl.IndexOf(",", StringComparison.Ordinal) + 1)..];
-        var fileName = $"3d_{_activeProduct.Slug}_ai_{DateTime.Now:yyyyMMdd_HHmmss}.png";
-        await JS.InvokeVoidAsync("downloadFileFromBytes", fileName, "image/png", base64);
+        try
+        {
+            var status = await JS.InvokeAsync<string>("mockup3d.shareCachedFile");
+            if (status == "shared" || status == "cancelled")
+            {
+                _showShareReady = false;
+                await JS.InvokeVoidAsync("mockup3d.clearCachedShare");
+            }
+            else
+            {
+                await JS.InvokeVoidAsync("mockup3d.downloadCachedFile");
+                await JS.InvokeVoidAsync("mockup3d.openWhatsAppWeb");
+                _errorMessage = "Direct share isn't available — the video downloaded to your Downloads folder. WhatsApp Web has opened: drag the file into the chat.";
+                _showShareReady = false;
+                await JS.InvokeVoidAsync("mockup3d.clearCachedShare");
+            }
+        }
+        catch (Exception ex)
+        {
+            _errorMessage = "Share failed: " + ex.Message;
+        }
+        StateHasChanged();
     }
 
-    private void CloseComparison()
+    private async Task DownloadCachedVideo()
     {
-        _showComparison = false;
-        _snapshotDataUrl = null;
-        _aiResultDataUrl = null;
+        await JS.InvokeVoidAsync("mockup3d.downloadCachedFile");
+        _showShareReady = false;
+        await JS.InvokeVoidAsync("mockup3d.clearCachedShare");
+        StateHasChanged();
+    }
+
+    private async Task CancelShare()
+    {
+        _showShareReady = false;
+        await JS.InvokeVoidAsync("mockup3d.clearCachedShare");
+        StateHasChanged();
     }
 
     private async Task<bool> TryDebitCoins(int cost, string description)

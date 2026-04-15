@@ -4061,6 +4061,60 @@ app.MapGet("/api/license-info", () =>
     return Results.Ok(new { HardwareId = hwid, ShortId = hwid[..16] });
 });
 
+app.MapPost("/api/mockup3d/transcode", async (HttpContext ctx) =>
+{
+    try
+    {
+        using var ms = new MemoryStream();
+        await ctx.Request.Body.CopyToAsync(ms);
+        var inputBytes = ms.ToArray();
+        if (inputBytes.Length == 0) return Results.BadRequest("Empty payload");
+
+        var tempDir = Path.Combine(Path.GetTempPath(), "artforge_mockup3d");
+        Directory.CreateDirectory(tempDir);
+        var id = Guid.NewGuid().ToString("N");
+        var inPath = Path.Combine(tempDir, $"{id}.webm");
+        var outPath = Path.Combine(tempDir, $"{id}.mp4");
+        await File.WriteAllBytesAsync(inPath, inputBytes);
+
+        try
+        {
+            var psi = new System.Diagnostics.ProcessStartInfo
+            {
+                FileName = "ffmpeg",
+                Arguments = $"-y -i \"{inPath}\" -c:v libx264 -preset veryfast -crf 23 -pix_fmt yuv420p -movflags +faststart -an \"{outPath}\"",
+                RedirectStandardError = true,
+                RedirectStandardOutput = true,
+                UseShellExecute = false,
+                CreateNoWindow = true
+            };
+            using var proc = System.Diagnostics.Process.Start(psi);
+            if (proc is null) return Results.Problem("ffmpeg not available");
+            var stderrTask = proc.StandardError.ReadToEndAsync();
+            if (!proc.WaitForExit(60_000))
+            {
+                try { proc.Kill(true); } catch { }
+                return Results.Problem("ffmpeg timeout");
+            }
+            var stderr = await stderrTask;
+            if (proc.ExitCode != 0 || !File.Exists(outPath))
+                return Results.Problem("ffmpeg failed: " + stderr[..Math.Min(500, stderr.Length)]);
+
+            var mp4 = await File.ReadAllBytesAsync(outPath);
+            return Results.File(mp4, "video/mp4");
+        }
+        finally
+        {
+            try { if (File.Exists(inPath)) File.Delete(inPath); } catch { }
+            try { if (File.Exists(outPath)) File.Delete(outPath); } catch { }
+        }
+    }
+    catch (Exception ex)
+    {
+        return Results.Problem("Transcode error: " + ex.Message);
+    }
+}).RequireAuthorization().DisableAntiforgery();
+
 app.UseAuthentication();
 app.UseAuthorization();
 app.UseAntiforgery();

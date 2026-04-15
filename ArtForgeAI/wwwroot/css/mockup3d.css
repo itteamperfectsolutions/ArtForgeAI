@@ -140,6 +140,25 @@
     gap: 0.3rem;
 }
 
+.m3d-slot-group {
+    display: flex;
+    align-items: center;
+    gap: 0.35rem;
+}
+
+.m3d-slot-label {
+    font-size: 0.72rem;
+    color: var(--text-muted);
+    font-weight: 600;
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+    margin-right: 0.15rem;
+}
+
+.m3d-slot-group .m3d-slider {
+    width: 70px;
+}
+
 .m3d-slider-label {
     font-size: 0.7rem;
     color: var(--text-muted);
